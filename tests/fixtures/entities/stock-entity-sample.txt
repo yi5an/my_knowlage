@@ -1,0 +1,4 @@
+NVIDIA Corporation, ticker NVDA on NASDAQ, designs GPUs used in AI data centers.
+TSMC manufactures advanced semiconductors for NVIDIA and other fabless chip companies.
+ASML supplies lithography equipment used by semiconductor foundries.
+

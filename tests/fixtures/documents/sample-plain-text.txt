@@ -1,0 +1,3 @@
+KnowPilot is a local-first knowledge base for research notes, documents, and structured knowledge.
+This plain text fixture is intentionally small so parser tests can use it without external services.
+

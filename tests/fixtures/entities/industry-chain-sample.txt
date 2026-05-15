@@ -1,0 +1,6 @@
+AI compute industry chain:
+Upstream: ASML lithography equipment and semiconductor materials.
+Midstream: TSMC wafer fabrication and advanced packaging.
+Downstream: NVIDIA GPUs, cloud providers, and enterprise AI applications.
+Risks: export controls, capacity shortages, and power constraints.
+

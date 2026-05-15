@@ -1,0 +1,20 @@
+{
+  "question": "Which companies are mentioned in the AI compute supply chain?",
+  "expected_answer": "The sample mentions ASML, TSMC, NVIDIA, cloud providers, and enterprise AI applications.",
+  "evidence": [
+    {
+      "source": "tests/fixtures/entities/industry-chain-sample.txt",
+      "text": "Upstream: ASML lithography equipment and semiconductor materials."
+    },
+    {
+      "source": "tests/fixtures/entities/industry-chain-sample.txt",
+      "text": "Midstream: TSMC wafer fabrication and advanced packaging."
+    },
+    {
+      "source": "tests/fixtures/entities/industry-chain-sample.txt",
+      "text": "Downstream: NVIDIA GPUs, cloud providers, and enterprise AI applications."
+    }
+  ],
+  "confidence": 0.9
+}
+
