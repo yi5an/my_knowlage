@@ -7,46 +7,44 @@ export function ReaderPage() {
   return (
     <main className="page reader-page">
       <PageHeader
-        title="Reader"
-        description="Three-column reading, outline, document body, and AI notes panel."
+        title="阅读"
+        description="三栏阅读：大纲、正文与 AI 笔记面板。"
       />
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={5}>
-          <Card title="Outline" className="panel-card sticky-panel">
+          <Card title="大纲" className="panel-card sticky-panel">
             <List
               size="small"
-              dataSource={["Overview", "Architecture", "AI pipeline", "Evidence model"]}
+              dataSource={["概览", "架构", "AI 流水线", "证据模型"]}
               renderItem={(item) => <List.Item>{item}</List.Item>}
             />
           </Card>
         </Col>
         <Col xs={24} lg={12}>
           <article className="reader-document">
-            <Typography.Title level={2}>AI Agent local knowledge base</Typography.Title>
+            <Typography.Title level={2}>AI Agent 本地知识库</Typography.Title>
             <Typography.Paragraph>
-              KnowPilot combines local document storage, structured extraction, hybrid search, and
-              knowledge graph navigation.
+              KnowPilot 结合本地文档存储、结构化抽取、混合检索与知识图谱导航。
             </Typography.Paragraph>
             <Typography.Paragraph>
-              <mark>GraphRAG connects document chunks with verified entities and relations.</mark>
-              Each AI-generated answer must keep evidence and confidence fields.
+              <mark>GraphRAG 将文档块与已验证的实体和关系连接起来。</mark>
+              每个 AI 生成的回答都必须保留证据与置信度字段。
             </Typography.Paragraph>
             <Typography.Paragraph>
-              The reader reserves space for annotations, citations, and assistant workflows without
-              triggering backend business logic.
+              阅读器为批注、引用与助手工作流预留空间，且不会触发后端业务逻辑。
             </Typography.Paragraph>
           </article>
         </Col>
         <Col xs={24} lg={7}>
-          <Card title="Assistant and notes" className="panel-card sticky-panel">
+          <Card title="助手与笔记" className="panel-card sticky-panel">
             <Space wrap>
-              <Button icon={<BulbOutlined />}>Explain</Button>
-              <Button icon={<TagsOutlined />}>Extract</Button>
-              <Button icon={<CommentOutlined />}>Note</Button>
+              <Button icon={<BulbOutlined />}>解释</Button>
+              <Button icon={<TagsOutlined />}>抽取</Button>
+              <Button icon={<CommentOutlined />}>笔记</Button>
             </Space>
             <div className="note-box">
-              <Tag color="gold">Pending</Tag>
-              <Typography.Text>Review relation: GraphRAG improves multi-hop retrieval.</Typography.Text>
+              <Tag color="gold">待处理</Tag>
+              <Typography.Text>审阅关系：GraphRAG 提升多跳检索能力。</Typography.Text>
             </div>
           </Card>
         </Col>

@@ -133,6 +133,8 @@ class InMemoryGraphStore(GraphStore):
         limit: int,
         node_types: list[str] | None = None,
     ) -> GraphSubgraph:
+        # Treat "*" or empty query as a wildcard returning all nodes.
+        wildcard = query.strip() in ("", "*")
         lowered = query.lower()
         results: list[GraphStoreNode] = []
         for node in self.nodes.values():
@@ -140,7 +142,7 @@ class InMemoryGraphStore(GraphStore):
                 continue
             if not _node_type_allowed(node, node_types):
                 continue
-            if lowered in node.label.lower() or lowered in str(node.properties).lower():
+            if wildcard or lowered in node.label.lower() or lowered in str(node.properties).lower():
                 results.append(node)
             if len(results) >= limit:
                 break

@@ -183,7 +183,9 @@ class EntityExtractionService:
     def _extract_with_llm(self, text: str) -> EntityExtractionSchema:
         if self.llm_client is None:
             return EntityExtractionSchema(entities=[])
-        prompt = f"Extract entities as structured JSON.\n\n{text}"
+        from app.services.youtube.extraction_prompts import build_entity_extraction_prompt
+
+        prompt = build_entity_extraction_prompt(text)
         return self.llm_client.generate(prompt, EntityExtractionSchema)
 
     def _get_or_create_entity_type(self, workspace_id: str, name: str) -> EntityType:

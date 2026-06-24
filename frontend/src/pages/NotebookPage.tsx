@@ -8,35 +8,35 @@ export function NotebookPage() {
     <main className="page">
       <PageHeader
         title="NotebookLM"
-        description="Prepare export packages and reserve future enterprise API integration settings."
+        description="准备导出包，并预留未来企业 API 集成设置。"
       />
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
-          <Card title="Personal export" className="panel-card">
+          <Card title="个人导出" className="panel-card">
             <Typography.Paragraph>
-              Bundle selected documents, summaries, citations, and source manifests into a ZIP.
+              将选中的文档、摘要、引用与来源清单打包为 ZIP。
             </Typography.Paragraph>
             <Button type="primary" icon={<FileZipOutlined />}>
-              Prepare package
+              准备打包
             </Button>
           </Card>
         </Col>
         <Col xs={24} lg={12}>
-          <Card title="Enterprise connector" className="panel-card">
+          <Card title="企业连接器" className="panel-card">
             <Typography.Paragraph>
-              API endpoint and auth settings are placeholders; no real credentials are stored here.
+              API 端点与认证设置为占位项，此处不存储真实凭证。
             </Typography.Paragraph>
-            <Button icon={<ApiOutlined />}>Configure</Button>
+            <Button icon={<ApiOutlined />}>配置</Button>
           </Card>
         </Col>
       </Row>
-      <Card title="Export flow" className="panel-card section-row">
+      <Card title="导出流程" className="panel-card section-row">
         <Steps
           items={[
-            { title: "Select" },
-            { title: "Validate" },
-            { title: "Package" },
-            { title: "Export" },
+            { title: "选择" },
+            { title: "校验" },
+            { title: "打包" },
+            { title: "导出" },
           ]}
         />
       </Card>

@@ -151,6 +151,18 @@ class Document(UpdatedTimestampMixin, Base):
         server_default="normal",
     )
     metadata_: Mapped[JsonObject] = mapped_column("metadata", JsonType, default=dict)
+    # YouTube source extension (nullable; only set for source_type == "youtube")
+    video_id: Mapped[str | None] = mapped_column(ForeignKey("video.id"))
+    summary_json: Mapped[JsonObject | None] = mapped_column("summary_json", JsonType, default=None)
+    transcript_lang: Mapped[str | None] = mapped_column(String(32))
+    mindmap_data: Mapped[JsonObject | None] = mapped_column("mindmap_data", JsonType, default=None)
+
+    # Unread indicator: a summary is "unread" (shows a star/badge) until the
+    # user opens its card. Set to True when a summary is first produced, and
+    # flipped to False by the mark-read endpoint when the card page loads.
+    is_unread: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1"
+    )
 
 
 class DocumentTag(Base):
@@ -468,3 +480,73 @@ class ModelConfig(TimestampMixin, Base):
     metadata_: Mapped[JsonObject] = mapped_column("metadata", JsonType, default=dict)
 
     provider: Mapped[ModelProvider] = relationship()
+
+
+# --- YouTube source extension (subscription + video metadata) ---
+
+
+class Subscription(UpdatedTimestampMixin, Base):
+    """A subscribed content source (e.g. a YouTube channel).
+
+    Drives the polling scheduler. A manual single-URL summary has no subscription;
+    only scheduled channel subscriptions live here.
+    """
+
+    __tablename__ = "subscription"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "platform",
+            "channel_id",
+            name="uq_subscription_workspace_platform_channel",
+        ),
+        Index("idx_subscription_enabled", "enabled", "next_poll_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(32), default="youtube", server_default="youtube")
+    channel_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    channel_name: Mapped[str | None] = mapped_column(String(255))
+    thumbnail_url: Mapped[str | None] = mapped_column(Text())
+    poll_interval: Mapped[int] = mapped_column(Integer, default=3600, server_default="3600")
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_video_id: Mapped[str | None] = mapped_column(String(128))
+    last_error: Mapped[str | None] = mapped_column(Text())
+    enabled: Mapped[bool] = mapped_column(Boolean(), default=True, server_default="true")
+    metadata_: Mapped[JsonObject] = mapped_column("metadata", JsonType, default=dict)
+
+
+class Video(TimestampMixin, Base):
+    """Metadata for a single fetched video. The transcript itself is stored as a
+    Document (source_type='youtube') linked back here via document.video_id.
+    """
+
+    __tablename__ = "video"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "video_id", name="uq_video_workspace_video"),
+        Index("idx_video_subscription", "subscription_id"),
+        Index("idx_video_fetch_status", "fetch_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    subscription_id: Mapped[str | None] = mapped_column(ForeignKey("subscription.id"))
+    platform: Mapped[str] = mapped_column(String(32), default="youtube", server_default="youtube")
+    video_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(Text(), nullable=False)
+    channel_id: Mapped[str | None] = mapped_column(String(128))
+    channel_name: Mapped[str | None] = mapped_column(String(255))
+    duration_sec: Mapped[int | None] = mapped_column(Integer)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    thumbnail_url: Mapped[str | None] = mapped_column(Text())
+    description: Mapped[str | None] = mapped_column(Text())
+    chapters: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    fetch_status: Mapped[str] = mapped_column(
+        String(32),
+        default="pending",
+        server_default="pending",
+    )
+    error_message: Mapped[str | None] = mapped_column(Text())
+    metadata_: Mapped[JsonObject] = mapped_column("metadata", JsonType, default=dict)

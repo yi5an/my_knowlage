@@ -35,6 +35,35 @@ class Settings(BaseSettings):
     graph_store_backend: str = Field(default="memory", alias="GRAPH_STORE_BACKEND")
     kuzu_database_path: str | None = Field(default=None, alias="KUZU_DATABASE_PATH")
 
+    # YouTube source configuration.
+    youtube_api_key: str | None = Field(default=None, alias="YOUTUBE_API_KEY")
+    youtube_preferred_language: str | None = Field(default=None, alias="YOUTUBE_PREFERRED_LANGUAGE")
+    youtube_default_poll_interval: int = Field(default=3600, alias="YOUTUBE_DEFAULT_POLL_INTERVAL")
+
+    # Translation: translate non-Chinese transcripts to Chinese before summarizing.
+    translate_to_chinese: bool = Field(default=True, alias="TRANSLATE_TO_CHINESE")
+
+    # LLM configuration (OpenAI-compatible). When unset, a mock client is used.
+    llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
+    llm_model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
+    llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
+    llm_max_output_tokens: int = Field(default=2048, alias="LLM_MAX_OUTPUT_TOKENS")
+
+    # ASR (speech recognition) fallback for videos that have no subtitles.
+    # GLM-ASR-2512 lives on the official BigModel platform (the local GLM
+    # endpoint exposes only text models), so ASR uses a separate key/url.
+    asr_enabled: bool = Field(default=True, alias="ASR_ENABLED")
+    asr_api_key: str | None = Field(default=None, alias="GLM_ASR_API_KEY")
+    asr_base_url: str = Field(
+        default="https://open.bigmodel.cn/api/paas/v4", alias="GLM_ASR_BASE_URL"
+    )
+    asr_model: str = Field(default="glm-asr-2512", alias="GLM_ASR_MODEL")
+    # Per-request limits for GLM-ASR-2512. The API caps each transcription
+    # call at ~30s of audio, so long videos must be split into these windows.
+    asr_segment_sec: int = Field(default=28, alias="ASR_SEGMENT_SEC")
+    # Whether to use ASR at all. Auto-enabled when asr_api_key is present.
+    asr_audio_workspace: str = Field(default="./storage/asr", alias="ASR_AUDIO_WORKSPACE")
+
     model_config = SettingsConfigDict(
         env_file="../.env",
         env_file_encoding="utf-8",

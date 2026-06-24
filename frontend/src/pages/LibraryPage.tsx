@@ -7,31 +7,31 @@ export function LibraryPage() {
   return (
     <main className="page">
       <PageHeader
-        title="Library"
-        description="Browse categorized documents without duplicating reader or import workflows."
+        title="文档库"
+        description="按分类浏览文档，无需重复阅读或导入流程。"
       />
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={6}>
-          <Card title="Categories" className="panel-card">
+          <Card title="分类" className="panel-card">
             <Tree
               defaultExpandAll
               treeData={[
                 {
-                  title: "Technology",
+                  title: "技术",
                   key: "tech",
-                  children: [{ title: "AI Agents", key: "agents" }],
+                  children: [{ title: "AI 智能体", key: "agents" }],
                 },
                 {
-                  title: "Investment",
+                  title: "投资",
                   key: "investment",
-                  children: [{ title: "AI Compute", key: "compute" }],
+                  children: [{ title: "AI 算力", key: "compute" }],
                 },
               ]}
             />
           </Card>
         </Col>
         <Col xs={24} lg={12}>
-          <Card title="Documents" className="panel-card">
+          <Card title="文档" className="panel-card">
             <List
               dataSource={documents}
               renderItem={(doc) => (
@@ -52,9 +52,9 @@ export function LibraryPage() {
           </Card>
         </Col>
         <Col xs={24} lg={6}>
-          <Card title="AI preview" className="panel-card">
+          <Card title="AI 预览" className="panel-card">
             <Typography.Paragraph>
-              Select a document to preview summaries, tags, and extraction status.
+              选择文档以预览摘要、标签和抽取状态。
             </Typography.Paragraph>
             <Space wrap>
               <Tag color="blue">RAG</Tag>

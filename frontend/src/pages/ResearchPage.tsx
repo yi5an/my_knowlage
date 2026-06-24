@@ -7,12 +7,12 @@ export function ResearchPage() {
   return (
     <main className="page">
       <PageHeader
-        title="Deep research"
-        description="Task list, report draft, and agent process are separated from document import and search pages."
+        title="深度研究"
+        description="任务列表、报告草稿与 Agent 流程，与文档导入及搜索页面分离。"
       />
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={7}>
-          <Card title="Tasks" className="panel-card">
+          <Card title="任务" className="panel-card">
             <List
               dataSource={researchTasks}
               renderItem={(task) => (
@@ -25,26 +25,25 @@ export function ResearchPage() {
           </Card>
         </Col>
         <Col xs={24} lg={10}>
-          <Card title="Report draft" className="panel-card">
-            <Typography.Title level={4}>AI compute supply chain</Typography.Title>
+          <Card title="报告草稿" className="panel-card">
+            <Typography.Title level={4}>AI 算力供应链</Typography.Title>
             <Typography.Paragraph>
-              Early evidence suggests advanced lithography, wafer fabrication, GPU design, and cloud
-              demand are the main dependency layers.
+              早期证据表明，先进光刻、晶圆制造、GPU 设计与云需求是主要的依赖层级。
             </Typography.Paragraph>
           </Card>
         </Col>
         <Col xs={24} lg={7}>
-          <Card title="Agent process" className="panel-card">
+          <Card title="Agent 流程" className="panel-card">
             <Steps
               direction="vertical"
               size="small"
               current={2}
               items={[
-                { title: "Plan" },
-                { title: "Retrieve" },
-                { title: "Read" },
-                { title: "Verify" },
-                { title: "Draft" },
+                { title: "规划" },
+                { title: "检索" },
+                { title: "阅读" },
+                { title: "验证" },
+                { title: "起草" },
               ]}
             />
           </Card>

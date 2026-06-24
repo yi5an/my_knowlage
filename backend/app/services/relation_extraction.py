@@ -25,7 +25,9 @@ class RelationExtractionService:
     ) -> RelationExtractionSchema:
         relations = self._extract_rule_relations(text, workspace_id, doc_id, chunk_id)
         if self.llm_client is not None:
-            prompt = f"Extract relations as structured JSON with evidence.\n\n{text}"
+            from app.services.youtube.extraction_prompts import build_relation_extraction_prompt
+
+            prompt = build_relation_extraction_prompt(text)
             relations.extend(self.llm_client.generate(prompt, RelationExtractionSchema).relations)
         return RelationExtractionSchema(relations=relations)
 
@@ -39,12 +41,19 @@ class RelationExtractionService:
         schema = self.extract(text, workspace_id, doc_id, chunk_id)
         persisted: list[EntityRelation] = []
         for item in schema.relations:
+            # The LLM prompt returns entity *names* as source/target ids.
+            # Resolve them to real entity DB ids; skip a relation if either
+            # endpoint cannot be found (avoids dangling foreign keys).
+            source_entity = self._find_entity(workspace_id, item.source_entity_id)
+            target_entity = self._find_entity(workspace_id, item.target_entity_id)
+            if source_entity is None or target_entity is None:
+                continue
             relation_type = self._get_or_create_relation_type(workspace_id, item.relation_type)
             relation = EntityRelation(
                 id=f"relation_{uuid4().hex}",
                 workspace_id=workspace_id,
-                source_entity_id=item.source_entity_id,
-                target_entity_id=item.target_entity_id,
+                source_entity_id=source_entity.id,
+                target_entity_id=target_entity.id,
                 relation_type_id=relation_type.id,
                 evidence_doc_id=item.evidence_doc_id,
                 evidence_chunk_id=item.evidence_chunk_id,
@@ -74,8 +83,8 @@ class RelationExtractionService:
                 continue
             relations.append(
                 ExtractedRelationSchema(
-                    source_entity_id=source_entity.id,
-                    target_entity_id=target_entity.id,
+                    source_entity_id=source_entity.normalized_name,
+                    target_entity_id=target_entity.normalized_name,
                     relation_type="supplies",
                     evidence_doc_id=doc_id,
                     evidence_chunk_id=chunk_id,
