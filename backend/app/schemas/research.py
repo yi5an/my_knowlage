@@ -57,6 +57,32 @@ class ResearchClaim(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
+# --- LLM-driven workflow node outputs -------------------------------------
+# Each node produces one of these, validated against the schema by
+# StructuredOutputClient. They are persisted only transitively (the final
+# report is ResearchReport below); kept here so prompts and the agent share
+# one source of truth for the JSON shapes.
+
+
+class ResearchPlan(BaseModel):
+    """PlanResearchNode output: decompose the question into retrieval queries."""
+
+    queries: list[str] = Field(min_length=1)
+    rationale: str
+
+
+class ExtractedClaims(BaseModel):
+    """ExtractClaimsNode output: claims pulled from gathered sources."""
+
+    claims: list[ResearchClaim] = Field(default_factory=list)
+
+
+class CrossCheckedClaims(BaseModel):
+    """CrossCheckNode output: claims after cross-source validation."""
+
+    claims: list[ResearchClaim] = Field(default_factory=list)
+
+
 class ResearchReport(BaseModel):
     summary: str
     background: str

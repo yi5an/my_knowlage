@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -17,12 +18,28 @@ from app.infrastructure.models import (
     TaskJob,
 )
 from app.schemas.research import (
+    CrossCheckedClaims,
+    ExtractedClaims,
     ResearchClaim,
+    ResearchPlan,
     ResearchReport,
     ResearchSourceItem,
     ResearchTaskCreateRequest,
 )
-from app.services.web_search import MockWebSearchClient, WebSearchClient
+from app.services.research_prompts import (
+    build_cross_check_prompt,
+    build_extract_claims_prompt,
+    build_plan_prompt,
+    build_report_prompt,
+)
+from app.services.structured_output import StructuredOutputClient
+from app.services.web_search import WebSearchClient
+
+logger = logging.getLogger(__name__)
+
+
+class ResearchWorkflowError(Exception):
+    """Raised when a research workflow node fails irrecoverably."""
 
 
 class LocalKnowledgeSearchClient(Protocol):
@@ -64,6 +81,7 @@ class DatabaseLocalKnowledgeSearchClient:
 @dataclass(frozen=True)
 class WorkflowState:
     task: ResearchTask
+    plan: ResearchPlan | None
     local_sources: list[ResearchSourceItem]
     web_sources: list[ResearchSourceItem]
     all_sources: list[ResearchSourceItem]
@@ -86,14 +104,18 @@ class ResearchAgentService:
     def __init__(
         self,
         session: Session,
+        llm_client: StructuredOutputClient,
         local_search_client: LocalKnowledgeSearchClient | None = None,
         web_search_client: WebSearchClient | None = None,
     ) -> None:
         self.session = session
+        self.llm_client = llm_client
         self.local_search_client = (
             local_search_client or DatabaseLocalKnowledgeSearchClient(session)
         )
-        self.web_search_client = web_search_client or MockWebSearchClient()
+        # Web search defaults to None: the workflow treats a missing client as
+        # a hard config error (Tavily key not set) rather than silently mock.
+        self.web_search_client = web_search_client
 
     def create_task(self, request: ResearchTaskCreateRequest) -> ResearchTask:
         task = ResearchTask(
@@ -130,20 +152,31 @@ class ResearchAgentService:
         if task is None:
             msg = f"Research task not found: {task_id}"
             raise ValueError(msg)
+        # The last node (ImportToKnowledgeBaseNode) is completed by import_report,
+        # not by the workflow, so it stays pending here. That keeps the 7/8 = 87%
+        # progress contract intact.
         state = WorkflowState(
             task=task,
+            plan=None,
             local_sources=[],
             web_sources=[],
             all_sources=[],
             claims=[],
         )
-        state = self._plan_research(state)
-        state = self._search_local_knowledge(state)
-        state = self._search_web(state)
-        state = self._read_sources(state)
-        state = self._extract_claims(state)
-        state = self._cross_check(state)
-        state = self._generate_report(state)
+        try:
+            state = self._plan_research(state)
+            state = self._search_local_knowledge(state)
+            state = self._search_web(state)
+            state = self._read_sources(state)
+            state = self._extract_claims(state)
+            state = self._cross_check(state)
+            state = self._generate_report(state)
+        except Exception as exc:  # noqa: BLE001
+            # Strict failure mode: any node failure fails the whole workflow.
+            # Persist the failure so the client can read status + reason even
+            # though run_workflow re-raises.
+            self._fail_task(task, exc)
+            raise
         task.status = "completed"
         self.session.commit()
         return task
@@ -210,134 +243,104 @@ class ResearchAgentService:
         self.session.refresh(document)
         return document, jobs
 
+    # --- LLM-driven nodes --------------------------------------------------
+
     def _plan_research(self, state: WorkflowState) -> WorkflowState:
-        plan = {
+        plan = self.llm_client.generate(
+            build_plan_prompt(state.task.question), ResearchPlan
+        )
+        stored = {
             "question": state.task.question,
-            "queries": [state.task.question],
-            "required_sections": [
-                "摘要",
-                "背景",
-                "关键发现",
-                "证据",
-                "对比表",
-                "风险与不确定性",
-                "下一步建议",
-            ],
+            "queries": plan.queries,
+            "rationale": plan.rationale,
         }
-        state.task.plan = plan
-        self._complete_step(state.task, "PlanResearchNode", plan)
-        return state
+        state.task.plan = stored
+        self._complete_step(state.task, "PlanResearchNode", stored)
+        return _with(state, plan=plan)
 
     def _search_local_knowledge(self, state: WorkflowState) -> WorkflowState:
-        sources = self.local_search_client.search(
-            state.task.question,
-            state.task.workspace_id,
-            limit=5,
-        )
-        self._store_sources(state.task.id, sources)
+        queries = _retrieval_queries(state)
+        merged: list[ResearchSourceItem] = []
+        seen: set[tuple[str, str]] = set()
+        for q in queries:
+            for src in self.local_search_client.search(
+                q, state.task.workspace_id, limit=5
+            ):
+                key = (src.doc_id or src.url or src.title, src.snippet)
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(src)
+        self._store_sources(state.task.id, merged)
         self._complete_step(
             state.task,
             "SearchLocalKnowledgeNode",
-            {"source_count": len(sources)},
+            {"source_count": len(merged)},
         )
-        return WorkflowState(
-            task=state.task,
-            local_sources=sources,
-            web_sources=state.web_sources,
-            all_sources=state.all_sources,
-            claims=state.claims,
-            report=state.report,
-        )
+        return _with(state, local_sources=merged)
 
     def _search_web(self, state: WorkflowState) -> WorkflowState:
-        sources = self.web_search_client.search(state.task.question, limit=5)
-        self._store_sources(state.task.id, sources)
-        self._complete_step(state.task, "SearchWebNode", {"source_count": len(sources)})
-        return WorkflowState(
-            task=state.task,
-            local_sources=state.local_sources,
-            web_sources=sources,
-            all_sources=state.all_sources,
-            claims=state.claims,
-            report=state.report,
-        )
+        if self.web_search_client is None:
+            raise ResearchWorkflowError(
+                "web search is not configured (TAVILY_API_KEY missing)"
+            )
+        queries = _retrieval_queries(state)
+        merged: list[ResearchSourceItem] = []
+        seen: set[tuple[str, str]] = set()
+        for q in queries:
+            for src in self.web_search_client.search(q, limit=5):
+                key = (src.url or src.title, src.snippet)
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(src)
+        self._store_sources(state.task.id, merged)
+        self._complete_step(state.task, "SearchWebNode", {"source_count": len(merged)})
+        return _with(state, web_sources=merged)
 
     def _read_sources(self, state: WorkflowState) -> WorkflowState:
         all_sources = [*state.local_sources, *state.web_sources]
         self._complete_step(state.task, "ReadSourcesNode", {"source_count": len(all_sources)})
-        return WorkflowState(
-            task=state.task,
-            local_sources=state.local_sources,
-            web_sources=state.web_sources,
-            all_sources=all_sources,
-            claims=state.claims,
-            report=state.report,
-        )
+        return _with(state, all_sources=all_sources)
 
     def _extract_claims(self, state: WorkflowState) -> WorkflowState:
-        claims = [
-            ResearchClaim(
-                text=source.snippet,
-                evidence=[source.title],
-                confidence=source.credibility_score,
-            )
-            for source in state.all_sources
-        ]
-        self._complete_step(state.task, "ExtractClaimsNode", {"claim_count": len(claims)})
-        return WorkflowState(
-            task=state.task,
-            local_sources=state.local_sources,
-            web_sources=state.web_sources,
-            all_sources=state.all_sources,
-            claims=claims,
-            report=state.report,
+        extracted = self.llm_client.generate(
+            build_extract_claims_prompt(state.task.question, state.all_sources),
+            ExtractedClaims,
         )
+        claims = extracted.claims
+        self._complete_step(state.task, "ExtractClaimsNode", {"claim_count": len(claims)})
+        return _with(state, claims=claims)
 
     def _cross_check(self, state: WorkflowState) -> WorkflowState:
-        checked = [
-            claim.model_copy(update={"confidence": min(claim.confidence + 0.05, 1.0)})
-            for claim in state.claims
-        ]
-        self._complete_step(state.task, "CrossCheckNode", {"claim_count": len(checked)})
-        return WorkflowState(
-            task=state.task,
-            local_sources=state.local_sources,
-            web_sources=state.web_sources,
-            all_sources=state.all_sources,
-            claims=checked,
-            report=state.report,
+        checked = self.llm_client.generate(
+            build_cross_check_prompt(state.task.question, state.claims),
+            CrossCheckedClaims,
         )
+        claims = checked.claims
+        self._complete_step(
+            state.task, "CrossCheckNode", {"claim_count": len(claims)}
+        )
+        return _with(state, claims=claims)
 
     def _generate_report(self, state: WorkflowState) -> WorkflowState:
-        report = ResearchReport(
-            summary=f"围绕“{state.task.question}”形成了基于本地与外部来源的结构化研究结论。",
-            background=f"研究任务：{state.task.title}。",
-            key_findings=[claim.text for claim in state.claims[:5]] or ["暂无关键发现。"],
-            evidence=[evidence for claim in state.claims for evidence in claim.evidence],
-            comparison_table=[
-                {
-                    "source": source.title,
-                    "type": source.source_type,
-                    "credibility": str(source.credibility_score),
-                }
-                for source in state.all_sources
-            ],
-            risks_and_uncertainties=["当前网络搜索为 mock 来源，真实外部证据仍需后续接入验证。"],
-            next_steps=["导入报告到知识库后运行实体识别与关系抽取任务。"],
+        report = self.llm_client.generate(
+            build_report_prompt(
+                state.task.question,
+                state.task.title,
+                state.all_sources,
+                state.claims,
+            ),
+            ResearchReport,
         )
         metadata = dict(state.task.metadata_ or {})
         metadata["report"] = report.model_dump()
         state.task.metadata_ = metadata
         self._complete_step(state.task, "GenerateReportNode", report.model_dump())
         self.session.commit()
-        return WorkflowState(
-            task=state.task,
-            local_sources=state.local_sources,
-            web_sources=state.web_sources,
-            all_sources=state.all_sources,
-            claims=state.claims,
-            report=report,
-        )
+        return _with(state, report=report)
+
+    # --- persistence helpers ----------------------------------------------
 
     def _store_sources(self, task_id: str, sources: list[ResearchSourceItem]) -> None:
         for source in sources:
@@ -355,6 +358,19 @@ class ResearchAgentService:
                 )
             )
         self.session.flush()
+
+    def _fail_task(self, task: ResearchTask, exc: Exception) -> None:
+        node = _current_node_name(self._steps(task))
+        metadata = dict(task.metadata_ or {})
+        metadata["error"] = {
+            "node": node,
+            "type": type(exc).__name__,
+            "message": str(exc),
+        }
+        task.metadata_ = metadata
+        task.status = "failed"
+        self.session.commit()
+        logger.warning("research workflow failed at %s: %s", node, exc)
 
     def _initial_steps(self) -> list[dict[str, Any]]:
         return [
@@ -385,6 +401,50 @@ class ResearchAgentService:
         metadata["workflow_steps"] = steps
         task.metadata_ = metadata
         self.session.flush()
+
+
+def _retrieval_queries(state: WorkflowState) -> list[str]:
+    """Queries to feed local + web search: plan sub-queries, falling back to
+    the raw question so a single-query plan still searches at least once."""
+    if state.plan and state.plan.queries:
+        return state.plan.queries
+    return [state.task.question]
+
+
+def _current_node_name(steps: list[dict[str, Any]]) -> str:
+    """Name of the first pending workflow step (the one that failed)."""
+    for step in steps:
+        if isinstance(step, dict) and step.get("status") != "completed":
+            return str(step.get("name", "UnknownNode"))
+    return "UnknownNode"
+
+
+def _with(
+    state: WorkflowState,
+    *,
+    plan: ResearchPlan | None = None,
+    local_sources: list[ResearchSourceItem] | None = None,
+    web_sources: list[ResearchSourceItem] | None = None,
+    all_sources: list[ResearchSourceItem] | None = None,
+    claims: list[ResearchClaim] | None = None,
+    report: ResearchReport | None = None,
+) -> WorkflowState:
+    """Return a copy of an immutable WorkflowState with selected fields replaced.
+
+    Takes only keyword args for the fields to override (None means "keep the
+    current value"), so callers read as ``_with(state, plan=...)`` while mypy
+    can still type-check each field instead of losing precision through a
+    ``**kwargs`` dict spread.
+    """
+    return WorkflowState(
+        task=state.task,
+        plan=plan if plan is not None else state.plan,
+        local_sources=local_sources if local_sources is not None else state.local_sources,
+        web_sources=web_sources if web_sources is not None else state.web_sources,
+        all_sources=all_sources if all_sources is not None else state.all_sources,
+        claims=claims if claims is not None else state.claims,
+        report=report if report is not None else state.report,
+    )
 
 
 def _report_to_markdown(report: ResearchReport) -> str:

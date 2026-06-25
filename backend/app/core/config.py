@@ -49,6 +49,23 @@ class Settings(BaseSettings):
     llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
     llm_max_output_tokens: int = Field(default=2048, alias="LLM_MAX_OUTPUT_TOKENS")
 
+    # Web search provider for the deep-research agent (Tavily).
+    # Required for research tasks; a missing key makes research fail explicitly.
+    tavily_api_key: str | None = Field(default=None, alias="TAVILY_API_KEY")
+    tavily_base_url: str = Field(
+        default="https://api.tavily.com", alias="TAVILY_BASE_URL"
+    )
+    tavily_max_results: int = Field(default=5, alias="TAVILY_MAX_RESULTS")
+
+    # Async task_job worker: consumes entity_extraction / relation_extraction
+    # jobs created by research import (and document import), then triggers a
+    # graph sync. Runs on the same IntervalScheduler pattern as YouTube polling.
+    task_worker_enabled: bool = Field(default=True, alias="TASK_WORKER_ENABLED")
+    task_worker_interval_seconds: int = Field(
+        default=15, alias="TASK_WORKER_INTERVAL_SECONDS"
+    )
+    task_worker_batch_size: int = Field(default=5, alias="TASK_WORKER_BATCH_SIZE")
+
     # ASR (speech recognition) fallback for videos that have no subtitles.
     # GLM-ASR-2512 lives on the official BigModel platform (the local GLM
     # endpoint exposes only text models), so ASR uses a separate key/url.

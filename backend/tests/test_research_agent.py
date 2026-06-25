@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,8 +11,17 @@ from app.api.v1.research import get_research_agent_service
 from app.infrastructure.database import Base
 from app.infrastructure.models import Document, ResearchSource, ResearchTask, TaskJob, Workspace
 from app.main import app
-from app.schemas.research import ResearchSourceItem, ResearchTaskCreateRequest
+from app.schemas.research import (
+    CrossCheckedClaims,
+    ExtractedClaims,
+    ResearchClaim,
+    ResearchPlan,
+    ResearchReport,
+    ResearchSourceItem,
+    ResearchTaskCreateRequest,
+)
 from app.services.research_agent import ResearchAgentService
+from app.services.structured_output import StructuredOutputClient, StructuredOutputError
 from app.services.web_search import MockWebSearchClient
 
 
@@ -26,6 +36,77 @@ class MockLocalSearchClient:
                 credibility_score=0.9,
             )
         ][:limit]
+
+
+class ScriptedStructuredOutputClient(StructuredOutputClient):
+    """Returns a canned object per schema, so tests never call a real LLM.
+
+    Optionally raises for a given schema to exercise the strict-failure path.
+    """
+
+    def __init__(
+        self,
+        outputs: dict[type[Any], Any],
+        fail_on: type[Any] | None = None,
+    ) -> None:
+        self.outputs = outputs
+        self.fail_on = fail_on
+
+    def generate(self, prompt: str, schema: type[Any]) -> Any:
+        if self.fail_on is not None and schema is self.fail_on:
+            raise StructuredOutputError(f"forced failure for {schema.__name__}")
+        output = self.outputs.get(schema)
+        if output is None:
+            return schema.model_validate({})
+        return schema.model_validate(output.model_dump())
+
+
+def _sample_outputs() -> dict[type[Any], Any]:
+    return {
+        ResearchPlan: ResearchPlan(
+            queries=["AI chip market size", "AI chip demand drivers"],
+            rationale="Split the question into market size and demand drivers.",
+        ),
+        ExtractedClaims: ExtractedClaims(
+            claims=[
+                ResearchClaim(
+                    text="AI chip demand is driven by data centers.",
+                    evidence=["Web AI chip source"],
+                    confidence=0.8,
+                ),
+            ]
+        ),
+        CrossCheckedClaims: CrossCheckedClaims(
+            claims=[
+                ResearchClaim(
+                    text="AI chip demand is driven by data centers.",
+                    evidence=["Web AI chip source"],
+                    confidence=0.85,
+                ),
+            ]
+        ),
+        ResearchReport: ResearchReport(
+            summary="AI chip market is growing fast.",
+            background="Research task: AI chip research.",
+            key_findings=["Data centers drive AI chip demand."],
+            evidence=["Web AI chip source"],
+            comparison_table=[
+                {"source": "Web AI chip source", "type": "web", "credibility": "0.75"}
+            ],
+            risks_and_uncertainties=["Mock sources limit real evidence."],
+            next_steps=["Import report and run extraction."],
+        ),
+    }
+
+
+def _web_source() -> ResearchSourceItem:
+    return ResearchSourceItem(
+        source_type="web",
+        title="Web AI chip source",
+        url="https://example.test/ai-chip",
+        snippet="Web source says AI chip demand is driven by data centers.",
+        credibility_score=0.75,
+    )
 
 
 @pytest.fixture()
@@ -48,18 +129,9 @@ def db_session() -> Generator[Session, None, None]:
 def research_service(db_session: Session) -> ResearchAgentService:
     return ResearchAgentService(
         session=db_session,
+        llm_client=ScriptedStructuredOutputClient(_sample_outputs()),
         local_search_client=MockLocalSearchClient(),
-        web_search_client=MockWebSearchClient(
-            [
-                ResearchSourceItem(
-                    source_type="web",
-                    title="Web AI chip source",
-                    url="https://example.test/ai-chip",
-                    snippet="Web source says AI chip demand is driven by data centers.",
-                    credibility_score=0.75,
-                )
-            ]
-        ),
+        web_search_client=MockWebSearchClient([_web_source()]),
     )
 
 
@@ -89,6 +161,23 @@ def test_create_research_task_api(client: TestClient, db_session: Session) -> No
     assert payload["status"] == "completed"
     assert payload["metadata"]["report"]["summary"]
     assert db_session.scalar(select(ResearchTask).where(ResearchTask.id == payload["id"]))
+
+
+def test_plan_decomposes_question_into_queries(
+    research_service: ResearchAgentService,
+    db_session: Session,
+) -> None:
+    task = research_service.create_task(
+        ResearchTaskCreateRequest(
+            workspace_id="ws_research",
+            title="Plan test",
+            question="AI chip market",
+        )
+    )
+
+    plan = task.plan
+    assert plan["queries"] == ["AI chip market size", "AI chip demand drivers"]
+    assert plan["rationale"]
 
 
 def test_mock_local_and_web_sources_are_written(
@@ -158,7 +247,6 @@ def test_import_result_creates_document_and_extraction_jobs(
             question="AI chip market",
         )
     )
-
     document, jobs = research_service.import_report(task.id)
 
     assert db_session.get(Document, document.id) is not None
@@ -168,3 +256,31 @@ def test_import_result_creates_document_and_extraction_jobs(
     imported_task = db_session.get(ResearchTask, task.id)
     assert imported_task is not None
     assert imported_task.status == "imported"
+
+
+def test_workflow_failure_marks_task_failed_and_records_error(
+    db_session: Session,
+) -> None:
+    # Force the GenerateReport node to fail while earlier nodes succeed.
+    service = ResearchAgentService(
+        session=db_session,
+        llm_client=ScriptedStructuredOutputClient(_sample_outputs(), fail_on=ResearchReport),
+        local_search_client=MockLocalSearchClient(),
+        web_search_client=MockWebSearchClient([_web_source()]),
+    )
+
+    with pytest.raises(StructuredOutputError):
+        service.create_task(
+            ResearchTaskCreateRequest(
+                workspace_id="ws_research",
+                title="Failure test",
+                question="AI chip market",
+            )
+        )
+
+    tasks = list(db_session.scalars(select(ResearchTask)))
+    assert len(tasks) == 1
+    failed = tasks[0]
+    assert failed.status == "failed"
+    assert failed.metadata_["error"]["node"] == "GenerateReportNode"
+    assert failed.metadata_["error"]["type"] == "StructuredOutputError"

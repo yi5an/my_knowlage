@@ -17,20 +17,24 @@ class StructuredOutputError(Exception):
     """Raised when structured output generation fails."""
 
 
-_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*$", re.DOTALL)
+_FENCE_OPEN_RE = re.compile(r"^\s*```(?:json)?\s*\n?", re.IGNORECASE)
+_FENCE_CLOSE_RE = re.compile(r"\n?\s*```\s*$")
 
 
 def _strip_json_fences(text: str) -> str:
-    """Remove ```json ...``` markdown fences if a model wrapped its output.
+    r"""Remove ```json ... ``` markdown fences if a model wrapped its output.
 
-    Many OpenAI-compatible models ignore ``response_format=json_object``
-    and still wrap the JSON in fences. Strip them so validation succeeds
-    without a wasted retry.
+    Many OpenAI-compatible models ignore ``response_format=json_object`` and
+    still wrap the JSON in fences. Some also **truncate** mid-output when the
+    JSON is long, dropping the closing fence entirely. We therefore strip the
+    opening and closing fences independently rather than requiring both to be
+    present, so a truncated payload still reaches the validator (which can then
+    report a precise truncation error instead of a misleading "invalid JSON").
     """
-    match = _FENCE_RE.match(text)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
+    stripped = text.strip()
+    stripped = _FENCE_OPEN_RE.sub("", stripped, count=1)
+    stripped = _FENCE_CLOSE_RE.sub("", stripped, count=1)
+    return stripped.strip()
 
 
 class StructuredOutputClient(ABC):
