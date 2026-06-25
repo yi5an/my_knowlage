@@ -9,6 +9,12 @@ from app.core.errors import AppError
 from app.infrastructure.database import get_db_session
 from app.infrastructure.models import Entity, EntityRelation, EntityType
 from app.schemas.entities import (
+    AutoMergeRequest,
+    AutoMergeResponse,
+    EntityCleanupRequest,
+    EntityCleanupResponse,
+    EntityMergeRequest,
+    EntityMergeResponse,
     EntityResponse,
     EntityTypeCreateRequest,
     EntityTypeDiscoveryRequest,
@@ -18,6 +24,8 @@ from app.schemas.entities import (
     RelationResponse,
     RelationUpdateRequest,
 )
+from app.services.entity_cleanup import EntityCleanupService
+from app.services.entity_merge import EntityMergeService
 from app.services.entity_type_discovery import EntityTypeDiscoveryService
 
 router = APIRouter(tags=["entities"])
@@ -123,6 +131,58 @@ async def update_entity(
     session.commit()
     session.refresh(entity)
     return _entity_response(entity)
+
+
+def _build_merge_service(session: Session) -> EntityMergeService:
+    from app.services.graph_dependencies import get_graph_store
+    from app.services.research_dependencies import build_llm_client_from_settings
+
+    return EntityMergeService(
+        session=session,
+        llm_client=build_llm_client_from_settings(),
+        graph_store=get_graph_store(),
+    )
+
+
+@router.post("/entities/merge", response_model=EntityMergeResponse)
+async def merge_entities(
+    request: EntityMergeRequest,
+    session: Session = DB_SESSION_DEPENDENCY,
+) -> EntityMergeResponse:
+    """Merge two entities: keep ``keep_entity_id``, fold ``merge_entity_id``."""
+    return _build_merge_service(session).merge(request)
+
+
+@router.post("/entities/auto-merge", response_model=AutoMergeResponse)
+async def auto_merge_entities(
+    request: AutoMergeRequest,
+    session: Session = DB_SESSION_DEPENDENCY,
+) -> AutoMergeResponse:
+    """Scan a workspace for duplicate entities and merge them.
+
+    With ``dry_run=true`` only returns candidate pairs without merging.
+    """
+    return _build_merge_service(session).auto_merge(request)
+
+
+@router.post("/entities/cleanup", response_model=EntityCleanupResponse)
+async def cleanup_entities(
+    request: EntityCleanupRequest,
+    session: Session = DB_SESSION_DEPENDENCY,
+) -> EntityCleanupResponse:
+    """Review entity quality and remove low-quality (non-entity) entries.
+
+    With ``dry_run=true`` only returns the list of invalid entity ids.
+    """
+    from app.services.graph_dependencies import get_graph_store
+    from app.services.research_dependencies import build_llm_client_from_settings
+
+    service = EntityCleanupService(
+        session=session,
+        llm_client=build_llm_client_from_settings(),
+        graph_store=get_graph_store(),
+    )
+    return service.cleanup(request)
 
 
 @router.get("/relations", response_model=list[RelationResponse])

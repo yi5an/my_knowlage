@@ -16,6 +16,7 @@ from app.infrastructure.models import (
     StockProfile,
 )
 from app.schemas.entities import EntityExtractionSchema, ExtractedEntitySchema
+from app.services.entity_resolution import EntityResolutionService
 from app.services.structured_output import StructuredOutputClient
 
 DEFAULT_ENTITY_TYPES = {
@@ -33,9 +34,28 @@ class PersistedEntityExtraction:
 
 
 class EntityExtractionService:
-    def __init__(self, session: Session, llm_client: StructuredOutputClient | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        llm_client: StructuredOutputClient | None = None,
+        resolution_service: EntityResolutionService | None = None,
+    ) -> None:
         self.session = session
         self.llm_client = llm_client
+        # Resolution service handles entity normalization (alias matching +
+        # optional LLM-assisted merge). Auto-build one from the LLM client when
+        # not explicitly provided, so existing callers (worker, tests) get the
+        # improved dedup without each wiring it themselves.
+        resolution: EntityResolutionService | None
+        if resolution_service is not None:
+            resolution = resolution_service
+        elif llm_client is not None:
+            resolution = EntityResolutionService(
+                session=session, llm_client=llm_client
+            )
+        else:
+            resolution = None
+        self.resolution_service = resolution
 
     def extract(
         self,
@@ -215,15 +235,22 @@ class EntityExtractionService:
         entity_type_id: str,
         item: ExtractedEntitySchema,
     ) -> Entity:
+        # Prefer the resolution service (alias + LLM matching) when injected.
+        if self.resolution_service is not None:
+            entity, _created = self.resolution_service.resolve(
+                workspace_id, entity_type_id, item
+            )
+            return entity
+        # Legacy fallback: exact normalized_name match only.
         statement = select(Entity).where(
             Entity.workspace_id == workspace_id,
             Entity.normalized_name == item.normalized_name,
         )
-        entity = self.session.scalar(statement)
-        if entity is not None:
-            entity.confidence = max(entity.confidence, item.confidence)
-            entity.properties = {**(entity.properties or {}), **item.properties}
-            return entity
+        existing = self.session.scalar(statement)
+        if existing is not None:
+            existing.confidence = max(existing.confidence, item.confidence)
+            existing.properties = {**(existing.properties or {}), **item.properties}
+            return existing
         entity = Entity(
             id=f"entity_{uuid4().hex}",
             workspace_id=workspace_id,

@@ -129,3 +129,99 @@ class ExtractedRelationSchema(BaseModel):
 
 class RelationExtractionSchema(BaseModel):
     relations: list[ExtractedRelationSchema]
+
+
+# --- Entity normalization / merge ----------------------------------------
+# Schemas for deciding whether two entities refer to the same thing and for
+# the public merge API. Used by EntityResolutionService (write-time dedup)
+# and EntityMergeService (historical cleanup API).
+
+
+class EntityMergePair(BaseModel):
+    """One candidate pair: does entity A mean the same thing as entity B?"""
+
+    entity_a_id: str
+    entity_b_id: str
+    entity_a_name: str
+    entity_b_name: str
+    entity_a_aliases: list[str] = Field(default_factory=list)
+    entity_b_aliases: list[str] = Field(default_factory=list)
+
+
+class EntityMergeDecisionItem(BaseModel):
+    entity_a_id: str
+    entity_b_id: str
+    is_same: bool
+    reason: str = ""
+
+
+class EntityMergeDecision(BaseModel):
+    """LLM output: same/different verdicts for a batch of candidate pairs."""
+
+    decisions: list[EntityMergeDecisionItem] = Field(default_factory=list)
+
+
+class EntityMergeRequest(BaseModel):
+    """Manually merge two entities into one (keep `keep_entity_id`)."""
+
+    keep_entity_id: str
+    merge_entity_id: str
+
+
+class EntityMergeResponse(BaseModel):
+    kept_entity_id: str
+    merged_entity_id: str
+    mentions_moved: int
+    relations_moved: int
+    relations_deduped: int
+
+
+class AutoMergeRequest(BaseModel):
+    workspace_id: str
+    dry_run: bool = False
+    min_name_overlap: float = Field(default=0.5, ge=0, le=1)
+
+
+class AutoMergeResponse(BaseModel):
+    dry_run: bool
+    candidate_pairs: list[EntityMergePair]
+    merged: list[EntityMergeResponse] = Field(default_factory=list)
+
+
+# --- Entity quality cleanup ----------------------------------------------
+
+
+class EntityCleanupRequest(BaseModel):
+    workspace_id: str
+    dry_run: bool = True
+
+
+class EntityCleanupReview(BaseModel):
+    entity_id: str
+    is_valid: bool
+    reason: str = ""
+
+
+class EntityCleanupDecision(BaseModel):
+    reviews: list[EntityCleanupReview] = Field(default_factory=list)
+
+
+class EntityCleanupResponse(BaseModel):
+    dry_run: bool
+    reviewed: int
+    invalid_entities: list[str] = Field(default_factory=list)
+    removed: int = 0
+
+
+# --- Entity translation (bilingual labels) -------------------------------
+
+
+class EntityTranslationItem(BaseModel):
+    entity_id: str
+    zh_name: str
+
+
+class EntityTranslationResult(BaseModel):
+    """LLM output: Chinese names for a batch of entities."""
+
+    translations: list[EntityTranslationItem] = Field(default_factory=list)
