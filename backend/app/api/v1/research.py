@@ -1,6 +1,7 @@
 from http import HTTPStatus
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 
 from app.core.errors import AppError
 from app.infrastructure.models import ResearchTask
@@ -15,6 +16,21 @@ from app.services.research_dependencies import get_research_agent_service
 
 router = APIRouter(prefix="/research", tags=["research"])
 RESEARCH_SERVICE_DEPENDENCY = Depends(get_research_agent_service)
+
+
+@router.get("/tasks", response_model=list[ResearchTaskResponse])
+async def list_research_tasks(
+    workspace_id: str = "ws_default",
+    service: ResearchAgentService = RESEARCH_SERVICE_DEPENDENCY,
+) -> list[ResearchTaskResponse]:
+    tasks = list(
+        service.session.scalars(
+            select(ResearchTask)
+            .where(ResearchTask.workspace_id == workspace_id)
+            .order_by(ResearchTask.created_at.desc())
+        )
+    )
+    return [_task_response(task) for task in tasks]
 
 
 @router.post("/tasks", response_model=ResearchTaskResponse)
