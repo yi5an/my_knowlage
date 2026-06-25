@@ -25,9 +25,9 @@ def _build_polling_scheduler() -> IntervalScheduler | None:
     from app.services.youtube.extraction_pipeline import DefaultExtractionPipeline
     from app.services.youtube.fetcher import get_fetcher_from_settings
     from app.services.youtube.orchestrator import VideoSummaryOrchestrator
-    from app.services.youtube.summary_retry import FailedSummaryRetryScanner
     from app.services.youtube.subscription_service import SubscriptionService
     from app.services.youtube.summary import build_summary_service_from_settings
+    from app.services.youtube.summary_retry import FailedSummaryRetryScanner
     from app.services.youtube.transcript import ChainedTranscriptExtractor
     from app.services.youtube.translation import TranslationService
 
@@ -82,15 +82,45 @@ def _build_polling_scheduler() -> IntervalScheduler | None:
     )
 
 
+def _build_task_worker_scheduler() -> IntervalScheduler | None:
+    """Wire the async task_job worker scheduler.
+
+    Returns None when disabled via settings, so the app still starts cleanly.
+    Each tick the worker claims a batch of pending entity/relation extraction
+    jobs, runs them, and re-syncs the graph so the pipeline closes
+    automatically (research -> import -> extraction -> graph).
+    """
+    from app.services.task_worker_dependencies import build_task_job_processor
+
+    settings = get_settings()
+    if not settings.task_worker_enabled:
+        return None
+    processor = build_task_job_processor()
+
+    def poll() -> None:
+        processor.run_once(batch_size=settings.task_worker_batch_size)
+
+    return IntervalScheduler(
+        interval_seconds=settings.task_worker_interval_seconds, task=poll
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     scheduler = _build_polling_scheduler()
     if scheduler is not None:
         scheduler.start()
         app.state.polling_scheduler = scheduler
+    task_worker_scheduler = _build_task_worker_scheduler()
+    if task_worker_scheduler is not None:
+        task_worker_scheduler.start()
+        app.state.task_worker_scheduler = task_worker_scheduler
     try:
         yield
     finally:
+        task_worker_to_stop = getattr(app.state, "task_worker_scheduler", None)
+        if task_worker_to_stop is not None:
+            task_worker_to_stop.stop()
         scheduler_to_stop = getattr(app.state, "polling_scheduler", None)
         if scheduler_to_stop is not None:
             scheduler_to_stop.stop()
