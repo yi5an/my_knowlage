@@ -7,6 +7,7 @@ import {
   Empty,
   Input,
   Row,
+  Segmented,
   Space,
   Spin,
   Tag,
@@ -15,7 +16,8 @@ import {
 import { SearchOutlined } from "@ant-design/icons";
 
 import { PageHeader } from "../components/PageHeader";
-import { GraphCanvas, NodeTypeLegend } from "../components/GraphCanvas";
+import { GraphCanvas, NodeTypeLegend, type ContextAction, type LayoutKind } from "../components/GraphCanvas";
+import { EntityNodeList } from "../components/EntityNodeList";
 import {
   graphApi,
   type GraphEdge,
@@ -32,20 +34,34 @@ export function GraphPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const [expanding, setExpanding] = useState(false);
+  const [layout, setLayout] = useState<LayoutKind>("force");
+  // "entities" hides document/chunk/entity_type nodes so the graph shows the
+  // knowledge graph (entities + their relations), not raw content nodes.
+  const [viewScope, setViewScope] = useState<"entities" | "all">("entities");
+  const [nodeFilter, setNodeFilter] = useState("");
 
-  const search = useCallback(async (q: string) => {
-    setLoading(true);
-    setError(null);
-    setSelected(null);
-    try {
-      const result = q.trim() ? await graphApi.search(q.trim()) : await graphApi.search("*");
-      setData(result);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const search = useCallback(
+    async (q: string) => {
+      setLoading(true);
+      setError(null);
+      setSelected(null);
+      try {
+        // In "entities" scope, ask the backend to only return entity nodes —
+        // otherwise the default limit is filled with document/chunk nodes and
+        // entities get cut off entirely.
+        const nodeTypes = viewScope === "entities" ? ["entity"] : undefined;
+        const result = q.trim()
+          ? await graphApi.search(q.trim(), "ws_default", 50, nodeTypes)
+          : await graphApi.search("*", "ws_default", 50, nodeTypes);
+        setData(result);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [viewScope],
+  );
 
   useEffect(() => {
     search("*");
@@ -74,8 +90,10 @@ export function GraphPage() {
     }
   }
 
-  const incidentEdges: GraphEdge[] = data
-    ? data.edges.filter(
+  // Backend already filtered by node_types, so visibleData == data.
+  const visibleData = data;
+  const incidentEdges: GraphEdge[] = visibleData
+    ? visibleData.edges.filter(
         (e) => selected && (e.source_id === selected.id || e.target_id === selected.id),
       )
     : [];
@@ -88,22 +106,20 @@ export function GraphPage() {
       />
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={5}>
-          <Card title="搜索" className="panel-card">
-            <Space.Compact style={{ width: "100%" }}>
-              <Input
-                placeholder="实体名称..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onPressEnter={() => search(query)}
-                prefix={<SearchOutlined />}
-              />
-              <Button type="primary" onClick={() => search(query)}>
-                查找
-              </Button>
-            </Space.Compact>
-            <div style={{ marginTop: 12 }}>
-              <NodeTypeLegend />
-            </div>
+          <Card
+            title="实体列表"
+            className="panel-card"
+            styles={{ body: { maxHeight: 560, overflow: "auto" } }}
+          >
+            <EntityNodeList
+              nodes={visibleData?.nodes ?? []}
+              selectedId={selected?.id}
+              filter={nodeFilter}
+              onFilterChange={setNodeFilter}
+              onSelect={(n) => {
+                setSelected(n);
+              }}
+            />
           </Card>
         </Col>
         <Col xs={24} lg={13}>
@@ -111,14 +127,43 @@ export function GraphPage() {
             className="panel-card"
             styles={{ body: { height: 520, padding: 0 } }}
             title={
-              <Space>
+              <Space wrap>
                 <Text strong>图谱</Text>
-                {data && (
+                {visibleData && (
                   <Tag color="blue">
-                    {data.nodes.length} 个节点 · {data.edges.length} 条边
+                    {visibleData.nodes.length} 个节点 · {visibleData.edges.length} 条边
                   </Tag>
                 )}
                 {expanding && <Spin size="small" />}
+                <NodeTypeLegend />
+                <Input
+                  size="small"
+                  placeholder="搜索实体..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onPressEnter={() => search(query)}
+                  prefix={<SearchOutlined />}
+                  style={{ width: 140 }}
+                />
+                <Segmented
+                  size="small"
+                  value={viewScope}
+                  onChange={(v) => setViewScope(v as "entities" | "all")}
+                  options={[
+                    { label: "仅实体", value: "entities" },
+                    { label: "全部", value: "all" },
+                  ]}
+                />
+                <Segmented
+                  size="small"
+                  value={layout}
+                  onChange={(v) => setLayout(v as LayoutKind)}
+                  options={[
+                    { label: "力导向", value: "force" },
+                    { label: "同心圆", value: "radial" },
+                    { label: "网格", value: "grid" },
+                  ]}
+                />
               </Space>
             }
           >
@@ -127,12 +172,30 @@ export function GraphPage() {
               <div style={{ display: "flex", justifyContent: "center", paddingTop: 200 }}>
                 <Spin size="large" />
               </div>
-            ) : data && data.nodes.length > 0 ? (
+            ) : visibleData && visibleData.nodes.length > 0 ? (
               <GraphCanvas
-                nodes={data.nodes}
-                edges={data.edges}
+                nodes={visibleData.nodes}
+                edges={visibleData.edges}
                 selectedId={selected?.id}
+                layout={layout}
                 onSelectNode={expandNode}
+                onContextAction={(action, node) => {
+                  switch (action) {
+                    case "detail":
+                      setSelected(node);
+                      break;
+                    case "expand":
+                      void expandNode(node);
+                      break;
+                    case "copy":
+                      void navigator.clipboard?.writeText(node.label);
+                      break;
+                    case "search":
+                      setQuery(node.label);
+                      void search(node.label);
+                      break;
+                  }
+                }}
               />
             ) : (
               <div style={{ paddingTop: 160 }}>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -160,20 +161,26 @@ class GraphSyncService:
 
     def _entity_nodes(self, workspace_id: str) -> list[GraphStoreNode]:
         statement = select(Entity).where(Entity.workspace_id == workspace_id)
-        return [
-            GraphStoreNode(
-                id=entity.id,
-                label=entity.name,
-                node_type="entity",
-                properties={
-                    "workspace_id": entity.workspace_id,
-                    "entity_type_id": entity.entity_type_id,
-                    "normalized_name": entity.normalized_name,
-                    "confidence": entity.confidence,
-                },
+        nodes: list[GraphStoreNode] = []
+        for entity in self.session.scalars(statement):
+            # Merge the entity's own properties (zh_name, logo_url, avatar_url,
+            # ...) so the graph can render bilingual labels and logos.
+            props: dict[str, Any] = {
+                "workspace_id": entity.workspace_id,
+                "entity_type_id": entity.entity_type_id,
+                "normalized_name": entity.normalized_name,
+                "confidence": entity.confidence,
+            }
+            props.update(entity.properties or {})
+            nodes.append(
+                GraphStoreNode(
+                    id=entity.id,
+                    label=entity.name,
+                    node_type="entity",
+                    properties=props,
+                )
             )
-            for entity in self.session.scalars(statement)
-        ]
+        return nodes
 
     def _document_chunk_edges(self, workspace_id: str) -> list[GraphStoreEdge]:
         statement = (

@@ -4,7 +4,20 @@ export interface GraphNode {
   id: string;
   label: string;
   node_type: string;
-  properties?: Record<string, unknown>;
+  properties?: {
+    zh_name?: string;
+    logo_url?: string;
+    avatar_url?: string;
+    [key: string]: unknown;
+  };
+}
+
+/** Convenience accessors pulling enrichment fields out of node.properties. */
+export function nodeZhName(node: GraphNode): string | undefined {
+  return node.properties?.zh_name;
+}
+export function nodeImageUrl(node: GraphNode): string | undefined {
+  return node.properties?.logo_url ?? node.properties?.avatar_url;
 }
 
 export interface GraphEdge {
@@ -22,10 +35,15 @@ export interface GraphResponse {
 }
 
 export const graphApi = {
-  search(query: string, workspaceId = "ws_default", limit = 50): Promise<GraphResponse> {
+  search(
+    query: string,
+    workspaceId = "ws_default",
+    limit = 50,
+    nodeTypes?: string[],
+  ): Promise<GraphResponse> {
     return apiRequest<GraphResponse>("/graph/search", {
       method: "POST",
-      body: { query, workspace_id: workspaceId, limit },
+      body: { query, workspace_id: workspaceId, limit, node_types: nodeTypes },
     });
   },
 
