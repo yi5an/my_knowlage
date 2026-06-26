@@ -15,13 +15,15 @@ export interface GraphCanvasProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
   selectedId?: string | null;
+  /** ids of nodes connected to the selected node (for edge highlight). */
+  highlightedNeighborIds?: Set<string>;
   layout?: LayoutKind;
   onSelectNode?: (node: GraphNode) => void;
-  /** Right-click actions. Keys are menu item ids. */
+  /** Right-click actions. */
   onContextAction?: (action: ContextAction, node: GraphNode) => void;
 }
 
-export type ContextAction = "detail" | "expand" | "copy" | "search";
+export type ContextAction = "expand" | "favorite" | "explain";
 
 const NODE_STYLE: Record<
   string,
@@ -46,15 +48,17 @@ function styleFor(type: string) {
 /**
  * Knowledge-graph renderer (AntV G6 v5).
  *
- * - Per-type color + icon (emoji), or a logo/avatar image when the node has one.
- * - Bilingual labels: primary = zh_name, secondary = original name.
- * - Edge labels show the relation type in Chinese.
- * - Node dragging, canvas pan/zoom, and a right-click context menu.
+ * Interaction model:
+ * - Left-click a node: select it (highlight + center), do NOT auto-expand.
+ *   Expansion only happens via the right-click menu.
+ * - Right-click a node: context menu (展开 / 收藏 / 解释).
+ * - Selecting highlights the node and its incident edges.
  */
 export function GraphCanvas({
   nodes,
   edges,
   selectedId,
+  highlightedNeighborIds,
   layout = "force",
   onSelectNode,
   onContextAction,
@@ -73,6 +77,13 @@ export function GraphCanvas({
     graphRef.current?.destroy();
     graphRef.current = null;
 
+    const neighborSet = highlightedNeighborIds ?? new Set<string>();
+    const isHighlightedEdge = (src: string, tgt: string) =>
+      selectedId != null &&
+      (src === selectedId || tgt === selectedId) &&
+      (neighborSet.has(src) || src === selectedId) &&
+      (neighborSet.has(tgt) || tgt === selectedId);
+
     const graph = new Graph({
       container: containerRef.current,
       autoFit: "view",
@@ -80,25 +91,31 @@ export function GraphCanvas({
       node: {
         type: "circle",
         style: {
-          size: 36,
+          size: (d: { id?: string }) =>
+            selectedId != null && d.id === selectedId ? 44 : 34,
           fill: (d: { data?: { node_type?: string } }) =>
             styleFor(d.data?.node_type ?? "").color,
-          stroke: (d: { id?: string }) =>
-            selectedId != null && d.id === selectedId ? "#000" : "#fff",
-          lineWidth: (d: { id?: string }) =>
-            selectedId != null && d.id === selectedId ? 3 : 1,
+          // Selected node: dark border + thicker; neighbors slightly emphasized.
+          stroke: (d: { id?: string }) => {
+            if (selectedId != null && d.id === selectedId) return "#fa541c";
+            if (neighborSet.has(d.id ?? "")) return "#fa8c16";
+            return "#ffffff";
+          },
+          lineWidth: (d: { id?: string }) => {
+            if (selectedId != null && d.id === selectedId) return 3;
+            if (neighborSet.has(d.id ?? "")) return 2;
+            return 1;
+          },
           cursor: "pointer",
           icon: true,
           iconText: (d: { data?: { node_type?: string; img?: string } }) =>
             d.data?.img ? "" : styleFor(d.data?.node_type ?? "").icon,
           iconSrc: (d: { data?: { img?: string } }) => d.data?.img ?? "",
-          iconWidth: 24,
-          iconHeight: 24,
-          // Primary label = Chinese name (fallback to original).
-          labelText: (d: {
-            id?: string;
-            data?: { zh?: string; label?: string };
-          }) => {
+          iconWidth: (d: { id?: string }) =>
+            selectedId != null && d.id === selectedId ? 30 : 22,
+          iconHeight: (d: { id?: string }) =>
+            selectedId != null && d.id === selectedId ? 30 : 22,
+          labelText: (d: { data?: { zh?: string; label?: string } }) => {
             const zh = d.data?.zh;
             const orig = d.data?.label ?? "";
             return zh ?? orig;
@@ -111,8 +128,10 @@ export function GraphCanvas({
       },
       edge: {
         style: {
-          stroke: "#bfbfbf",
-          lineWidth: 1.5,
+          stroke: (d: { source?: string; target?: string }) =>
+            isHighlightedEdge(d.source ?? "", d.target ?? "") ? "#fa541c" : "#bfbfbf",
+          lineWidth: (d: { source?: string; target?: string }) =>
+            isHighlightedEdge(d.source ?? "", d.target ?? "") ? 3 : 1.5,
           label: true,
           labelText: (d: { data?: { relation_type?: string } }) =>
             relationLabel(d.data?.relation_type ?? ""),
@@ -132,10 +151,9 @@ export function GraphCanvas({
           trigger: "contextmenu",
           getContent: () =>
             [
-              { key: "detail", label: "查看详情" },
-              { key: "expand", label: "展开邻居" },
-              { key: "copy", label: "复制名称" },
-              { key: "search", label: "在搜索中查找" },
+              { key: "expand", label: "节点拓展" },
+              { key: "favorite", label: "节点收藏" },
+              { key: "explain", label: "实体解释" },
             ],
           onClick: (key: string, _target: unknown, current: { id?: string }) => {
             const node = nodesRef.current.find((n) => n.id === current.id);
@@ -145,6 +163,7 @@ export function GraphCanvas({
       ],
     });
 
+    // Left-click only selects (highlight + center). No auto-expand.
     graph.on("node:click", (evt: unknown) => {
       const id = (evt as { target?: { id?: string } }).target?.id;
       const node = nodesRef.current.find((n) => n.id === id);
@@ -159,6 +178,14 @@ export function GraphCanvas({
         } catch {
           /* destroyed */
         }
+        // Center on the selected node if any.
+        if (selectedId) {
+          try {
+            void graph.focusElement?.(selectedId);
+          } catch {
+            /* focusElement may be unavailable in some versions */
+          }
+        }
       }, 500);
     });
 
@@ -166,7 +193,7 @@ export function GraphCanvas({
       graph.destroy();
       graphRef.current = null;
     };
-  }, [nodes, edges, selectedId, layout]);
+  }, [nodes, edges, selectedId, layout, highlightedNeighborIds]);
 
   return <div ref={containerRef} style={{ width: "100%", height: "100%" }} />;
 }

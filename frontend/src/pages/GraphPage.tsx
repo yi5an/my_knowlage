@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
+  Button,
   Card,
   Col,
   Empty,
   Input,
+  Modal,
   Row,
   Segmented,
   Space,
@@ -38,6 +40,16 @@ export function GraphPage() {
   // knowledge graph (entities + their relations), not raw content nodes.
   const [viewScope, setViewScope] = useState<"entities" | "all">("entities");
   const [nodeFilter, setNodeFilter] = useState("");
+  // Favorited node ids (persisted to localStorage).
+  const [favorites, setFavorites] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem("graph_favorites") ?? "[]"));
+    } catch {
+      return new Set();
+    }
+  });
+  // Node being explained in the modal.
+  const [explainNode, setExplainNode] = useState<GraphNode | null>(null);
 
   const search = useCallback(
     async (q: string) => {
@@ -96,6 +108,22 @@ export function GraphPage() {
         (e) => selected && (e.source_id === selected.id || e.target_id === selected.id),
       )
     : [];
+  // Neighbors of the selected node — passed to GraphCanvas to highlight edges.
+  const highlightedNeighborIds = new Set(
+    incidentEdges.map((e) =>
+      e.source_id === selected?.id ? e.target_id : e.source_id,
+    ),
+  );
+
+  function toggleFavorite(node: GraphNode) {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(node.id)) next.delete(node.id);
+      else next.add(node.id);
+      localStorage.setItem("graph_favorites", JSON.stringify([...next]));
+      return next;
+    });
+  }
 
   return (
     <main className="page">
@@ -176,22 +204,19 @@ export function GraphPage() {
                 nodes={visibleData.nodes}
                 edges={visibleData.edges}
                 selectedId={selected?.id}
+                highlightedNeighborIds={highlightedNeighborIds}
                 layout={layout}
-                onSelectNode={expandNode}
+                onSelectNode={(node) => setSelected(node)}
                 onContextAction={(action, node) => {
                   switch (action) {
-                    case "detail":
-                      setSelected(node);
-                      break;
                     case "expand":
                       void expandNode(node);
                       break;
-                    case "copy":
-                      void navigator.clipboard?.writeText(node.label);
+                    case "favorite":
+                      toggleFavorite(node);
                       break;
-                    case "search":
-                      setQuery(node.label);
-                      void search(node.label);
+                    case "explain":
+                      setExplainNode(node);
                       break;
                   }
                 }}
@@ -207,27 +232,54 @@ export function GraphPage() {
           <Card title="节点详情" className="panel-card">
             {selected ? (
               <Space direction="vertical" size="small" style={{ width: "100%" }}>
-                <Title level={4} style={{ marginBottom: 4 }}>
-                  {selected.label}
-                </Title>
+                <Space style={{ width: "100%", justifyContent: "space-between" }}>
+                  <Title level={4} style={{ marginBottom: 0 }}>
+                    {selected.properties?.zh_name ?? selected.label}
+                  </Title>
+                  <Button
+                    size="small"
+                    type={favorites.has(selected.id) ? "primary" : "text"}
+                    onClick={() => toggleFavorite(selected)}
+                    title={favorites.has(selected.id) ? "取消收藏" : "收藏"}
+                  >
+                    {favorites.has(selected.id) ? "★" : "☆"}
+                  </Button>
+                </Space>
+                {selected.properties?.zh_name && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {selected.label}
+                  </Text>
+                )}
                 <Tag color="purple">{selected.node_type}</Tag>
-                <Paragraph style={{ marginTop: 8 }}>
+                <Paragraph style={{ marginTop: 8, marginBottom: 4 }}>
                   <Text type="secondary">连接数：</Text>
                   <Text strong>{incidentEdges.length}</Text>
                 </Paragraph>
                 {incidentEdges.length > 0 && (
                   <div>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      关系：
+                      关系（点击切换）：
                     </Text>
                     <ul style={{ margin: "4px 0", paddingLeft: 18 }}>
-                      {incidentEdges.slice(0, 8).map((e) => {
-                        const otherId = e.source_id === selected.id ? e.target_id : e.source_id;
+                      {incidentEdges.slice(0, 12).map((e) => {
+                        const otherId =
+                          e.source_id === selected.id ? e.target_id : e.source_id;
                         const other = data?.nodes.find((n) => n.id === otherId);
                         return (
-                          <li key={e.id} style={{ fontSize: 12 }}>
-                            <Tag>{e.relation_type}</Tag>
-                            {other?.label ?? otherId}
+                          <li key={e.id} style={{ fontSize: 12, marginBottom: 2 }}>
+                            <Tag
+                              style={{ cursor: "pointer" }}
+                              color="orange"
+                              onClick={() => other && setSelected(other)}
+                            >
+                              {e.relation_type}
+                            </Tag>
+                            <Text
+                              style={{ cursor: other ? "pointer" : "default", color: "#1677ff" }}
+                              onClick={() => other && setSelected(other)}
+                            >
+                              {other?.properties?.zh_name ?? other?.label ?? otherId}
+                            </Text>
                           </li>
                         );
                       })}
@@ -241,6 +293,34 @@ export function GraphPage() {
           </Card>
         </Col>
       </Row>
+      {/* Entity explanation modal (right-click → 实体解释). */}
+      <Modal
+        open={explainNode !== null}
+        title={explainNode ? explainNode.label : ""}
+        onCancel={() => setExplainNode(null)}
+        footer={[
+          <Button key="close" onClick={() => setExplainNode(null)}>
+            关闭
+          </Button>,
+        ]}
+      >
+        {explainNode && (
+          <Space direction="vertical" style={{ width: "100%" }}>
+            <div>
+              <Tag color="purple">{explainNode.node_type}</Tag>
+              {explainNode.properties?.zh_name &&
+                explainNode.properties.zh_name !== explainNode.label && (
+                  <Tag color="blue">{String(explainNode.properties.zh_name)}</Tag>
+                )}
+            </div>
+            <Text>
+              {explainNode.properties?.description
+                ? String(explainNode.properties.description)
+                : `实体「${explainNode.label}」来自知识库。可在关系图谱中右键展开其邻居，或在搜索中提问以获取更多上下文。`}
+            </Text>
+          </Space>
+        )}
+      </Modal>
     </main>
   );
 }
