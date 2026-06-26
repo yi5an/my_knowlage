@@ -27,6 +27,13 @@ const STATUS_COLOR: Record<string, string> = {
   failed: "error",
 };
 
+const STATUS_LABEL: Record<string, string> = {
+  running: "研究中",
+  completed: "已完成",
+  imported: "已导入",
+  failed: "失败",
+};
+
 function reportOf(task: ResearchTask): Record<string, unknown> | null {
   const report = task.metadata?.report;
   return report && typeof report === "object" ? (report as Record<string, unknown>) : null;
@@ -65,6 +72,8 @@ export function ResearchPage() {
     setCreating(true);
     setError(null);
     try {
+      // create() now returns immediately with status="running"; the workflow
+      // runs in a background thread on the server. We poll for completion.
       const task = await researchApi.create(question.trim());
       setTasks((prev) => [task, ...prev]);
       setSelectedId(task.id);
@@ -75,6 +84,23 @@ export function ResearchPage() {
       setCreating(false);
     }
   }
+
+  // Poll while any task is still running: the workflow takes 2-3 minutes and
+  // we want the list/report to update as soon as it finishes.
+  const hasRunning = tasks.some((t) => t.status === "running");
+  useEffect(() => {
+    if (!hasRunning) return;
+    const timer = setInterval(async () => {
+      try {
+        const fresh = await researchApi.list();
+        setTasks(fresh);
+      } catch {
+        // ignore transient poll errors
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [hasRunning]);
+
 
   const selected = tasks.find((t) => t.id === selectedId) ?? null;
   const report = selected ? reportOf(selected) : null;
@@ -113,7 +139,12 @@ export function ResearchPage() {
                       title={task.title}
                       description={
                         <Space size={4}>
-                          <Tag color={STATUS_COLOR[task.status] ?? "default"}>{task.status}</Tag>
+                          <Tag
+                            color={STATUS_COLOR[task.status] ?? "default"}
+                            icon={task.status === "running" ? <Spin size="small" /> : undefined}
+                          >
+                            {STATUS_LABEL[task.status] ?? task.status}
+                          </Tag>
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {task.question.slice(0, 30)}
                           </Text>
@@ -140,7 +171,9 @@ export function ResearchPage() {
                   <Title level={4} style={{ margin: 0 }}>
                     {selected.title}
                   </Title>
-                  <Tag color={STATUS_COLOR[selected.status] ?? "default"}>{selected.status}</Tag>
+                  <Tag color={STATUS_COLOR[selected.status] ?? "default"}>
+                    {STATUS_LABEL[selected.status] ?? selected.status}
+                  </Tag>
                 </Space>
               }
             >

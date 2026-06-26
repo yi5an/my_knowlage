@@ -107,6 +107,7 @@ class ResearchAgentService:
         llm_client: StructuredOutputClient,
         local_search_client: LocalKnowledgeSearchClient | None = None,
         web_search_client: WebSearchClient | None = None,
+        session_factory: Any = None,
     ) -> None:
         self.session = session
         self.llm_client = llm_client
@@ -116,8 +117,20 @@ class ResearchAgentService:
         # Web search defaults to None: the workflow treats a missing client as
         # a hard config error (Tavily key not set) rather than silently mock.
         self.web_search_client = web_search_client
+        # Optional session factory for the background workflow thread. In
+        # production this is left None and the thread uses SessionLocal; tests
+        # pass their own factory so the background session hits the same
+        # in-memory DB as the test fixture.
+        self.session_factory = session_factory
 
     def create_task(self, request: ResearchTaskCreateRequest) -> ResearchTask:
+        """Create a research task and start the workflow in the background.
+
+        Returns immediately with status="running" so the HTTP request is not
+        blocked for the 2-3 minutes the LLM workflow takes. The workflow runs
+        in a daemon thread with its own DB session; the client polls
+        ``GET /research/tasks/{id}`` for progress.
+        """
         task = ResearchTask(
             id=f"research_{uuid4().hex}",
             workspace_id=request.workspace_id,
@@ -130,12 +143,53 @@ class ResearchAgentService:
         self.session.add(task)
         self.session.commit()
         self.session.refresh(task)
-        self.run_workflow(task.id)
-        completed = self.get_task(task.id)
-        if completed is None:
-            msg = "Research task disappeared after creation."
-            raise RuntimeError(msg)
-        return completed
+        self._run_workflow_async(task.id)
+        return task
+
+    def _run_workflow_async(self, task_id: str) -> None:
+        """Run the workflow in a background thread with a fresh DB session.
+
+        SQLAlchemy sessions are not thread-safe, so the background run must
+        build its own session + service instance rather than reuse the
+        request-scoped ones.
+        """
+        import threading
+
+        llm_client = self.llm_client
+        web_client = self.web_search_client
+        session_factory = self.session_factory
+        local_client = self.local_search_client
+
+        def _run() -> None:
+            from app.infrastructure.database import SessionLocal
+
+            factory = session_factory if session_factory is not None else SessionLocal
+            session = factory()
+            try:
+                # Reuse the LLM and web clients (stateless w.r.t. the DB). The
+                # local-search client is reused only if it's NOT bound to the
+                # request session (e.g. a test mock); the DB-backed default is
+                # rebuilt on the new session so it stays thread-safe.
+                reusable_local = (
+                    local_client
+                    if not isinstance(local_client, DatabaseLocalKnowledgeSearchClient)
+                    else None
+                )
+                service = ResearchAgentService(
+                    session=session,
+                    llm_client=llm_client,
+                    local_search_client=reusable_local,
+                    web_search_client=web_client,
+                    session_factory=session_factory,
+                )
+                service.run_workflow(task_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("background research workflow failed: %s", task_id)
+            finally:
+                session.close()
+
+        thread = threading.Thread(target=_run, daemon=True, name=f"research-{task_id}")
+        thread.start()
 
     def get_task(self, task_id: str) -> ResearchTask | None:
         return self.session.get(ResearchTask, task_id)

@@ -127,12 +127,41 @@ def db_session() -> Generator[Session, None, None]:
 
 @pytest.fixture()
 def research_service(db_session: Session) -> ResearchAgentService:
+    # Build a factory bound to the same in-memory engine so the background
+    # workflow thread sees the task the request just created.
+    factory = sessionmaker(bind=db_session.bind, expire_on_commit=False)
     return ResearchAgentService(
         session=db_session,
         llm_client=ScriptedStructuredOutputClient(_sample_outputs()),
         local_search_client=MockLocalSearchClient(),
         web_search_client=MockWebSearchClient([_web_source()]),
+        session_factory=factory,
     )
+
+
+def wait_for_task_done(
+    service: ResearchAgentService, task_id: str, timeout: float = 5.0
+) -> ResearchTask:
+    """Poll until the background workflow reaches a terminal state.
+
+    The workflow now runs in a daemon thread, so create_task returns
+    immediately with status="running"; tests must wait for completion.
+    """
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        # Expire the cached object so we re-read the background thread's commit.
+        service.session.expire_all()
+        task = service.session.get(ResearchTask, task_id)
+        if task is not None and task.status in ("completed", "failed", "imported"):
+            service.session.refresh(task)
+            return task
+        time.sleep(0.05)
+    service.session.expire_all()
+    task = service.session.get(ResearchTask, task_id)
+    assert task is not None, "research task vanished"
+    return task
 
 
 @pytest.fixture()
@@ -158,9 +187,25 @@ def test_create_research_task_api(client: TestClient, db_session: Session) -> No
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "completed"
-    assert payload["metadata"]["report"]["summary"]
-    assert db_session.scalar(select(ResearchTask).where(ResearchTask.id == payload["id"]))
+    # Async: create returns immediately with status="running".
+    assert payload["status"] == "running"
+    task_id = payload["id"]
+
+    # Poll the GET endpoint until the background workflow finishes.
+    import time
+
+    deadline = time.time() + 5.0
+    final = None
+    while time.time() < deadline:
+        got = client.get(f"/api/v1/research/tasks/{task_id}").json()
+        if got["status"] in ("completed", "failed", "imported"):
+            final = got
+            break
+        time.sleep(0.02)
+    assert final is not None, "research task did not complete in time"
+    assert final["status"] == "completed"
+    assert final["metadata"]["report"]["summary"]
+    assert db_session.scalar(select(ResearchTask).where(ResearchTask.id == task_id))
 
 
 def test_plan_decomposes_question_into_queries(
@@ -174,6 +219,7 @@ def test_plan_decomposes_question_into_queries(
             question="AI chip market",
         )
     )
+    task = wait_for_task_done(research_service, task.id)
 
     plan = task.plan
     assert plan["queries"] == ["AI chip market size", "AI chip demand drivers"]
@@ -191,7 +237,9 @@ def test_mock_local_and_web_sources_are_written(
             question="AI chip market",
         )
     )
+    task = wait_for_task_done(research_service, task.id)
 
+    db_session.expire_all()
     sources = list(
         db_session.scalars(
             select(ResearchSource).where(ResearchSource.research_task_id == task.id)
@@ -209,6 +257,7 @@ def test_generate_report_has_required_sections(research_service: ResearchAgentSe
             question="AI chip market",
         )
     )
+    task = wait_for_task_done(research_service, task.id)
 
     report = task.metadata_["report"]
     assert report["summary"]
@@ -228,6 +277,7 @@ def test_progress_records_every_workflow_step(research_service: ResearchAgentSer
             question="AI chip market",
         )
     )
+    task = wait_for_task_done(research_service, task.id)
 
     progress, steps = research_service.progress(task)
 
@@ -247,6 +297,7 @@ def test_import_result_creates_document_and_extraction_jobs(
             question="AI chip market",
         )
     )
+    task = wait_for_task_done(research_service, task.id)
     document, jobs = research_service.import_report(task.id)
 
     assert db_session.get(Document, document.id) is not None
@@ -262,25 +313,26 @@ def test_workflow_failure_marks_task_failed_and_records_error(
     db_session: Session,
 ) -> None:
     # Force the GenerateReport node to fail while earlier nodes succeed.
+    factory = sessionmaker(bind=db_session.bind, expire_on_commit=False)
     service = ResearchAgentService(
         session=db_session,
         llm_client=ScriptedStructuredOutputClient(_sample_outputs(), fail_on=ResearchReport),
         local_search_client=MockLocalSearchClient(),
         web_search_client=MockWebSearchClient([_web_source()]),
+        session_factory=factory,
     )
 
-    with pytest.raises(StructuredOutputError):
-        service.create_task(
-            ResearchTaskCreateRequest(
-                workspace_id="ws_research",
-                title="Failure test",
-                question="AI chip market",
-            )
+    task = service.create_task(
+        ResearchTaskCreateRequest(
+            workspace_id="ws_research",
+            title="Failure test",
+            question="AI chip market",
         )
+    )
+    # Async: the failure happens in the background thread, which catches the
+    # StructuredOutputError, marks the task failed, and logs it.
+    failed = wait_for_task_done(service, task.id)
 
-    tasks = list(db_session.scalars(select(ResearchTask)))
-    assert len(tasks) == 1
-    failed = tasks[0]
     assert failed.status == "failed"
     assert failed.metadata_["error"]["node"] == "GenerateReportNode"
     assert failed.metadata_["error"]["type"] == "StructuredOutputError"
