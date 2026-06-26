@@ -83,7 +83,6 @@ export function GraphCanvas({
 
     const graph = new Graph({
       container: containerRef.current,
-      autoFit: "view",
       data: toG6Data(nodes, edges),
       node: {
         type: "circle",
