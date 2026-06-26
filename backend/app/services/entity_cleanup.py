@@ -13,6 +13,7 @@ and removal happens in a single transaction followed by a graph sync.
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -77,19 +78,34 @@ class EntityCleanupService:
     # --- LLM review -------------------------------------------------------
 
     def _review(self, entities: list[Entity]) -> list[str]:
-        if self.llm_client is None:
-            # Without an LLM we cannot judge quality; review nothing.
-            return []
-        try:
-            decision = self.llm_client.generate(
-                build_entity_cleanup_prompt(entities), EntityCleanupDecision
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("LLM entity cleanup review failed; skipping")
-            return []
-        return [
-            r.entity_id for r in decision.reviews if not r.is_valid
-        ]
+        invalid: list[str] = []
+        # Stage 1: deterministic pre-filter — sentence fragments and noise that
+        # are obviously not entities, no LLM needed (fast + precise).
+        todo: list[Entity] = []
+        for entity in entities:
+            if _is_obvious_fragment(entity.name):
+                invalid.append(entity.id)
+            else:
+                todo.append(entity)
+
+        # Stage 2: LLM review for the rest, in batches to keep each JSON
+        # response short (a single 100+ entity batch truncates/fails).
+        if todo and self.llm_client is not None:
+            BATCH = 15
+            for i in range(0, len(todo), BATCH):
+                batch = todo[i : i + BATCH]
+                try:
+                    decision = self.llm_client.generate(
+                        build_entity_cleanup_prompt(batch), EntityCleanupDecision
+                    )
+                    invalid.extend(
+                        r.entity_id for r in decision.reviews if not r.is_valid
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "LLM cleanup batch %d failed; skipping", i // BATCH
+                    )
+        return invalid
 
     # --- removal ----------------------------------------------------------
 
@@ -139,3 +155,38 @@ class EntityCleanupService:
         GraphSyncService(
             session=self.session, graph_store=self.graph_store
         ).sync_workspace(workspace_id)
+
+
+# Patterns that mark a "name" as an obvious sentence fragment, not an entity.
+
+# Verb-ish phrases that turn a noun into a sentence/clause.
+_FRAGMENT_VERBS = re.compile(
+    r"设计了|开发了|供应|供给|占据|占比|处于|凭借|包括|分为|进入|"
+    r"凭借|属于|代表|制造|生产了|研发了|推出了|领先"
+)
+# Brackets / parens that suggest a truncated clause like "下游（云计算".
+_UNCLOSED_BRACKET = re.compile(r"[（(]\S+$|^[^）)]*[）)]")
+
+
+def _is_obvious_fragment(name: str) -> bool:
+    """True if ``name`` is clearly a sentence fragment, not a real entity.
+
+    Catches the common noise from relation extraction that stuffs a whole
+    clause into an entity name (e.g. "芯片设计环节英伟达凭借GPU...").
+    """
+    if not name or not name.strip():
+        return True
+    n = name.strip()
+    # Too long to be a proper name.
+    if len(n) > 18:
+        return True
+    # Contains a verb that makes it a clause.
+    if _FRAGMENT_VERBS.search(n):
+        return True
+    # Unclosed/opening bracket fragment like "（云计算" or "下游（芯片设计".
+    if _UNCLOSED_BRACKET.search(n):
+        return True
+    # Suspicious punctuation that a clean entity name wouldn't contain.
+    if re.search(r"[，。；,;？\?！!]", n):
+        return True
+    return False
