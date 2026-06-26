@@ -149,15 +149,16 @@ export function GraphCanvas({
         {
           type: "contextmenu",
           trigger: "contextmenu",
-          getContent: () =>
+          // getItems returns { name, value }[]; the value is passed back to onClick.
+          getItems: () =>
             [
-              { key: "expand", label: "节点拓展" },
-              { key: "favorite", label: "节点收藏" },
-              { key: "explain", label: "实体解释" },
+              { name: "节点拓展", value: "expand" },
+              { name: "节点收藏", value: "favorite" },
+              { name: "实体解释", value: "explain" },
             ],
-          onClick: (key: string, _target: unknown, current: { id?: string }) => {
+          onClick: (value: string, _target: unknown, current: { id?: string }) => {
             const node = nodesRef.current.find((n) => n.id === current.id);
-            if (node) onContextRef.current?.(key as ContextAction, node);
+            if (node) onContextRef.current?.(value as ContextAction, node);
           },
         },
       ],
