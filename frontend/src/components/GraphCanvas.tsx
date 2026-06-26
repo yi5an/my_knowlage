@@ -132,6 +132,8 @@ export function GraphCanvas({
         style: {
           stroke: "#bfbfbf",
           lineWidth: 1.5,
+          // Arrow at the target end — relations (供应/上游/竞争...) are directed.
+          endArrow: true,
           label: true,
           labelText: (d: { data?: { relation_type?: string } }) =>
             relationLabel(d.data?.relation_type ?? ""),
