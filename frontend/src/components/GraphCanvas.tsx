@@ -229,15 +229,29 @@ export function GraphCanvas({
       }
     }
 
-    // Center on the selected node. Disable the animation so it doesn't fight
-    // with the force simulation ticking underneath.
+    // Center on the selected node. The d3-force layout keeps ticking for a
+    // few seconds after a click and G6 re-fits on convergence; re-focus when
+    // the layout settles so the selected node stays centered (not shrunk).
+    const refocus = () => {
+      if (graphRef.current && selectedId) {
+        try {
+          void graphRef.current.focusElement?.(selectedId);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
     if (selectedId) {
       try {
-        void graph.focusElement?.(selectedId, { animation: false } as never);
+        void graph.focusElement?.(selectedId);
       } catch {
         /* focusElement may be unavailable in some versions */
       }
+      graph.on("afterlayout", refocus);
     }
+    return () => {
+      graph.off("afterlayout", refocus);
+    };
   }, [selectedId, highlightedNeighborIds, edges]);
 
   return <div ref={containerRef} style={{ width: "100%", height: "100%" }} />;
@@ -277,12 +291,6 @@ function layoutConfig(kind: LayoutKind) {
         nodeSize: 50,
         link: { distance: 170 },
         manyBody: { strength: -250 },
-        // Converge fast so the layout stops ticking quickly; otherwise the
-        // ongoing simulation moves nodes around after we focus one, and G6
-        // re-fits the view on convergence — which looks like the canvas
-        // shrinking a few seconds after clicking a node.
-        alphaDecay: 0.05,
-        alphaMin: 0.05,
       };
   }
 }
