@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
-  Button,
   Card,
   Col,
   Empty,
@@ -16,7 +15,7 @@ import {
 import { SearchOutlined } from "@ant-design/icons";
 
 import { PageHeader } from "../components/PageHeader";
-import { GraphCanvas, NodeTypeLegend, type ContextAction, type LayoutKind } from "../components/GraphCanvas";
+import { GraphCanvas, NodeTypeLegend, type LayoutKind } from "../components/GraphCanvas";
 import { EntityNodeList } from "../components/EntityNodeList";
 import {
   graphApi,

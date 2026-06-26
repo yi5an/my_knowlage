@@ -17,12 +17,17 @@ export class ApiError extends Error {
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   let response: Response;
   try {
+    const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
     response = await fetch(`${apiBaseUrl}${path}`, {
       method: options.method ?? "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      // FormData must not set Content-Type so the browser can add the
+      // multipart boundary; everything else is JSON.
+      headers: isForm ? undefined : { "Content-Type": "application/json" },
+      body: isForm
+        ? (options.body as FormData)
+        : options.body
+          ? JSON.stringify(options.body)
+          : undefined,
     });
   } catch {
     // Network failure / timeout — the backend is unreachable.
