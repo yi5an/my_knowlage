@@ -50,9 +50,12 @@ function styleFor(type: string) {
  *
  * Interaction model:
  * - Left-click a node: select it (highlight + center), do NOT auto-expand.
- *   Expansion only happens via the right-click menu.
  * - Right-click a node: context menu (展开 / 收藏 / 解释).
- * - Selecting highlights the node and its incident edges.
+ *
+ * Performance: the Graph is only created/destroyed when the data or layout
+ * changes. Selecting a node updates element *states* (setElementState) and the
+ * view, which G6 re-renders cheaply without rebuilding the canvas — so there
+ * is no flicker.
  */
 export function GraphCanvas({
   nodes,
@@ -72,17 +75,11 @@ export function GraphCanvas({
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
+  // --- create / destroy the graph only on data or layout change ---
   useEffect(() => {
     if (!containerRef.current) return;
     graphRef.current?.destroy();
     graphRef.current = null;
-
-    const neighborSet = highlightedNeighborIds ?? new Set<string>();
-    const isHighlightedEdge = (src: string, tgt: string) =>
-      selectedId != null &&
-      (src === selectedId || tgt === selectedId) &&
-      (neighborSet.has(src) || src === selectedId) &&
-      (neighborSet.has(tgt) || tgt === selectedId);
 
     const graph = new Graph({
       container: containerRef.current,
@@ -91,30 +88,18 @@ export function GraphCanvas({
       node: {
         type: "circle",
         style: {
-          size: (d: { id?: string }) =>
-            selectedId != null && d.id === selectedId ? 44 : 34,
+          size: 34,
           fill: (d: { data?: { node_type?: string } }) =>
             styleFor(d.data?.node_type ?? "").color,
-          // Selected node: dark border + thicker; neighbors slightly emphasized.
-          stroke: (d: { id?: string }) => {
-            if (selectedId != null && d.id === selectedId) return "#fa541c";
-            if (neighborSet.has(d.id ?? "")) return "#fa8c16";
-            return "#ffffff";
-          },
-          lineWidth: (d: { id?: string }) => {
-            if (selectedId != null && d.id === selectedId) return 3;
-            if (neighborSet.has(d.id ?? "")) return 2;
-            return 1;
-          },
+          stroke: "#ffffff",
+          lineWidth: 1,
           cursor: "pointer",
           icon: true,
           iconText: (d: { data?: { node_type?: string; img?: string } }) =>
             d.data?.img ? "" : styleFor(d.data?.node_type ?? "").icon,
           iconSrc: (d: { data?: { img?: string } }) => d.data?.img ?? "",
-          iconWidth: (d: { id?: string }) =>
-            selectedId != null && d.id === selectedId ? 30 : 22,
-          iconHeight: (d: { id?: string }) =>
-            selectedId != null && d.id === selectedId ? 30 : 22,
+          iconWidth: 22,
+          iconHeight: 22,
           labelText: (d: { data?: { zh?: string; label?: string } }) => {
             const zh = d.data?.zh;
             const orig = d.data?.label ?? "";
@@ -125,13 +110,29 @@ export function GraphCanvas({
           labelPosition: "bottom",
           labelOffsetY: 6,
         },
+        // State-driven styles: selecting a node flips these on without a rebuild.
+        state: {
+          selected: {
+            size: 44,
+            stroke: "#fa541c",
+            lineWidth: 3,
+            iconWidth: 30,
+            iconHeight: 30,
+            labelFontWeight: "bold",
+          },
+          highlight: {
+            stroke: "#fa8c16",
+            lineWidth: 2,
+          },
+          dim: {
+            opacity: 0.35,
+          },
+        },
       },
       edge: {
         style: {
-          stroke: (d: { source?: string; target?: string }) =>
-            isHighlightedEdge(d.source ?? "", d.target ?? "") ? "#fa541c" : "#bfbfbf",
-          lineWidth: (d: { source?: string; target?: string }) =>
-            isHighlightedEdge(d.source ?? "", d.target ?? "") ? 3 : 1.5,
+          stroke: "#bfbfbf",
+          lineWidth: 1.5,
           label: true,
           labelText: (d: { data?: { relation_type?: string } }) =>
             relationLabel(d.data?.relation_type ?? ""),
@@ -142,6 +143,10 @@ export function GraphCanvas({
           labelBackgroundOpacity: 0.85,
           labelPadding: [2, 4],
         },
+        state: {
+          highlight: { stroke: "#fa541c", lineWidth: 3 },
+          dim: { opacity: 0.25 },
+        },
       },
       layout: layoutConfig(layout),
       behaviors: ["drag-element-force", "drag-canvas", "zoom-canvas", "click-select"],
@@ -149,7 +154,6 @@ export function GraphCanvas({
         {
           type: "contextmenu",
           trigger: "contextmenu",
-          // getItems returns { name, value }[]; the value is passed back to onClick.
           getItems: () =>
             [
               { name: "节点拓展", value: "expand" },
@@ -164,7 +168,7 @@ export function GraphCanvas({
       ],
     });
 
-    // Left-click only selects (highlight + center). No auto-expand.
+    // Left-click only selects (handled by the selection effect). No auto-expand.
     graph.on("node:click", (evt: unknown) => {
       const id = (evt as { target?: { id?: string } }).target?.id;
       const node = nodesRef.current.find((n) => n.id === id);
@@ -179,14 +183,6 @@ export function GraphCanvas({
         } catch {
           /* destroyed */
         }
-        // Center on the selected node if any.
-        if (selectedId) {
-          try {
-            void graph.focusElement?.(selectedId);
-          } catch {
-            /* focusElement may be unavailable in some versions */
-          }
-        }
       }, 500);
     });
 
@@ -194,7 +190,53 @@ export function GraphCanvas({
       graph.destroy();
       graphRef.current = null;
     };
-  }, [nodes, edges, selectedId, layout, highlightedNeighborIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, edges, layout]);
+
+  // --- update selection highlight WITHOUT rebuilding the graph ---
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    const neighborSet = highlightedNeighborIds ?? new Set<string>();
+    const allNodes = nodesRef.current;
+    const allEdges = edges;
+
+    // Node states: selected / highlight (neighbor) / dim (unrelated).
+    for (const n of allNodes) {
+      if (selectedId != null && n.id === selectedId) {
+        void graph.setElementState(n.id, "selected");
+      } else if (neighborSet.has(n.id)) {
+        void graph.setElementState(n.id, "highlight");
+      } else if (selectedId != null) {
+        void graph.setElementState(n.id, "dim");
+      } else {
+        void graph.setElementState(n.id, []);
+      }
+    }
+
+    // Edge states: highlight incident edges, dim the rest when something is selected.
+    for (const e of allEdges) {
+      const incident =
+        selectedId != null &&
+        (e.source_id === selectedId || e.target_id === selectedId);
+      if (incident) {
+        void graph.setElementState(e.id, "highlight");
+      } else if (selectedId != null) {
+        void graph.setElementState(e.id, "dim");
+      } else {
+        void graph.setElementState(e.id, []);
+      }
+    }
+
+    // Center on the selected node.
+    if (selectedId) {
+      try {
+        void graph.focusElement?.(selectedId);
+      } catch {
+        /* focusElement may be unavailable in some versions */
+      }
+    }
+  }, [selectedId, highlightedNeighborIds, edges]);
 
   return <div ref={containerRef} style={{ width: "100%", height: "100%" }} />;
 }
