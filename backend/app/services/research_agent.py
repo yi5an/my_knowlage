@@ -358,35 +358,61 @@ class ResearchAgentService:
         return _with(state, all_sources=all_sources)
 
     def _extract_claims(self, state: WorkflowState) -> WorkflowState:
-        extracted = self.llm_client.generate(
-            build_extract_claims_prompt(state.task.question, state.all_sources),
-            ExtractedClaims,
-        )
-        claims = extracted.claims
+        try:
+            extracted = self.llm_client.generate(
+                build_extract_claims_prompt(state.task.question, state.all_sources),
+                ExtractedClaims,
+            )
+            claims = extracted.claims
+        except Exception as exc:  # noqa: BLE001
+            # LLM structured-output failures are common on complex Chinese
+            # payloads. Fall back to using source snippets directly as claims
+            # so the workflow can still produce a report instead of aborting.
+            logger.warning("ExtractClaimsNode LLM failed, using fallback: %s", exc)
+            claims = [
+                ResearchClaim(
+                    text=src.snippet,
+                    evidence=[src.title],
+                    confidence=src.credibility_score,
+                )
+                for src in state.all_sources
+                if src.snippet
+            ][:8]
         self._complete_step(state.task, "ExtractClaimsNode", {"claim_count": len(claims)})
         return _with(state, claims=claims)
 
     def _cross_check(self, state: WorkflowState) -> WorkflowState:
-        checked = self.llm_client.generate(
-            build_cross_check_prompt(state.task.question, state.claims),
-            CrossCheckedClaims,
-        )
-        claims = checked.claims
+        try:
+            checked = self.llm_client.generate(
+                build_cross_check_prompt(state.task.question, state.claims),
+                CrossCheckedClaims,
+            )
+            claims = checked.claims
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("CrossCheckNode LLM failed, using fallback: %s", exc)
+            # Keep claims as-is (no cross-validation) rather than abort.
+            claims = state.claims
         self._complete_step(
             state.task, "CrossCheckNode", {"claim_count": len(claims)}
         )
         return _with(state, claims=claims)
 
     def _generate_report(self, state: WorkflowState) -> WorkflowState:
-        report = self.llm_client.generate(
-            build_report_prompt(
-                state.task.question,
-                state.task.title,
-                state.all_sources,
-                state.claims,
-            ),
-            ResearchReport,
-        )
+        try:
+            report = self.llm_client.generate(
+                build_report_prompt(
+                    state.task.question,
+                    state.task.title,
+                    state.all_sources,
+                    state.claims,
+                ),
+                ResearchReport,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Report generation is the last step; failing here wastes the whole
+            # run. Fall back to a structured report assembled from claims.
+            logger.warning("GenerateReportNode LLM failed, using fallback: %s", exc)
+            report = _fallback_report(state)
         metadata = dict(state.task.metadata_ or {})
         metadata["report"] = report.model_dump()
         state.task.metadata_ = metadata
@@ -498,6 +524,39 @@ def _with(
         all_sources=all_sources if all_sources is not None else state.all_sources,
         claims=claims if claims is not None else state.claims,
         report=report if report is not None else state.report,
+    )
+
+
+def _fallback_report(state: WorkflowState) -> ResearchReport:
+    """Assemble a minimal report from claims/sources when the LLM fails.
+
+    Used only as a last resort so a research task still yields a report
+    instead of ending in failure due to one bad LLM call.
+    """
+    claims = state.claims or []
+    findings = [c.text for c in claims[:6]] or ["暂无足够证据形成结论。"]
+    evidence = [e for c in claims for e in c.evidence] or [
+        s.title for s in state.all_sources
+    ]
+    src_count = len(state.all_sources)
+    return ResearchReport(
+        summary=(
+            f"围绕「{state.task.question}」整理了基于 {src_count} 个来源的研究结论"
+            "(LLM 报告生成失败,以下为来源摘要)。"
+        ),
+        background=f"研究任务:{state.task.title}。",
+        key_findings=findings,
+        evidence=evidence,
+        comparison_table=[
+            {
+                "source": s.title,
+                "type": s.source_type,
+                "credibility": f"{s.credibility_score:.2f}",
+            }
+            for s in state.all_sources
+        ],
+        risks_and_uncertainties=["LLM 报告生成异常,结论为来源片段拼接,需人工复核。"],
+        next_steps=["重新运行研究,或人工审阅来源后撰写报告。"],
     )
 
 

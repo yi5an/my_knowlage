@@ -39,6 +39,15 @@ function reportOf(task: ResearchTask): Record<string, unknown> | null {
   return report && typeof report === "object" ? (report as Record<string, unknown>) : null;
 }
 
+/** Translate common backend errors into friendly Chinese. */
+function friendlyError(msg: string): string {
+  if (msg.includes("structured output")) return "AI 模型返回格式异常,多次重试后仍失败。可稍后重试。";
+  if (msg.includes("web search is not configured") || msg.includes("TAVILY_API_KEY"))
+    return "未配置网络搜索(Tavily),请在 .env 设置 TAVILY_API_KEY。";
+  if (msg.includes("Interrupted") || msg.includes("中断")) return "服务重启,任务被中断。可重新运行。";
+  return msg;
+}
+
 export function ResearchPage() {
   const [tasks, setTasks] = useState<ResearchTask[]>([]);
   const [loading, setLoading] = useState(false);
@@ -183,8 +192,11 @@ export function ResearchPage() {
                 <Alert
                   type="error"
                   message="研究失败"
-                  description={String(
-                    (selected.metadata?.error as Record<string, unknown>)?.message ?? "未知错误",
+                  description={friendlyError(
+                    String(
+                      (selected.metadata?.error as Record<string, unknown>)?.message ??
+                        "未知错误",
+                    ),
                   )}
                 />
               ) : (

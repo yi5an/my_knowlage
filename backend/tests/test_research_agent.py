@@ -312,11 +312,11 @@ def test_import_result_creates_document_and_extraction_jobs(
 def test_workflow_failure_marks_task_failed_and_records_error(
     db_session: Session,
 ) -> None:
-    # Force the GenerateReport node to fail while earlier nodes succeed.
+    # Force the PlanResearch node (still strict, no fallback) to fail.
     factory = sessionmaker(bind=db_session.bind, expire_on_commit=False)
     service = ResearchAgentService(
         session=db_session,
-        llm_client=ScriptedStructuredOutputClient(_sample_outputs(), fail_on=ResearchReport),
+        llm_client=ScriptedStructuredOutputClient(_sample_outputs(), fail_on=ResearchPlan),
         local_search_client=MockLocalSearchClient(),
         web_search_client=MockWebSearchClient([_web_source()]),
         session_factory=factory,
@@ -334,5 +334,30 @@ def test_workflow_failure_marks_task_failed_and_records_error(
     failed = wait_for_task_done(service, task.id)
 
     assert failed.status == "failed"
-    assert failed.metadata_["error"]["node"] == "GenerateReportNode"
+    assert failed.metadata_["error"]["node"] == "PlanResearchNode"
     assert failed.metadata_["error"]["type"] == "StructuredOutputError"
+
+
+def test_report_fallback_when_llm_fails(db_session: Session) -> None:
+    # Report node fails but fallback keeps the workflow producing a report.
+    factory = sessionmaker(bind=db_session.bind, expire_on_commit=False)
+    service = ResearchAgentService(
+        session=db_session,
+        llm_client=ScriptedStructuredOutputClient(_sample_outputs(), fail_on=ResearchReport),
+        local_search_client=MockLocalSearchClient(),
+        web_search_client=MockWebSearchClient([_web_source()]),
+        session_factory=factory,
+    )
+
+    task = service.create_task(
+        ResearchTaskCreateRequest(
+            workspace_id="ws_research",
+            title="Fallback test",
+            question="AI chip market",
+        )
+    )
+    result = wait_for_task_done(service, task.id)
+
+    # Fallback report was produced instead of failing.
+    assert result.status == "completed"
+    assert result.metadata_["report"]["summary"]
