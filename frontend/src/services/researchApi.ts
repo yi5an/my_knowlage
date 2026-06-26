@@ -10,6 +10,12 @@ export type ResearchTask = {
   metadata: Record<string, unknown>;
 };
 
+export type ResearchImportResult = {
+  task_id: string;
+  document_id: string;
+  task_job_ids: string[];
+};
+
 export const researchApi = {
   list(workspaceId = "ws_default") {
     return apiRequest<ResearchTask[]>(`/research/tasks?workspace_id=${workspaceId}`);
@@ -18,6 +24,12 @@ export const researchApi = {
     return apiRequest<ResearchTask>("/research/tasks", {
       method: "POST",
       body: { workspace_id: workspaceId, question, title: title ?? question },
+    });
+  },
+  /** Import a completed task's report into the knowledge base. */
+  importReport(taskId: string) {
+    return apiRequest<ResearchImportResult>(`/research/tasks/${taskId}/import`, {
+      method: "POST",
     });
   },
 };
