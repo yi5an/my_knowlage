@@ -227,10 +227,11 @@ export function GraphCanvas({
       }
     }
 
-    // Center on the selected node.
+    // Center on the selected node. Disable the animation so it doesn't fight
+    // with the force simulation ticking underneath.
     if (selectedId) {
       try {
-        void graph.focusElement?.(selectedId);
+        void graph.focusElement?.(selectedId, { animation: false } as never);
       } catch {
         /* focusElement may be unavailable in some versions */
       }
@@ -274,6 +275,12 @@ function layoutConfig(kind: LayoutKind) {
         nodeSize: 50,
         link: { distance: 170 },
         manyBody: { strength: -250 },
+        // Converge fast so the layout stops ticking quickly; otherwise the
+        // ongoing simulation moves nodes around after we focus one, and G6
+        // re-fits the view on convergence — which looks like the canvas
+        // shrinking a few seconds after clicking a node.
+        alphaDecay: 0.05,
+        alphaMin: 0.05,
       };
   }
 }
