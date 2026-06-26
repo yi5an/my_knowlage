@@ -18,6 +18,7 @@ import { SearchOutlined } from "@ant-design/icons";
 
 import { PageHeader } from "../components/PageHeader";
 import { GraphCanvas, NodeTypeLegend, type LayoutKind } from "../components/GraphCanvas";
+import { entityApi, type ExplainResult } from "../services/entityApi";
 import { EntityNodeList } from "../components/EntityNodeList";
 import {
   graphApi,
@@ -48,8 +49,32 @@ export function GraphPage() {
       return new Set();
     }
   });
-  // Node being explained in the modal.
+  // Node being explained in the modal (right-click → 实体解释).
   const [explainNode, setExplainNode] = useState<GraphNode | null>(null);
+  const [explainResult, setExplainResult] = useState<ExplainResult | null>(null);
+  const [explaining, setExplaining] = useState(false);
+
+  async function showExplain(node: GraphNode) {
+    setExplainNode(node);
+    setExplainResult(null);
+    setExplaining(true);
+    try {
+      const result = await entityApi.explain(node.id);
+      setExplainResult(result);
+    } catch {
+      setExplainResult({
+        entity_id: node.id,
+        name: node.label,
+        title: "",
+        extract: `无法获取「${node.label}」的解释。`,
+        url: null,
+        thumbnail: null,
+        lang: "",
+      });
+    } finally {
+      setExplaining(false);
+    }
+  }
 
   const search = useCallback(
     async (q: string) => {
@@ -216,7 +241,7 @@ export function GraphPage() {
                       toggleFavorite(node);
                       break;
                     case "explain":
-                      setExplainNode(node);
+                      void showExplain(node);
                       break;
                   }
                 }}
@@ -296,9 +321,20 @@ export function GraphPage() {
       {/* Entity explanation modal (right-click → 实体解释). */}
       <Modal
         open={explainNode !== null}
-        title={explainNode ? explainNode.label : ""}
+        title={explainNode ? `实体解释：${explainNode.properties?.zh_name ?? explainNode.label}` : ""}
         onCancel={() => setExplainNode(null)}
         footer={[
+          explainResult?.url ? (
+            <Button
+              key="wiki"
+              type="link"
+              href={explainResult.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              查看 Wikipedia 原文 ↗
+            </Button>
+          ) : null,
           <Button key="close" onClick={() => setExplainNode(null)}>
             关闭
           </Button>,
@@ -312,12 +348,36 @@ export function GraphPage() {
                 explainNode.properties.zh_name !== explainNode.label && (
                   <Tag color="blue">{String(explainNode.properties.zh_name)}</Tag>
                 )}
+              {explainResult?.lang && (
+                <Tag color={explainResult.lang === "zh" ? "gold" : "default"}>
+                  {explainResult.lang === "zh" ? "中文维基" : "英文维基"}
+                </Tag>
+              )}
             </div>
-            <Text>
-              {explainNode.properties?.description
-                ? String(explainNode.properties.description)
-                : `实体「${explainNode.label}」来自知识库。可在关系图谱中右键展开其邻居，或在搜索中提问以获取更多上下文。`}
-            </Text>
+            {explaining ? (
+              <div style={{ textAlign: "center", padding: 24 }}>
+                <Spin tip="正在从 Wikipedia 获取解释..." />
+              </div>
+            ) : (
+              <Space align="start" style={{ width: "100%" }}>
+                {explainResult?.thumbnail && (
+                  <img
+                    src={explainResult.thumbnail}
+                    alt={explainResult.title}
+                    style={{
+                      width: 90,
+                      height: 90,
+                      objectFit: "cover",
+                      borderRadius: 4,
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+                <Paragraph style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                  {explainResult?.extract ?? "暂无解释"}
+                </Paragraph>
+              </Space>
+            )}
           </Space>
         )}
       </Modal>

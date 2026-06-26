@@ -213,6 +213,19 @@ class EntityCleanupResponse(BaseModel):
     removed: int = 0
 
 
+# --- Entity explanation (Wikipedia) --------------------------------------
+
+
+class EntityExplainResponse(BaseModel):
+    entity_id: str
+    name: str
+    title: str = ""
+    extract: str = ""
+    url: str | None = None
+    thumbnail: str | None = None
+    lang: str = ""
+
+
 # --- Entity translation (bilingual labels) -------------------------------
 
 

@@ -13,6 +13,7 @@ from app.schemas.entities import (
     AutoMergeResponse,
     EntityCleanupRequest,
     EntityCleanupResponse,
+    EntityExplainResponse,
     EntityMergeRequest,
     EntityMergeResponse,
     EntityResponse,
@@ -27,6 +28,7 @@ from app.schemas.entities import (
 from app.services.entity_cleanup import EntityCleanupService
 from app.services.entity_merge import EntityMergeService
 from app.services.entity_type_discovery import EntityTypeDiscoveryService
+from app.services.wiki import WikiClient
 
 router = APIRouter(tags=["entities"])
 DB_SESSION_DEPENDENCY = Depends(get_db_session)
@@ -105,6 +107,34 @@ async def get_entity(
     if entity is None:
         raise AppError("entity_not_found", "Entity not found.", HTTPStatus.NOT_FOUND)
     return _entity_response(entity)
+
+
+@router.get("/entities/{entity_id}/explain", response_model=EntityExplainResponse)
+async def explain_entity(
+    entity_id: str,
+    session: Session = DB_SESSION_DEPENDENCY,
+) -> EntityExplainResponse:
+    """Fetch a Wikipedia explanation for the entity (Chinese first, then English)."""
+    entity = session.get(Entity, entity_id)
+    if entity is None:
+        raise AppError("entity_not_found", "Entity not found.", HTTPStatus.NOT_FOUND)
+    zh_name = (entity.properties or {}).get("zh_name")
+    summary = WikiClient().explain(entity.name, str(zh_name) if zh_name else None)
+    if summary is None:
+        return EntityExplainResponse(
+            entity_id=entity.id,
+            name=entity.name,
+            extract=f"未在 Wikipedia 找到「{entity.name}」的词条。",
+        )
+    return EntityExplainResponse(
+        entity_id=entity.id,
+        name=entity.name,
+        title=summary.title,
+        extract=summary.extract,
+        url=summary.url,
+        thumbnail=summary.thumbnail,
+        lang=summary.lang,
+    )
 
 
 @router.put("/entities/{entity_id}", response_model=EntityResponse)

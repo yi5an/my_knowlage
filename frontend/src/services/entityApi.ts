@@ -13,12 +13,25 @@ export type EntitySummary = {
   verified: boolean;
 };
 
+export type ExplainResult = {
+  entity_id: string;
+  name: string;
+  title: string;
+  extract: string;
+  url: string | null;
+  thumbnail: string | null;
+  lang: string;
+};
+
 export const entityApi = {
   get(entityId: string) {
     return apiRequest<EntitySummary>(`/entities/${entityId}`);
   },
   list(workspaceId: string) {
     return apiRequest<EntitySummary[]>(`/entities?workspace_id=${workspaceId}`);
+  },
+  explain(entityId: string) {
+    return apiRequest<ExplainResult>(`/entities/${entityId}/explain`);
   },
 };
 
