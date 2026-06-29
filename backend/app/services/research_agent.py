@@ -146,6 +146,30 @@ class ResearchAgentService:
         self._run_workflow_async(task.id)
         return task
 
+    def retry_task(self, task_id: str) -> ResearchTask:
+        """Reset a failed/finished task and re-run its workflow.
+
+        Clears the plan, workflow steps, report and error, flips status back
+        to "running", and kicks off the workflow in a fresh background thread.
+        Used by the ``POST /research/tasks/{id}/retry`` endpoint.
+        """
+        task = self.session.get(ResearchTask, task_id)
+        if task is None:
+            msg = f"Research task not found: {task_id}"
+            raise ValueError(msg)
+        # Reset all transient state so the workflow starts clean.
+        task.plan = {}
+        metadata = dict(task.metadata_ or {})
+        metadata.pop("report", None)
+        metadata.pop("error", None)
+        metadata["workflow_steps"] = self._initial_steps()
+        task.metadata_ = metadata
+        task.status = "running"
+        self.session.commit()
+        self.session.refresh(task)
+        self._run_workflow_async(task.id)
+        return task
+
     def _run_workflow_async(self, task_id: str) -> None:
         """Run the workflow in a background thread with a fresh DB session.
 

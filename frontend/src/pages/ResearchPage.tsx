@@ -137,6 +137,18 @@ export function ResearchPage() {
     }
   }
 
+  async function retryTask() {
+    if (!selected) return;
+    try {
+      await researchApi.retry(selected.id);
+      // Update the list; the running task triggers the existing poll effect.
+      const fresh = await researchApi.list();
+      setTasks(fresh);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   // Load entities when the selected task is imported (entities extracted).
   const selected = tasks.find((t) => t.id === selectedId) ?? null;
   const report = selected ? reportOf(selected) : null;
@@ -273,6 +285,11 @@ export function ResearchPage() {
                         "未知错误",
                     ),
                   )}
+                  action={
+                    <Button size="small" danger onClick={retryTask}>
+                      重试
+                    </Button>
+                  }
                 />
               ) : (
                 <Empty description={selected.status === "running" ? "研究进行中…" : "暂无报告"} />

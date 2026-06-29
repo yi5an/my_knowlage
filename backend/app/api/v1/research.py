@@ -85,6 +85,19 @@ async def import_research_task(
     )
 
 
+@router.post("/tasks/{task_id}/retry", response_model=ResearchTaskResponse)
+async def retry_research_task(
+    task_id: str,
+    service: ResearchAgentService = RESEARCH_SERVICE_DEPENDENCY,
+) -> ResearchTaskResponse:
+    """Reset a failed/finished task and re-run the workflow in the background."""
+    try:
+        task = service.retry_task(task_id)
+    except ValueError as exc:
+        raise AppError("research_task_not_found", str(exc), HTTPStatus.NOT_FOUND) from exc
+    return _task_response(task)
+
+
 def _task_response(task: ResearchTask) -> ResearchTaskResponse:
     return ResearchTaskResponse.model_validate(
         {

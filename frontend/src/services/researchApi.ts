@@ -32,5 +32,11 @@ export const researchApi = {
       method: "POST",
     });
   },
+  /** Reset a failed/finished task and re-run the workflow. */
+  retry(taskId: string) {
+    return apiRequest<ResearchTask>(`/research/tasks/${taskId}/retry`, {
+      method: "POST",
+    });
+  },
 };
 

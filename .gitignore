@@ -17,3 +17,6 @@ dist/
 coverage/
 
 .playwright-mcp/
+*.db-wal
+*.db-shm
+*.db-journal
