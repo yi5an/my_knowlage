@@ -104,10 +104,15 @@ export function GraphCanvas({
             const orig = d.data?.label ?? "";
             return zh ?? orig;
           },
-          labelFontSize: 11,
+          labelFontSize: 12,
           labelFill: "#262626",
           labelPosition: "bottom",
           labelOffsetY: 6,
+          labelBackground: true,
+          labelBackgroundFill: "#ffffff",
+          labelBackgroundOpacity: 0.8,
+          labelBackgroundRadius: 3,
+          labelPadding: [1, 3],
         },
         // State-driven styles: selecting a node flips these on without a rebuild.
         state: {
@@ -288,9 +293,11 @@ function layoutConfig(kind: LayoutKind) {
       return {
         type: "d3-force",
         preventOverlap: true,
-        nodeSize: 50,
-        link: { distance: 170 },
-        manyBody: { strength: -250 },
+        nodeSize: 60,
+        link: { distance: 240 },
+        manyBody: { strength: -450 },
+        alpha: 1,
+        alphaDecay: 0.02,
       };
   }
 }
