@@ -128,6 +128,13 @@ export interface InvestmentDashboard {
   today_macro_count: number;
 }
 
+export interface InvestmentDigest {
+  counts: InvestmentDashboard;
+  today_highlights: InvestmentItem[];
+  pending_claims: InvestmentClaim[];
+  challenged_items: InvestmentItem[];
+}
+
 export interface InvestmentFetchJob {
   id: string;
   source_id?: string | null;
@@ -252,6 +259,27 @@ export const investmentApi = {
   // dashboard
   getDashboard(workspaceId = WS): Promise<InvestmentDashboard> {
     return apiRequest(`/investment/dashboard?workspace_id=${workspaceId}`);
+  },
+
+  // macro calendar
+  listMacroEvents(params: {
+    workspaceId?: string;
+    days?: number;
+    importance?: Importance;
+    limit?: number;
+  } = {}): Promise<InvestmentItem[]> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      days: params.days ?? 30,
+      importance: params.importance,
+      limit: params.limit ?? 100,
+    });
+    return apiRequest(`/investment/macro-events${q}`);
+  },
+
+  // daily digest (aggregate view)
+  getDigest(workspaceId = WS): Promise<InvestmentDigest> {
+    return apiRequest(`/investment/digest?workspace_id=${workspaceId}`);
   },
 
   // items

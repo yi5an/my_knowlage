@@ -12,6 +12,7 @@ from app.schemas.investment import (
     InvestmentClaimResponse,
     InvestmentClaimUpdate,
     InvestmentDashboardResponse,
+    InvestmentDigestResponse,
     InvestmentFetchJobResponse,
     InvestmentItemCreate,
     InvestmentItemResponse,
@@ -43,6 +44,42 @@ async def dashboard(
     service: InvestmentService = SERVICE_DEPENDENCY,
 ) -> InvestmentDashboardResponse:
     return InvestmentDashboardResponse(**service.dashboard(workspace_id))
+
+
+@router.get("/macro-events", response_model=list[InvestmentItemResponse])
+async def list_macro_events(
+    workspace_id: str = "ws_default",
+    days: int = Query(default=30, ge=0, le=365),
+    importance: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[InvestmentItemResponse]:
+    """Macro-calendar view: ``investment_item`` rows with info_layer=macro_calendar."""
+    items = service.list_macro_calendar(
+        workspace_id=workspace_id, days=days, importance=importance, limit=limit
+    )
+    return [InvestmentItemResponse.model_validate(i) for i in items]
+
+
+@router.get("/digest", response_model=InvestmentDigestResponse)
+async def digest(
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentDigestResponse:
+    """Daily digest: aggregate counts + today's highlights + pending claims."""
+    data = service.digest(workspace_id)
+    return InvestmentDigestResponse(
+        counts=InvestmentDashboardResponse(**data["counts"]),
+        today_highlights=[
+            InvestmentItemResponse.model_validate(i) for i in data["today_highlights"]
+        ],
+        pending_claims=[
+            InvestmentClaimResponse.model_validate(c) for c in data["pending_claims"]
+        ],
+        challenged_items=[
+            InvestmentItemResponse.model_validate(i) for i in data["challenged_items"]
+        ],
+    )
 
 
 # --- watchlist -------------------------------------------------------------

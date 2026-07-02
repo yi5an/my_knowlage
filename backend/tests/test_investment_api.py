@@ -6,6 +6,7 @@ come from real rows inserted via the API.
 """
 
 from collections.abc import Generator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -236,3 +237,96 @@ def test_dashboard_reflects_real_counts(client: TestClient):
     assert filled["pending_review_count"] == 1
     assert filled["theses_challenged_count"] == 1
     assert filled["pending_claims_count"] == 1
+
+
+# --- macro-events & digest -------------------------------------------------
+
+
+def test_macro_events_only_returns_macro_calendar_layer(client: TestClient):
+    now_iso = datetime.now(UTC).isoformat()
+    # a macro item and a non-macro item
+    client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "FOMC statement",
+            "info_layer": "macro_calendar",
+            "importance": "high",
+            "published_at": now_iso,
+        },
+    )
+    client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "earnings call",
+            "info_layer": "primary_source",
+            "published_at": now_iso,
+        },
+    )
+
+    resp = client.get("/api/v1/investment/macro-events")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["info_layer"] == "macro_calendar"
+    assert body[0]["title"] == "FOMC statement"
+
+
+def test_macro_events_importance_filter(client: TestClient):
+    now_iso = datetime.now(UTC).isoformat()
+    client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "high impact",
+            "info_layer": "macro_calendar",
+            "importance": "high",
+            "published_at": now_iso,
+        },
+    )
+    client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "low impact",
+            "info_layer": "macro_calendar",
+            "importance": "low",
+            "published_at": now_iso,
+        },
+    )
+
+    only_high = client.get("/api/v1/investment/macro-events?importance=high").json()
+    assert len(only_high) == 1
+    assert only_high[0]["importance"] == "high"
+
+
+def test_digest_aggregates_counts_and_lists(client: TestClient):
+    now_iso = datetime.now(UTC).isoformat()
+    client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "a",
+            "action_status": "pending_review",
+            "importance": "high",
+            "published_at": now_iso,
+        },
+    )
+    client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "b",
+            "thesis_impact": "weakens",
+            "action_status": "tracking",
+            "published_at": now_iso,
+        },
+    )
+    client.post("/api/v1/investment/claims", json={"claim_text": "claim to verify"})
+
+    resp = client.get("/api/v1/investment/digest")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["counts"]["pending_review_count"] == 1
+    assert body["counts"]["theses_challenged_count"] == 1
+    assert body["counts"]["pending_claims_count"] == 1
+    # today_highlights includes today's items; challenged_items has the weakens one
+    titles = [h["title"] for h in body["today_highlights"]]
+    assert "a" in titles
+    assert any(c["claim_text"] == "claim to verify" for c in body["pending_claims"])
+    assert any(i["title"] == "b" for i in body["challenged_items"])

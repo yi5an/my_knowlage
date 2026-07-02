@@ -35,6 +35,16 @@ const TYPE_LABEL: Record<SourceType, string> = {
   manual: "手动",
 };
 
+/** Split a textarea (one series ID per line, also tolerates commas/spaces). */
+function _splitSeries(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  if (typeof raw !== "string") return [];
+  return raw
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 function fmtDate(s?: string | null): string {
   if (!s) return "—";
   try {
@@ -79,14 +89,25 @@ export function InvestmentSourcesPage() {
     const payload: Parameters<typeof investmentApi.createSource>[0] = {
       source_type: sourceType,
       name: values.name,
-      url: values.url,
       default_info_layer: values.default_info_layer ?? "news",
       poll_interval_seconds: values.poll_interval_seconds ?? 3600,
     };
-    // SEC needs a CIK in config; other types use url.
+    // SEC needs a CIK in config; BLS/FRED need series IDs in config;
+    // rss/federal_reserve_rss/hkex/cninfo use url.
     if (sourceType === "sec_edgar") {
       payload.config = { cik: values.cik, forms: ["10-K", "10-Q", "8-K", "4"] };
-      // SEC fetcher reads User-Agent from server settings, not per-source.
+    } else if (sourceType === "bls") {
+      payload.config = {
+        series: _splitSeries(values.series),
+        years: values.years ?? 1,
+      };
+    } else if (sourceType === "fred") {
+      payload.config = {
+        series: _splitSeries(values.series),
+        limit: values.limit ?? 5,
+      };
+    } else {
+      payload.url = values.url;
     }
     try {
       await investmentApi.createSource(payload);
@@ -242,21 +263,59 @@ export function InvestmentSourcesPage() {
                 { value: "rss", label: "RSS / Atom" },
                 { value: "federal_reserve_rss", label: "美联储 RSS" },
                 { value: "sec_edgar", label: "SEC EDGAR（按 CIK）" },
+                { value: "bls", label: "BLS（按序列，宏观）" },
+                { value: "fred", label: "FRED（按序列，宏观）" },
+                { value: "hkex", label: "港交所 HKEX（公告搜索）" },
+                { value: "cninfo", label: "巨潮 CNINFO（公告搜索）" },
               ]}
             />
           </Form.Item>
           <Form.Item shouldUpdate={(prev, cur) => prev.source_type !== cur.source_type} noStyle>
-            {({ getFieldValue }) =>
-              getFieldValue("source_type") === "sec_edgar" ? (
-                <Form.Item label="CIK" name="cik" rules={[{ required: true }]}>
-                  <Input placeholder="如：0000320193 (Apple)" />
-                </Form.Item>
-              ) : (
+            {({ getFieldValue }) => {
+              const st = getFieldValue("source_type") as SourceType;
+              if (st === "sec_edgar") {
+                return (
+                  <Form.Item label="CIK" name="cik" rules={[{ required: true }]}>
+                    <Input placeholder="如：0000320193 (Apple)" />
+                  </Form.Item>
+                );
+              }
+              if (st === "bls" || st === "fred") {
+                return (
+                  <>
+                    <Form.Item
+                      label="序列 ID（每行一个）"
+                      name="series"
+                      rules={[{ required: true }]}
+                    >
+                      <Input.TextArea
+                        rows={3}
+                        placeholder={
+                          st === "bls"
+                            ? "CUSR0000SA0&#10;LNS14000000&#10;CES0000000001"
+                            : "DGS10&#10;FEDFUNDS&#10;UNRATE"
+                        }
+                      />
+                    </Form.Item>
+                    {st === "bls" ? (
+                      <Form.Item label="回溯年数" name="years" initialValue={1}>
+                        <InputNumber min={1} max={10} style={{ width: "100%" }} />
+                      </Form.Item>
+                    ) : (
+                      <Form.Item label="每个序列取最近几条" name="limit" initialValue={5}>
+                        <InputNumber min={1} max={100} style={{ width: "100%" }} />
+                      </Form.Item>
+                    )}
+                  </>
+                );
+              }
+              // rss / federal_reserve_rss / hkex / cninfo → URL
+              return (
                 <Form.Item label="URL" name="url" rules={[{ required: true }]}>
                   <Input placeholder="https://www.federalreserve.gov/feeds/press_monetary.xml" />
                 </Form.Item>
-              )
-            }
+              );
+            }}
           </Form.Item>
           <Form.Item label="默认信息层级" name="default_info_layer">
             <Select
@@ -271,9 +330,20 @@ export function InvestmentSourcesPage() {
           <Form.Item label="抓取频率(秒)" name="poll_interval_seconds">
             <InputNumber min={60} style={{ width: "100%" }} />
           </Form.Item>
-          <Typography.Text type="secondary">
-            注意：SEC 抓取需在服务端配置 <code>SEC_USER_AGENT</code>，FRED 需配置 <code>FRED_API_KEY</code>。缺少时抓取会失败并记录错误，不会生成示例数据。
-          </Typography.Text>
+          <Form.Item shouldUpdate={(prev, cur) => prev.source_type !== cur.source_type} noStyle>
+            {({ getFieldValue }) => {
+              const st = getFieldValue("source_type") as SourceType;
+              const hints: string[] = [];
+              if (st === "sec_edgar") hints.push("SEC 抓取需在服务端配置 SEC_USER_AGENT");
+              if (st === "fred") hints.push("FRED 抓取需在服务端配置 FRED_API_KEY");
+              if (hints.length === 0) return null;
+              return (
+                <Typography.Text type="secondary">
+                  注意：{hints.join("；")}。缺少时抓取会失败并记录错误，不会生成示例数据。
+                </Typography.Text>
+              );
+            }}
+          </Form.Item>
         </Form>
       </Modal>
     </main>

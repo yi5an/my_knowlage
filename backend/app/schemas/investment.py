@@ -342,6 +342,15 @@ class InvestmentDashboardResponse(BaseModel):
     today_macro_count: int
 
 
+class InvestmentDigestResponse(BaseModel):
+    """Daily digest: aggregate counts + curated lists, no LLM generation."""
+
+    counts: InvestmentDashboardResponse
+    today_highlights: list[InvestmentItemResponse] = Field(default_factory=list)
+    pending_claims: list[InvestmentClaimResponse] = Field(default_factory=list)
+    challenged_items: list[InvestmentItemResponse] = Field(default_factory=list)
+
+
 class InvestmentFetchJobResponse(BaseModel):
     """A projection of a ``TaskJob(job_type='investment_fetch')`` row.
 

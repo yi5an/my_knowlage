@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -264,6 +265,33 @@ class InvestmentService:
             stmt = stmt.where(InvestmentItem.action_status == action_status)
         if source_id:
             stmt = stmt.where(InvestmentItem.source_id == source_id)
+        stmt = stmt.order_by(InvestmentItem.published_at.desc().nullslast()).limit(limit)
+        return list(self.session.scalars(stmt))
+
+    def list_macro_calendar(
+        self,
+        workspace_id: str = "ws_default",
+        days: int = 30,
+        importance: str | None = None,
+        limit: int = 100,
+    ) -> list[InvestmentItem]:
+        """Macro-calendar items: ``investment_item`` rows with
+        ``info_layer='macro_calendar'``, filtered to the last ``days`` days and
+        optionally by importance.
+
+        The calendar reuses ``investment_item`` as its data source (rather than
+        the dedicated ``macro_event`` table) so the same fetched Fed/RSS items
+        that feed the dashboard also feed the calendar view (spec decision).
+        """
+        stmt = select(InvestmentItem).where(
+            InvestmentItem.workspace_id == workspace_id,
+            InvestmentItem.info_layer == "macro_calendar",
+        )
+        if importance:
+            stmt = stmt.where(InvestmentItem.importance == importance)
+        if days > 0:
+            cutoff = datetime.now(UTC) - timedelta(days=days)
+            stmt = stmt.where(InvestmentItem.published_at >= cutoff)
         stmt = stmt.order_by(InvestmentItem.published_at.desc().nullslast()).limit(limit)
         return list(self.session.scalars(stmt))
 
@@ -527,4 +555,56 @@ class InvestmentService:
             "theses_challenged_count": theses_challenged,
             "today_primary_count": today_primary,
             "today_macro_count": today_macro,
+        }
+
+    def digest(self, workspace_id: str = "ws_default") -> dict[str, Any]:
+        """Aggregate daily digest: counts + today's highlights + pending claims
+        + challenged items. Pure aggregation over existing rows — no LLM, no
+        separate digest table (spec decision: aggregate view).
+        """
+        counts = self.dashboard(workspace_id)
+        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        today_highlights = list(
+            self.session.scalars(
+                select(InvestmentItem)
+                .where(
+                    InvestmentItem.workspace_id == workspace_id,
+                    InvestmentItem.published_at >= today_start,
+                )
+                .order_by(
+                    # high importance first, then most recent
+                    InvestmentItem.importance.desc(),
+                    InvestmentItem.published_at.desc().nullslast(),
+                )
+                .limit(10)
+            )
+        )
+        pending_claims = list(
+            self.session.scalars(
+                select(InvestmentClaim)
+                .where(
+                    InvestmentClaim.workspace_id == workspace_id,
+                    InvestmentClaim.verification_status == "pending",
+                )
+                .order_by(InvestmentClaim.created_at.desc())
+                .limit(5)
+            )
+        )
+        challenged_items = list(
+            self.session.scalars(
+                select(InvestmentItem)
+                .where(
+                    InvestmentItem.workspace_id == workspace_id,
+                    InvestmentItem.thesis_impact.in_(("weakens", "contradicts")),
+                )
+                .order_by(InvestmentItem.published_at.desc().nullslast())
+                .limit(5)
+            )
+        )
+        return {
+            "counts": counts,
+            "today_highlights": today_highlights,
+            "pending_claims": pending_claims,
+            "challenged_items": challenged_items,
         }
