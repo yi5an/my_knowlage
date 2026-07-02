@@ -11,7 +11,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.infrastructure.database import Base
-from app.infrastructure.models import Document, DocumentChunk, Video, Workspace
+from app.infrastructure.models import (
+    Document,
+    DocumentChunk,
+    InvestmentItem,
+    Video,
+    Workspace,
+)
 from app.schemas.youtube import (
     Chapter,
     KeyPoint,
@@ -170,3 +176,59 @@ def test_summarize_is_idempotent(session: Session) -> None:
     # Running twice does not duplicate video or document rows.
     assert session.query(Video).count() == 1
     assert session.query(Document).count() == 1
+
+
+def test_summary_creates_opinion_investment_item(session: Session) -> None:
+    """A successful summary mirrors into an opinion-layer investment_item."""
+    fetcher = FakeYouTubeFetcher().add_video(_meta())
+    extractor = FakeTranscriptExtractor().with_transcript("dQw4w9WgXcQ", _transcript())
+    orch = _orchestrator(session, fetcher, extractor, _canned_summary())
+
+    result = orch.summarize_url("dQw4w9WgXcQ", workspace_id="ws_default")
+    assert result.succeeded
+
+    items = session.query(InvestmentItem).all()
+    assert len(items) == 1
+    item = items[0]
+    assert item.info_layer == "opinion"
+    assert item.source_credibility == "personal_opinion"
+    assert item.action_status == "pending_review"
+    assert item.source_name == "AI Channel"
+    assert item.source_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    assert item.document_id == result.document_id
+
+
+def test_opinion_item_creation_failure_does_not_break_summary(session: Session) -> None:
+    """If the investment item write raises, the YouTube summary still succeeds."""
+    fetcher = FakeYouTubeFetcher().add_video(_meta())
+    extractor = FakeTranscriptExtractor().with_transcript("dQw4w9WgXcQ", _transcript())
+    orch = _orchestrator(session, fetcher, extractor, _canned_summary())
+
+    # Force InvestmentService.create_item_from_document to blow up.
+    from app.services.investment import service as inv_service
+
+    original = inv_service.InvestmentService.create_item_from_document
+
+    def _boom(self, **kwargs):  # noqa: ANN001, ANN202
+        raise RuntimeError("forced investment failure")
+
+    inv_service.InvestmentService.create_item_from_document = _boom  # type: ignore
+    try:
+        result = orch.summarize_url("dQw4w9WgXcQ", workspace_id="ws_default")
+    finally:
+        inv_service.InvestmentService.create_item_from_document = original  # type: ignore
+
+    assert result.succeeded
+    assert session.query(Document).count() == 1
+    assert session.query(InvestmentItem).count() == 0  # nothing created
+
+
+def test_opinion_item_not_duplicated_on_resummarize(session: Session) -> None:
+    fetcher = FakeYouTubeFetcher().add_video(_meta())
+    extractor = FakeTranscriptExtractor().with_transcript("dQw4w9WgXcQ", _transcript())
+    orch = _orchestrator(session, fetcher, extractor, _canned_summary())
+
+    orch.summarize_url("dQw4w9WgXcQ", workspace_id="ws_default")
+    orch.summarize_url("dQw4w9WgXcQ", workspace_id="ws_default")
+
+    assert session.query(InvestmentItem).count() == 1

@@ -164,6 +164,55 @@ class InvestmentService:
 
     # --- item --------------------------------------------------------------
 
+    def create_item_from_document(
+        self,
+        *,
+        document: object,
+        info_layer: str = "opinion",
+        source_name: str | None = None,
+        source_url: str | None = None,
+    ) -> InvestmentItem | None:
+        """Create an opinion-layer investment item from an existing Document.
+
+        Used by the YouTube pipeline (doc 04 §13): once a video summary
+        Document is persisted, mirror it as an ``info_layer=opinion`` item so
+        it appears in the investment feed. Idempotent via dedupe_key
+        (``youtube|<document_id>``), so re-summarizing the same video never
+        creates a duplicate.
+        """
+        doc_id = getattr(document, "id", None)
+        workspace_id = getattr(document, "workspace_id", None)
+        if not doc_id or not workspace_id:
+            return None
+        title = getattr(document, "title", "") or "(untitled)"
+        url = source_url or getattr(document, "source_uri", None) or ""
+        dedupe_key = compute_dedupe_key("youtube", str(doc_id), url)
+        existing = self.session.scalar(
+            select(InvestmentItem).where(
+                InvestmentItem.workspace_id == workspace_id,
+                InvestmentItem.dedupe_key == dedupe_key,
+            )
+        )
+        if existing is not None:
+            return existing
+        item = InvestmentItem(
+            id=_new_id("inv"),
+            workspace_id=workspace_id,
+            document_id=str(doc_id),
+            dedupe_key=dedupe_key,
+            title=title,
+            source_url=url or None,
+            source_name=source_name,
+            info_layer=info_layer,
+            source_credibility="personal_opinion",
+            action_status="pending_review",
+            raw_payload={"document_id": str(doc_id)},
+        )
+        self.session.add(item)
+        self.session.commit()
+        self.session.refresh(item)
+        return item
+
     def create_item(self, payload: InvestmentItemCreate) -> InvestmentItem:
         dedupe_key = payload.dedupe_key or compute_dedupe_key(
             "manual", payload.title, payload.source_url or payload.title

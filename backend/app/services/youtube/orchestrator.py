@@ -240,6 +240,25 @@ class VideoSummaryOrchestrator:
                     exc,
                 )
 
+        # Mirror the summary into the investment feed as an opinion-layer item
+        # (doc 04 §13). Best-effort: a failure here must NEVER downgrade a
+        # successful YouTube summary. Idempotent via dedupe_key.
+        try:
+            from app.services.investment.service import InvestmentService
+
+            InvestmentService(session=self.session).create_item_from_document(
+                document=document,
+                info_layer="opinion",
+                source_name=getattr(video, "channel_name", None) or "YouTube",
+                source_url=f"https://www.youtube.com/watch?v={meta.video_id}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "investment opinion item creation failed for %s (summary kept): %s",
+                meta.video_id,
+                exc,
+            )
+
         return SummaryJobResult(
             video_id=meta.video_id,
             document_id=document.id,
