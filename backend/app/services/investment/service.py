@@ -39,6 +39,7 @@ from app.schemas.investment import (
     InvestmentWatchlistCreate,
     InvestmentWatchlistUpdate,
 )
+from app.services.investment.repositories import InvestmentSourceRepository
 
 INVESTMENT_FETCH_JOB_TYPE = "investment_fetch"
 
@@ -156,6 +157,10 @@ class InvestmentService:
         self.session.commit()
         self.session.refresh(src)
         return src
+
+    def list_due_sources(self, now: datetime) -> list[InvestmentSource]:
+        """Enabled sources whose next_poll_at is due (or never polled)."""
+        return InvestmentSourceRepository(self.session).list_due_sources(now)
 
     # --- item --------------------------------------------------------------
 

@@ -105,8 +105,27 @@ def _build_task_worker_scheduler() -> IntervalScheduler | None:
     )
 
 
+def _build_investment_scheduler() -> IntervalScheduler | None:
+    """Wire the investment source polling scheduler.
+
+    Returns None when disabled (``INVESTMENT_SCHEDULER_ENABLED=false``) so the
+    app still starts cleanly. Each tick scans due sources and enqueues
+    ``investment_fetch`` TaskJob rows; the real fetch is done by the worker via
+    ``InvestmentFetchJobHandler``.
+    """
+    from app.services.investment.scheduler import build_investment_scheduler
+
+    return build_investment_scheduler()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Register the investment fetch handler before the worker scheduler starts
+    # so the generic TaskJobProcessor can dispatch investment_fetch jobs.
+    from app.services.investment.fetch_job_handler import register as register_investment_handler
+
+    register_investment_handler()
+
     scheduler = _build_polling_scheduler()
     if scheduler is not None:
         scheduler.start()
@@ -115,9 +134,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if task_worker_scheduler is not None:
         task_worker_scheduler.start()
         app.state.task_worker_scheduler = task_worker_scheduler
+    investment_scheduler = _build_investment_scheduler()
+    if investment_scheduler is not None:
+        investment_scheduler.start()
+        app.state.investment_scheduler = investment_scheduler
     try:
         yield
     finally:
+        investment_to_stop = getattr(app.state, "investment_scheduler", None)
+        if investment_to_stop is not None:
+            investment_to_stop.stop()
         task_worker_to_stop = getattr(app.state, "task_worker_scheduler", None)
         if task_worker_to_stop is not None:
             task_worker_to_stop.stop()
