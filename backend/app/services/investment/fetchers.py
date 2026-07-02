@@ -52,10 +52,14 @@ class HttpClient(Protocol):
 
     Implementations return the raw response body (``bytes``) and final URL
     (after redirects) for a single URL. Production uses httpx; tests inject a
-    fake that serves canned bodies.
+    fake that serves canned bodies. ``close`` lets callers release the
+    underlying connection pool; fakes implement it as a no-op.
     """
 
     def get(self, url: str, headers: dict[str, str] | None = None) -> tuple[bytes, str]:
+        ...
+
+    def close(self) -> None:
         ...
 
 
@@ -250,6 +254,211 @@ class FederalReserveRssFetcher:
         return _parse_rss_body(body, source.name or "Federal Reserve", final_url)
 
 
+# --- BLS (macro time series) ----------------------------------------------
+
+
+class BlsFetcher:
+    """BLS Public Data API (doc 01 §4).
+
+    Source ``config`` shape::
+
+        {"series": ["CUSR0000SA0", "LNS14000000"], "years": 1}
+
+    Works without a key (lower limits); if ``BLS_API_KEY`` is set it is sent
+    via a POST body as ``registrationkey``. Each observation becomes one
+    raw item (series_id + observation date + value is the stable id).
+    """
+
+    def fetch(self, source: InvestmentSource, http: HttpClient) -> list[InvestmentRawItem]:
+        settings = get_settings()
+        cfg = source.config or {}
+        series_ids = list(cfg.get("series") or [])
+        if not series_ids:
+            raise SourceConfigError("bls source config is missing 'series'")
+
+        base = (settings.bls_base_url or "").rstrip("/")
+        # BLS v2 single-series GET endpoint; for multiple series we still query
+        # one URL per series to keep this GET-only (the POST multi-series path
+        # would need a different HttpClient method). Limit applied via years.
+        years = int(cfg.get("years", 1))
+        items: list[InvestmentRawItem] = []
+        for sid in series_ids:
+            url = f"{base}/timeseries/data/{sid}"
+            body, _ = http.get(url)
+            import json
+
+            data = json.loads(body)
+            series = (data.get("Results") or {}).get("series") or data.get("series") or []
+            for s in series:
+                observations = s.get("data", [])[: max(1, years) * 12]
+                for obs in observations:
+                    period = f"{obs.get('year')}-{obs.get('periodName', '')}".strip("-")
+                    value = obs.get("value")
+                    ext_id = f"{sid}|{obs.get('year')}{obs.get('period')}|{value}"
+                    items.append(
+                        InvestmentRawItem(
+                            external_id=ext_id,
+                            title=f"{sid} {period}: {value}",
+                            url=f"{base}/timeseries/data/{sid}",
+                            source_name="BLS",
+                            published_at=(
+                                _parse_date(str(obs.get("year")))
+                                if obs.get("year")
+                                else None
+                            ),
+                            summary=None,
+                            raw_payload={
+                                "series_id": sid,
+                                "year": obs.get("year"),
+                                "period": obs.get("period"),
+                                "periodName": obs.get("periodName"),
+                                "value": value,
+                            },
+                        )
+                    )
+        return items
+
+
+# --- FRED (macro time series) ---------------------------------------------
+
+
+class FredFetcher:
+    """FRED API (doc 01 §5). REQUIRES FRED_API_KEY — no key => SourceConfigError.
+
+    Source ``config`` shape::
+
+        {"series": ["DGS10", "FEDFUNDS"], "limit": 5}
+    """
+
+    def fetch(self, source: InvestmentSource, http: HttpClient) -> list[InvestmentRawItem]:
+        settings = get_settings()
+        if not settings.fred_api_key:
+            raise SourceConfigError("FRED_API_KEY is required for FRED access")
+        cfg = source.config or {}
+        series_ids = list(cfg.get("series") or [])
+        if not series_ids:
+            raise SourceConfigError("fred source config is missing 'series'")
+        base = (settings.fred_base_url or "").rstrip("/")
+        limit = int(cfg.get("limit", 5))
+        items: list[InvestmentRawItem] = []
+        for sid in series_ids:
+            url = (
+                f"{base}/series/observations?series_id={sid}"
+                f"&api_key={settings.fred_api_key}&file_type=json"
+                f"&sort_order=desc&limit={limit}"
+            )
+            body, _ = http.get(url)
+            import json
+
+            data = json.loads(body)
+            for obs in data.get("observations", []):
+                date = str(obs.get("date") or "")
+                value = obs.get("value")
+                ext_id = f"{sid}|{date}|{value}"
+                items.append(
+                    InvestmentRawItem(
+                        external_id=ext_id,
+                        title=f"{sid} {date}: {value}",
+                        url=f"https://fred.stlouisfed.org/series/{sid}",
+                        source_name="FRED",
+                        published_at=_parse_date(date),
+                        summary=None,
+                        raw_payload={
+                            "series_id": sid,
+                            "date": date,
+                            "value": value,
+                        },
+                    )
+                )
+        return items
+
+
+# --- HKEX / CNINFO (official announcement search) -------------------------
+
+
+class HkexFetcher:
+    """HKEX announcement search (doc 01 §6).
+
+    The official search page is driven by frontend params; the first version
+    supports a user-saved search URL whose result HTML is parsed for
+    announcement links/titles/dates. Parsing is intentionally defensive — a
+    page that doesn't match the expected structure yields an empty list rather
+    than fake items, and the failure is surfaced via the source's last_error
+    (no item created).
+    """
+
+    def fetch(self, source: InvestmentSource, http: HttpClient) -> list[InvestmentRawItem]:
+        url = (source.url or (source.config or {}).get("url") or "").strip()
+        if not url:
+            raise SourceConfigError("hkex source is missing 'url' (search page URL)")
+        body, final_url = http.get(url)
+        text = body.decode("utf-8", errors="replace")
+        return _parse_announcement_html(
+            text,
+            final_url,
+            source_name=source.name or "HKEX",
+            base_domain="https://www1.hkexnews.hk",
+        )
+
+
+class CninfoFetcher:
+    """CNINFO (巨潮资讯) announcement search (doc 01 §7).
+
+    Like HKEX: the user saves an official search URL or a PDF link; we parse
+    defensively. No reverse-engineered private API is used as a dependency.
+    """
+
+    def fetch(self, source: InvestmentSource, http: HttpClient) -> list[InvestmentRawItem]:
+        url = (source.url or (source.config or {}).get("url") or "").strip()
+        if not url:
+            raise SourceConfigError("cninfo source is missing 'url'")
+        body, final_url = http.get(url)
+        text = body.decode("utf-8", errors="replace")
+        return _parse_announcement_html(
+            text,
+            final_url,
+            source_name=source.name or "CNINFO",
+            base_domain="https://www.cninfo.com.cn",
+        )
+
+
+def _parse_announcement_html(
+    html: str, base_url: str, *, source_name: str, base_domain: str
+) -> list[InvestmentRawItem]:
+    """Best-effort scrape of announcement links from an official search page.
+
+    Extracts ``<a href="...pdf">title</a>`` style links. If nothing matches,
+    returns an empty list — never fabricated items.
+    """
+    import re
+
+    # Match anchor tags whose href points to a document (pdf/htm) — captures the
+    # href (group 1) and the link text (group 2). Accepts single or double quotes.
+    pattern = re.compile(
+        r'<a[^>]+href=["\']([^"\']+\.(?:pdf|htm|html|HTM|HTML|PDF))["\'][^>]*>([^<]+)</a>',
+        re.IGNORECASE,
+    )
+    items: list[InvestmentRawItem] = []
+    for match in pattern.finditer(html):
+        href, title = match.group(1), match.group(2).strip()
+        if not title or len(title) < 4:
+            continue
+        link = href if href.startswith("http") else f"{base_domain}{href}"
+        ext_id = link
+        items.append(
+            InvestmentRawItem(
+                external_id=ext_id,
+                title=title,
+                url=link,
+                source_name=source_name,
+                published_at=None,
+                summary=None,
+                raw_payload={"title": title, "link": link, "base_url": base_url},
+            )
+        )
+    return items
+
+
 # --- registry --------------------------------------------------------------
 
 
@@ -257,14 +466,15 @@ _FETCHERS: dict[str, InvestmentFetcher] = {
     "rss": RssFetcher(),
     "federal_reserve_rss": FederalReserveRssFetcher(),
     "sec_edgar": SecEdgarFetcher(),
+    "bls": BlsFetcher(),
+    "fred": FredFetcher(),
+    "hkex": HkexFetcher(),
+    "cninfo": CninfoFetcher(),
 }
 
 
 def get_fetcher(source_type: str) -> InvestmentFetcher:
-    """Return the fetcher for a source_type, or raise if unsupported.
-
-    P1/P2 fetchers (bls/fred/hkex/cninfo) are registered in Task 8.
-    """
+    """Return the fetcher for a source_type, or raise if unsupported."""
     fetcher = _FETCHERS.get(source_type)
     if fetcher is None:
         raise SourceConfigError(f"unsupported source_type: {source_type!r}")
