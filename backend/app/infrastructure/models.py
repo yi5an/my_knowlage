@@ -550,3 +550,165 @@ class Video(TimestampMixin, Base):
     )
     error_message: Mapped[str | None] = mapped_column(Text())
     metadata_: Mapped[JsonObject] = mapped_column("metadata", JsonType, default=dict)
+
+
+# ---------------------------------------------------------------------------
+# Investment information system
+# ---------------------------------------------------------------------------
+
+
+class InvestmentWatchlist(UpdatedTimestampMixin, Base):
+    """A subject under observation (stock / macro theme / company)."""
+
+    __tablename__ = "investment_watchlist"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    watch_type: Mapped[str] = mapped_column(String(32), default="stock", server_default="stock")
+    ticker: Mapped[str | None] = mapped_column(String(64))
+    exchange: Mapped[str | None] = mapped_column(String(32))
+    keywords: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    importance: Mapped[str] = mapped_column(String(32), default="medium", server_default="medium")
+    notes: Mapped[str | None] = mapped_column(Text())
+    enabled: Mapped[bool] = mapped_column(Boolean(), default=True, server_default="true")
+
+
+class InvestmentSource(UpdatedTimestampMixin, Base):
+    """Configuration for a real data source (RSS / SEC / Fed / BLS / FRED / HKEX / CNINFO)."""
+
+    __tablename__ = "investment_source"
+    __table_args__ = (Index("idx_investment_source_due", "enabled", "next_poll_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str | None] = mapped_column(Text())
+    config: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
+    default_info_layer: Mapped[str] = mapped_column(
+        String(32), default="news", server_default="news"
+    )
+    default_watchlist_ids: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    poll_interval_seconds: Mapped[int] = mapped_column(Integer, default=3600, server_default="3600")
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text())
+    enabled: Mapped[bool] = mapped_column(Boolean(), default=True, server_default="true")
+
+
+class InvestmentItem(UpdatedTimestampMixin, Base):
+    """A single investment information entry — the main feed table.
+
+    The ``importance`` / ``impact_direction`` / ``impact_horizon`` / ``thesis_impact``
+    fields are the user-confirmed values. Auto-classification only ever writes the
+    ``suggested_*`` shadow fields plus ``classification_reason``; it never overwrites
+    the confirmed fields (spec §6.1 / doc §17.3).
+    """
+
+    __tablename__ = "investment_item"
+    __table_args__ = (
+        Index(
+            "idx_investment_item_workspace_layer_status",
+            "workspace_id",
+            "info_layer",
+            "action_status",
+        ),
+        UniqueConstraint("workspace_id", "dedupe_key", name="uq_investment_item_dedupe"),
+        Index("idx_investment_item_published", "workspace_id", "published_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("document.id"))
+    source_id: Mapped[str | None] = mapped_column(ForeignKey("investment_source.id"))
+    dedupe_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(Text(), nullable=False)
+    source_url: Mapped[str | None] = mapped_column(Text())
+    source_name: Mapped[str | None] = mapped_column(String(255))
+    info_layer: Mapped[str] = mapped_column(String(32), default="news", server_default="news")
+    source_credibility: Mapped[str] = mapped_column(
+        String(32), default="unverified", server_default="unverified"
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summary: Mapped[str | None] = mapped_column(Text())
+    importance: Mapped[str] = mapped_column(String(32), default="medium", server_default="medium")
+    impact_direction: Mapped[str] = mapped_column(
+        String(32), default="neutral", server_default="neutral"
+    )
+    impact_horizon: Mapped[str] = mapped_column(
+        String(32), default="unknown", server_default="unknown"
+    )
+    thesis_impact: Mapped[str] = mapped_column(
+        String(32), default="unknown", server_default="unknown"
+    )
+    action_status: Mapped[str] = mapped_column(
+        String(32), default="pending_review", server_default="pending_review"
+    )
+    review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    raw_payload: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
+    # Auto-classified suggestions (never overwrite the confirmed fields above).
+    suggested_importance: Mapped[str | None] = mapped_column(String(32))
+    suggested_impact_direction: Mapped[str | None] = mapped_column(String(32))
+    suggested_impact_horizon: Mapped[str | None] = mapped_column(String(32))
+    suggested_thesis_impact: Mapped[str | None] = mapped_column(String(32))
+    classification_reason: Mapped[str | None] = mapped_column(Text())
+
+
+class InvestmentThesis(UpdatedTimestampMixin, Base):
+    """An investment hypothesis tied to a watchlist."""
+
+    __tablename__ = "investment_thesis"
+    __table_args__ = (Index("idx_investment_thesis_watchlist", "workspace_id", "watchlist_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    watchlist_id: Mapped[str | None] = mapped_column(ForeignKey("investment_watchlist.id"))
+    title: Mapped[str] = mapped_column(Text(), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text())
+    status: Mapped[str] = mapped_column(String(32), default="open", server_default="open")
+    confidence: Mapped[str] = mapped_column(String(32), default="medium", server_default="medium")
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class InvestmentClaim(UpdatedTimestampMixin, Base):
+    """A claim/claim-to-verify, possibly sourced from an opinion-layer item."""
+
+    __tablename__ = "investment_claim"
+    __table_args__ = (
+        Index("idx_investment_claim_status", "workspace_id", "verification_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    source_item_id: Mapped[str | None] = mapped_column(ForeignKey("investment_item.id"))
+    watchlist_id: Mapped[str | None] = mapped_column(ForeignKey("investment_watchlist.id"))
+    thesis_id: Mapped[str | None] = mapped_column(ForeignKey("investment_thesis.id"))
+    claim_text: Mapped[str] = mapped_column(Text(), nullable=False)
+    required_evidence: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    verification_status: Mapped[str] = mapped_column(
+        String(32), default="pending", server_default="pending"
+    )
+    verification_summary: Mapped[str | None] = mapped_column(Text())
+    evidence_doc_ids: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+
+
+class MacroEvent(UpdatedTimestampMixin, Base):
+    """A macro data point (CPI / rate / employment ...) for the calendar view."""
+
+    __tablename__ = "macro_event"
+    __table_args__ = (Index("idx_macro_event_workspace", "workspace_id", "event_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    title: Mapped[str] = mapped_column(Text(), nullable=False)
+    source_name: Mapped[str | None] = mapped_column(String(255))
+    source_url: Mapped[str | None] = mapped_column(Text())
+    importance: Mapped[str] = mapped_column(String(32), default="medium", server_default="medium")
+    impact_horizon: Mapped[str] = mapped_column(String(32), default="mid", server_default="mid")
+    event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    value: Mapped[str | None] = mapped_column(String(128))
+    unit: Mapped[str | None] = mapped_column(String(64))
+    raw_payload: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
