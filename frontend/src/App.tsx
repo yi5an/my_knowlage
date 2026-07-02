@@ -6,6 +6,7 @@ import {
   ControlOutlined,
   DashboardOutlined,
   FileSearchOutlined,
+  FundProjectionScreenOutlined,
   NodeIndexOutlined,
   ReadOutlined,
   SearchOutlined,
@@ -23,6 +24,14 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { EntityPage } from "./pages/EntityPage";
 import { GraphPage } from "./pages/GraphPage";
 import { ImportPage } from "./pages/ImportPage";
+import { InvestmentCalendarPage } from "./pages/InvestmentCalendarPage";
+import { InvestmentClaimsPage } from "./pages/InvestmentClaimsPage";
+import { InvestmentDashboardPage } from "./pages/InvestmentDashboardPage";
+import { InvestmentDigestPage } from "./pages/InvestmentDigestPage";
+import { InvestmentItemsPage } from "./pages/InvestmentItemsPage";
+import { InvestmentSourcesPage } from "./pages/InvestmentSourcesPage";
+import { InvestmentThesesPage } from "./pages/InvestmentThesesPage";
+import { InvestmentWatchlistPage } from "./pages/InvestmentWatchlistPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { NotebookPage } from "./pages/NotebookPage";
 import { ReaderPage } from "./pages/ReaderPage";
@@ -46,6 +55,14 @@ const navItems: MenuProps["items"] = [
   { key: "/search", icon: <SearchOutlined />, label: <Link to="/search">搜索</Link> },
   { key: "/research", icon: <FileSearchOutlined />, label: <Link to="/research">研究</Link> },
   { key: "/entity", icon: <StockOutlined />, label: <Link to="/entity">实体</Link> },
+  { key: "/investment", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment">投资工作台</Link> },
+  { key: "/investment/watchlist", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/watchlist">观察对象</Link> },
+  { key: "/investment/items", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/items">投资信息</Link> },
+  { key: "/investment/sources", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/sources">投资数据源</Link> },
+  { key: "/investment/claims", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/claims">待验证观点</Link> },
+  { key: "/investment/theses", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/theses">投资假设</Link> },
+  { key: "/investment/calendar", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/calendar">宏观日历</Link> },
+  { key: "/investment/digest", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/digest">每日简报</Link> },
   { key: "/notebooklm", icon: <ApiOutlined />, label: <Link to="/notebooklm">NotebookLM</Link> },
   { key: "/settings", icon: <SettingOutlined />, label: <Link to="/settings">设置</Link> },
 ];
@@ -119,6 +136,14 @@ export function App() {
             <Route path="/research" element={<ResearchPage />} />
             <Route path="/entity" element={<EntityPage />} />
             <Route path="/entity/:entityId" element={<EntityPage />} />
+            <Route path="/investment" element={<InvestmentDashboardPage />} />
+            <Route path="/investment/watchlist" element={<InvestmentWatchlistPage />} />
+            <Route path="/investment/items" element={<InvestmentItemsPage />} />
+            <Route path="/investment/sources" element={<InvestmentSourcesPage />} />
+            <Route path="/investment/claims" element={<InvestmentClaimsPage />} />
+            <Route path="/investment/theses" element={<InvestmentThesesPage />} />
+            <Route path="/investment/calendar" element={<InvestmentCalendarPage />} />
+            <Route path="/investment/digest" element={<InvestmentDigestPage />} />
             <Route path="/notebooklm" element={<NotebookPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
