@@ -226,6 +226,8 @@ class InvestmentItemResponse(BaseModel):
     published_at: datetime | None = None
     event_at: datetime | None = None
     summary: str | None = None
+    title_zh: str | None = None
+    summary_zh: str | None = None
     importance: str
     impact_direction: str
     impact_horizon: str
@@ -349,6 +351,27 @@ class InvestmentDigestResponse(BaseModel):
     today_highlights: list[InvestmentItemResponse] = Field(default_factory=list)
     pending_claims: list[InvestmentClaimResponse] = Field(default_factory=list)
     challenged_items: list[InvestmentItemResponse] = Field(default_factory=list)
+
+
+# --- LLM translation contract --------------------------------------------
+
+
+class InvestmentTranslationItem(BaseModel):
+    """One item's Chinese translation in the batch LLM output."""
+
+    item_id: str
+    title_zh: str
+    summary_zh: str | None = None
+
+
+class InvestmentTranslationSchema(BaseModel):
+    """Batch structured-output contract for the translation LLM call.
+
+    One call translates up to N items at once (cheaper than per-item calls),
+    mirroring the batch pattern of ``EntityTranslationResult``.
+    """
+
+    translations: list[InvestmentTranslationItem] = Field(default_factory=list)
 
 
 class InvestmentFetchJobResponse(BaseModel):

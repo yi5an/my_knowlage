@@ -634,6 +634,11 @@ class InvestmentItem(UpdatedTimestampMixin, Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     summary: Mapped[str | None] = mapped_column(Text())
+    # Chinese translations of title/summary (filled asynchronously by the
+    # investment_translation job). Nullable: untranslated items show the
+    # original-language title/summary (frontend falls back to title/summary).
+    title_zh: Mapped[str | None] = mapped_column(Text())
+    summary_zh: Mapped[str | None] = mapped_column(Text())
     importance: Mapped[str] = mapped_column(String(32), default="medium", server_default="medium")
     impact_direction: Mapped[str] = mapped_column(
         String(32), default="neutral", server_default="neutral"

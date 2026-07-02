@@ -104,7 +104,7 @@ export function InvestmentItemsPage() {
               setDrawerOpen(true);
             }}
           >
-            {r.title}
+            {r.title_zh ?? r.title}
           </Typography.Link>
           {r.source_url && (
             <Typography.Link ellipsis style={{ fontSize: 12, maxWidth: 320 }}>

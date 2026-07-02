@@ -105,7 +105,7 @@ export function InvestmentDigestPage() {
                         title={
                           <Space wrap>
                             <InfoLayerTag layer={item.info_layer} />
-                            <span>{item.title}</span>
+                            <span>{item.title_zh ?? item.title}</span>
                           </Space>
                         }
                         description={
@@ -161,7 +161,7 @@ export function InvestmentDigestPage() {
                         title={
                           <Space wrap>
                             <ImpactTag direction={item.impact_direction} />
-                            <span>{item.title}</span>
+                            <span>{item.title_zh ?? item.title}</span>
                           </Space>
                         }
                         description={

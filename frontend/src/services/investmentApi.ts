@@ -53,6 +53,8 @@ export interface InvestmentItem {
   published_at?: string | null;
   event_at?: string | null;
   summary?: string | null;
+  title_zh?: string | null;
+  summary_zh?: string | null;
   importance: Importance;
   impact_direction: ImpactDirection;
   impact_horizon: ImpactHorizon;

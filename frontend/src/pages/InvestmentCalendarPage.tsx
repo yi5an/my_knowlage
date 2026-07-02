@@ -146,15 +146,15 @@ export function InvestmentCalendarPage() {
                             {item.source_name && <Tag>{item.source_name}</Tag>}
                           </Space>
                           <div style={{ marginTop: 4 }}>
-                            <Typography.Text>{item.title}</Typography.Text>
+                            <Typography.Text>{item.title_zh ?? item.title}</Typography.Text>
                           </div>
-                          {item.summary && (
+                          {(item.summary_zh ?? item.summary) && (
                             <Typography.Paragraph
                               type="secondary"
                               ellipsis={{ rows: 2 }}
                               style={{ marginTop: 4, marginBottom: 0 }}
                             >
-                              {item.summary}
+                              {item.summary_zh ?? item.summary}
                             </Typography.Paragraph>
                           )}
                         </div>

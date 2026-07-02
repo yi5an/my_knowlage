@@ -316,6 +316,25 @@ async def classify_item(
     return InvestmentItemResponse.model_validate(item)
 
 
+@router.post("/items/translate")
+async def translate_items(
+    workspace_id: str = "ws_default",
+    limit: int = Query(default=20, ge=1, le=100),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> dict[str, int]:
+    """Manually translate up to ``limit`` untranslated items to Chinese.
+
+    The fetch pipeline already auto-enqueues a translation job after each
+    successful fetch; this endpoint lets a user retry/refresh translations
+    on demand (e.g. after configuring an LLM key).
+    """
+    return service.translate_items(
+        workspace_id=workspace_id,
+        limit=limit,
+        llm_client=_build_llm_client(),
+    )
+
+
 @router.post("/claims/{claim_id}/verify", response_model=InvestmentClaimResponse)
 async def verify_claim(
     claim_id: str,

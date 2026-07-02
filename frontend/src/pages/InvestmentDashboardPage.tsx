@@ -117,7 +117,7 @@ export function InvestmentDashboardPage() {
                     title={
                       <Space>
                         <InfoLayerTag layer={item.info_layer} />
-                        <span>{item.title}</span>
+                        <span>{item.title_zh ?? item.title}</span>
                       </Space>
                     }
                     description={

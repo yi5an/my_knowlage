@@ -16,7 +16,9 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.infrastructure.models import InvestmentSource, TaskJob
@@ -34,6 +36,11 @@ from app.services.investment.repositories import (
 logger = logging.getLogger(__name__)
 
 INVESTMENT_FETCH_JOB_TYPE = "investment_fetch"
+INVESTMENT_TRANSLATION_JOB_TYPE = "investment_translation"
+
+
+def _new_job_id() -> str:
+    return f"job_{uuid4().hex}"
 
 
 class InvestmentFetchJobHandler:
@@ -91,6 +98,12 @@ class InvestmentFetchJobHandler:
         InvestmentSourceRepository(session).mark_polled(source, success=True)
         session.commit()
 
+        # If new items were created, enqueue a translation job so their (often
+        # English) title/summary get translated to Chinese. Guard against
+        # double-enqueue: skip if a pending/running translation job exists.
+        if created > 0:
+            _enqueue_translation(session, source)
+
         logger.info(
             "investment fetch: source %s -> %d seen, %d created, %d skipped",
             source.id,
@@ -101,20 +114,53 @@ class InvestmentFetchJobHandler:
         return {"items_seen": seen, "items_created": created, "items_skipped": skipped}
 
 
+def _enqueue_translation(session: Session, source: InvestmentSource) -> None:
+    """Insert a pending ``investment_translation`` TaskJob for the source.
+
+    Idempotent: if there is already a pending/running translation job, do
+    nothing (the existing one will cover the new items, or a later fetch will
+    enqueue another once it completes).
+    """
+    existing = session.scalar(
+        select(TaskJob.id).where(
+            TaskJob.job_type == INVESTMENT_TRANSLATION_JOB_TYPE,
+            TaskJob.workspace_id == source.workspace_id,
+            TaskJob.status.in_(("pending", "running")),
+        )
+    )
+    if existing is not None:
+        return
+    session.add(
+        TaskJob(
+            id=_new_job_id(),
+            workspace_id=source.workspace_id,
+            job_type=INVESTMENT_TRANSLATION_JOB_TYPE,
+            target_type="investment_source",
+            target_id=source.id,
+            status="pending",
+            input={"source_id": source.id, "workspace_id": source.workspace_id},
+        )
+    )
+    session.commit()
+
+
 _HANDLER = InvestmentFetchJobHandler()
 
 
 def register() -> None:
-    """Register the investment fetch handler with the task worker.
+    """Register the investment job handlers with the task worker.
 
-    Idempotent. Called from ``main.py`` lifespan (after settings load, before
-    the worker scheduler starts) so the worker picks up ``investment_fetch``
-    jobs without ``task_worker`` importing the investment package at module
-    load (avoids a circular import: investment -> task_worker -> ...).
+    Registers both ``investment_fetch`` and ``investment_translation``. Called
+    from ``main.py`` lifespan. Idempotent. Imports ``task_worker._HANDLERS``
+    lazily to avoid a circular import at module load.
     """
+    from app.services.investment.translation_job_handler import (
+        _HANDLER as _TRANSLATION_HANDLER,
+    )
     from app.services.task_worker import _HANDLERS
 
     _HANDLERS[INVESTMENT_FETCH_JOB_TYPE] = _HANDLER
+    _HANDLERS[INVESTMENT_TRANSLATION_JOB_TYPE] = _TRANSLATION_HANDLER
 
 
 def now_utc() -> datetime:

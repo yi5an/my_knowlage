@@ -428,6 +428,19 @@ class InvestmentService:
             session=self.session, llm_client=llm_client  # type: ignore[arg-type]
         ).classify_item(item_id)
 
+    def translate_items(
+        self,
+        workspace_id: str = "ws_default",
+        limit: int = 20,
+        llm_client: object | None = None,
+    ) -> dict[str, int]:
+        """Translate untranslated items' title/summary to Chinese."""
+        from app.services.investment.translation import InvestmentTranslationService
+
+        return InvestmentTranslationService(
+            session=self.session, llm_client=llm_client  # type: ignore[arg-type]
+        ).translate_untranslated(workspace_id=workspace_id, limit=limit)
+
     def verify_claim(
         self,
         claim_id: str,

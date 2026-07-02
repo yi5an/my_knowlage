@@ -100,7 +100,7 @@ export function InvestmentItemDrawer({
       onClose={onClose}
       title={
         <Space>
-          <span>{item.title}</span>
+          <span>{item.title_zh ?? item.title}</span>
           <InfoLayerTag layer={item.info_layer} />
         </Space>
       }
