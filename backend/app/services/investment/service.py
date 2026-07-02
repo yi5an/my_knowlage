@@ -381,6 +381,45 @@ class InvestmentService:
         self.session.refresh(cl)
         return cl
 
+    # --- classification & verification ------------------------------------
+
+    def classify_item(
+        self, item_id: str, llm_client: object | None = None
+    ) -> object:
+        """Run the GLM-5.2 classifier on an item. Writes suggested_* only.
+
+        ``llm_client`` is optional; when None the classifier cannot run (the
+        caller — API layer — is responsible for assembling the shared
+        structured-output client from settings).
+        """
+        if llm_client is None:
+            raise AppError("config_error", "LLM client is required for classification", 500)
+        from app.services.investment.classifier import InvestmentClassifier
+
+        return InvestmentClassifier(
+            session=self.session, llm_client=llm_client  # type: ignore[arg-type]
+        ).classify_item(item_id)
+
+    def verify_claim(
+        self,
+        claim_id: str,
+        *,
+        rag_service: object | None = None,
+        web_search_client: object | None = None,
+        llm_client: object | None = None,
+    ) -> object:
+        """Verify a claim against local (+ optional web) evidence."""
+        from app.services.investment.claim_verifier import ClaimVerifier
+
+        result = ClaimVerifier(
+            session=self.session,
+            rag_service=rag_service,  # type: ignore[arg-type]
+            web_search_client=web_search_client,  # type: ignore[arg-type]
+            llm_client=llm_client,  # type: ignore[arg-type]
+        ).verify(claim_id)
+        self.session.commit()
+        return result
+
     # --- fetch job (enqueue) ----------------------------------------------
 
     def poll_source(self, source_id: str) -> TaskJob:

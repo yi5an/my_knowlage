@@ -234,3 +234,64 @@ async def get_job(
 
         raise AppError("not_found", "fetch job not found", 404)
     return job
+
+
+# --- classification & verification (LLM-backed) ---------------------------
+
+
+def _build_llm_client() -> object:
+    """Assemble the shared structured-output LLM client from settings."""
+    from app.services.research_dependencies import build_llm_client_from_settings
+
+    return build_llm_client_from_settings()
+
+
+def _build_rag_service() -> object:
+    """Build a RagService on a fresh session for the background verify call."""
+    from app.infrastructure.database import SessionLocal
+    from app.services.rag_dependencies import get_rag_service
+
+    return get_rag_service(session=SessionLocal())
+
+
+def _build_web_search_client() -> object | None:
+    from app.services.research_dependencies import build_web_client_from_settings
+
+    client = build_web_client_from_settings()
+    # Production must not manufacture evidence from a mock; the verifier
+    # detects MockWebSearchClient and skips web evidence in that case.
+    return client
+
+
+@router.post("/items/{item_id}/classify", response_model=InvestmentItemResponse)
+async def classify_item(
+    item_id: str,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentItemResponse:
+    """Run the GLM-5.2 classifier. Writes suggested_* only (no overwrite)."""
+    service.classify_item(item_id, llm_client=_build_llm_client())
+    from sqlalchemy.orm import object_session
+
+    from app.infrastructure.models import InvestmentItem
+
+    item = service.session.get(InvestmentItem, item_id)
+    _ = object_session  # noqa: F841 — keep import referenced for clarity
+    return InvestmentItemResponse.model_validate(item)
+
+
+@router.post("/claims/{claim_id}/verify", response_model=InvestmentClaimResponse)
+async def verify_claim(
+    claim_id: str,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentClaimResponse:
+    """Verify a claim against local (+ optional web) evidence."""
+    service.verify_claim(
+        claim_id,
+        rag_service=_build_rag_service(),
+        web_search_client=_build_web_search_client(),
+        llm_client=_build_llm_client(),
+    )
+    from app.infrastructure.models import InvestmentClaim
+
+    claim = service.session.get(InvestmentClaim, claim_id)
+    return InvestmentClaimResponse.model_validate(claim)
