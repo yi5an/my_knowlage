@@ -81,6 +81,30 @@ class Settings(BaseSettings):
     # Whether to use ASR at all. Auto-enabled when asr_api_key is present.
     asr_audio_workspace: str = Field(default="./storage/asr", alias="ASR_AUDIO_WORKSPACE")
 
+    # --- Investment information system -------------------------------------
+    # Real data sources (SEC EDGAR / Fed RSS / BLS / FRED). Production MUST NOT
+    # use mock data: when a required key/UA is missing the corresponding fetcher
+    # raises SourceConfigError rather than emitting fake items (doc 01 §9).
+    investment_scheduler_enabled: bool = Field(
+        default=True, alias="INVESTMENT_SCHEDULER_ENABLED"
+    )
+    investment_poll_interval_seconds: int = Field(
+        default=60, alias="INVESTMENT_POLL_INTERVAL_SECONDS"
+    )
+    investment_http_timeout_seconds: int = Field(
+        default=30, alias="INVESTMENT_HTTP_TIMEOUT_SECONDS"
+    )
+    sec_user_agent: str | None = Field(default=None, alias="SEC_USER_AGENT")
+    sec_max_requests_per_second: int = Field(default=5, alias="SEC_MAX_REQUESTS_PER_SECOND")
+    fred_api_key: str | None = Field(default=None, alias="FRED_API_KEY")
+    fred_base_url: str = Field(
+        default="https://api.stlouisfed.org/fred", alias="FRED_BASE_URL"
+    )
+    bls_api_key: str | None = Field(default=None, alias="BLS_API_KEY")
+    bls_base_url: str = Field(
+        default="https://api.bls.gov/publicAPI/v2", alias="BLS_BASE_URL"
+    )
+
     model_config = SettingsConfigDict(
         env_file="../.env",
         env_file_encoding="utf-8",
