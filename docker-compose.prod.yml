@@ -1,0 +1,58 @@
+# Production deployment for KnowPilot.
+#
+# Architecture:
+#   frontend (nginx)  :80  -> serves SPA, reverse-proxies /api -> backend:8010
+#   backend  (uvicorn)      -> runs FastAPI app + schedulers (YouTube poll, task worker)
+#
+# Database: reuses the existing Postgres on the host (172.16.28.250:5432),
+#           configured via DATABASE_URL in .env. No postgres/redis containers here.
+#
+# Usage on the server:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml logs -f
+#   docker compose -f docker-compose.prod.yml down
+#
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: knowpilot-backend
+    env_file:
+      - .env
+    environment:
+      # YouTube/Google APIs are not directly reachable from the server network.
+      # Route backend HTTP clients through the host proxy; keep private/local
+      # services (Postgres, local LLM, Tavily proxy) on the direct path.
+      YOUTUBE_PROXY_URL: ${YOUTUBE_PROXY_URL:-http://host.docker.internal:7890}
+      HTTP_PROXY: ${HTTP_PROXY:-http://host.docker.internal:7890}
+      HTTPS_PROXY: ${HTTPS_PROXY:-http://host.docker.internal:7890}
+      ALL_PROXY: ${ALL_PROXY:-http://host.docker.internal:7890}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,172.16.28.250,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,backend,frontend,postgres,redis,museum_pg,tavily-proxy}
+      http_proxy: ${HTTP_PROXY:-http://host.docker.internal:7890}
+      https_proxy: ${HTTPS_PROXY:-http://host.docker.internal:7890}
+      all_proxy: ${ALL_PROXY:-http://host.docker.internal:7890}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,172.16.28.250,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,backend,frontend,postgres,redis,museum_pg,tavily-proxy}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - backend_storage:/app/storage
+    # Bind to loopback only for direct debugging; nginx reaches it via the
+    # compose network using the service name.
+    ports:
+      - "127.0.0.1:8010:8010"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: knowpilot-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend_storage:

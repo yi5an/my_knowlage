@@ -26,8 +26,8 @@ from app.schemas.entities import (
     AutoMergeRequest,
     AutoMergeResponse,
     EntityMergePair,
-    EntityMergeResponse,
     EntityMergeRequest,
+    EntityMergeResponse,
 )
 from app.services.entity_resolution import _token_overlap
 from app.services.structured_output import StructuredOutputClient

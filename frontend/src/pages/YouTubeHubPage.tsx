@@ -25,6 +25,7 @@ import {
 import {
   listSummaries,
   pollSummaryUntilDone,
+  retryVideo,
   summarizeVideo,
   type SummaryListItem,
 } from "../services/youtubeApi";
@@ -37,6 +38,7 @@ export function YouTubeHubPage() {
   const [busy, setBusy] = useState(false);
   const [summaries, setSummaries] = useState<SummaryListItem[]>([]);
   const [listLoading, setListLoading] = useState(true);
+  const [retrying, setRetrying] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setListLoading(true);
@@ -71,6 +73,36 @@ export function YouTubeHubPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleRetry(item: SummaryListItem) {
+    if (!item.video_id) return;
+    setRetrying((prev) => ({ ...prev, [item.video_id]: true }));
+    try {
+      await retryVideo(item.video_id);
+      message.success("已重新提交，后台处理中。");
+      listSummaries("ws_default", 50).then(setSummaries).catch(() => {});
+    } catch (e) {
+      message.error("重新处理失败:" + String(e));
+    } finally {
+      setRetrying((prev) => ({ ...prev, [item.video_id]: false }));
+    }
+  }
+
+  function statusTag(item: SummaryListItem) {
+    if (item.summary_status === "completed" && item.tldr) return null;
+    // Permanently inaccessible (members-only / private / deleted / geo-blocked).
+    // Distinct from "转写失败" so the user knows not to retry.
+    if (item.summary_status === "access_denied")
+      return <Tag color="default">无访问权限</Tag>;
+    if (item.summary_status === "failed") {
+      if (item.failure_stage === "capture") return <Tag color="red">采集失败</Tag>;
+      if (item.failure_stage === "transcript") return <Tag color="red">转写失败</Tag>;
+      return <Tag color="red">总结失败</Tag>;
+    }
+    if (item.failure_stage === "pending") return <Tag color="warning">待重试</Tag>;
+    if (item.summary_status === "no_transcript") return <Tag color="orange">无字幕</Tag>;
+    return <Tag color="processing">处理中</Tag>;
   }
 
   return (
@@ -125,67 +157,101 @@ export function YouTubeHubPage() {
             ) : (
               <List
                 dataSource={summaries}
-                renderItem={(item) => (
-                  <List.Item key={item.document_id}>
-                    <List.Item.Meta
-                      avatar={
-                        item.thumbnail_url ? (
-                          <img
-                            src={item.thumbnail_url}
-                            alt={item.title}
-                            style={{ width: 96, borderRadius: 6 }}
-                          />
-                        ) : (
-                          <YoutubeOutlined style={{ fontSize: 32 }} />
-                        )
+                renderItem={(item) => {
+                  const isFailed = item.summary_status === "failed";
+                  const isReady = item.summary_status === "completed" && item.tldr;
+                  return (
+                    <List.Item
+                      key={item.document_id || item.video_id}
+                      actions={
+                        item.retryable
+                          ? [
+                              <Button
+                                key="retry"
+                                size="small"
+                                loading={!!retrying[item.video_id]}
+                                onClick={() => void handleRetry(item)}
+                              >
+                                重新处理
+                              </Button>,
+                            ]
+                          : undefined
                       }
-                      title={
-                        <Space size={6}>
-                          {item.is_unread && (
-                            <StarFilled
-                              style={{ color: "#faad14", fontSize: 13 }}
+                    >
+                      <List.Item.Meta
+                        avatar={
+                          item.thumbnail_url ? (
+                            <img
+                              src={item.thumbnail_url}
+                              alt={item.title}
+                              style={{ width: 96, borderRadius: 6 }}
                             />
-                          )}
-                          <Link to={`/youtube/summary/${item.document_id}`}>
-                            {item.title}
-                          </Link>
-                        </Space>
-                      }
-                      description={
-                        <Space direction="vertical" size={0} style={{ width: "100%" }}>
-                          {(item.channel_name || item.published_at) && (
-                            <Space size="small" wrap>
-                              {item.channel_name && (
-                                <Text type="secondary">{item.channel_name}</Text>
-                              )}
-                              {item.published_at && (
-                                <Text type="secondary">
-                                  📅 {new Date(item.published_at).toLocaleDateString("zh-CN")}
-                                </Text>
-                              )}
-                            </Space>
-                          )}
-                          {item.tldr && (
-                            <Text
-                              type="secondary"
-                              style={{ fontSize: 13 }}
-                              ellipsis={{ tooltip: item.tldr }}
-                            >
-                              {item.tldr}
-                            </Text>
-                          )}
-                          <Space wrap size={[4, 4]} style={{ marginTop: 2 }}>
-                            {item.tags.slice(0, 4).map((t) => (
-                              <Tag key={t} style={{ marginRight: 0 }}>
-                                #{t}
-                              </Tag>
-                            ))}
+                          ) : (
+                            <YoutubeOutlined style={{ fontSize: 32 }} />
+                          )
+                        }
+                        title={
+                          <Space size={6} wrap>
+                            {item.is_unread && (
+                              <StarFilled
+                                style={{ color: "#faad14", fontSize: 13 }}
+                              />
+                            )}
+                            {isReady ? (
+                              <Link to={`/youtube/summary/${item.document_id}`}>
+                                {item.title}
+                              </Link>
+                            ) : (
+                              <Text strong>{item.title}</Text>
+                            )}
+                            {statusTag(item)}
                           </Space>
-                        </Space>
-                      }
-                    />
-                  </List.Item>
-                )}
+                        }
+                        description={
+                          <Space direction="vertical" size={0} style={{ width: "100%" }}>
+                            {(item.channel_name || item.published_at) && (
+                              <Space size="small" wrap>
+                                {item.channel_name && (
+                                  <Text type="secondary">{item.channel_name}</Text>
+                                )}
+                                {item.published_at && (
+                                  <Text type="secondary">
+                                    📅 {new Date(item.published_at).toLocaleDateString("zh-CN")}
+                                  </Text>
+                                )}
+                              </Space>
+                            )}
+                            {isFailed && item.error && (
+                              <Text
+                                type="danger"
+                                style={{ fontSize: 13 }}
+                                ellipsis={{ tooltip: item.error }}
+                              >
+                                {item.error}
+                              </Text>
+                            )}
+                            {item.tldr && (
+                              <Text
+                                type="secondary"
+                                style={{ fontSize: 13 }}
+                                ellipsis={{ tooltip: item.tldr }}
+                              >
+                                {item.tldr}
+                              </Text>
+                            )}
+                            <Space wrap size={[4, 4]} style={{ marginTop: 2 }}>
+                              {item.tags.slice(0, 4).map((t) => (
+                                <Tag key={t} style={{ marginRight: 0 }}>
+                                  #{t}
+                                </Tag>
+                              ))}
+                            </Space>
+                          </Space>
+                        }
+                      />
+                    </List.Item>
+                  );
+                }}
               />
             )}
           </Spin>

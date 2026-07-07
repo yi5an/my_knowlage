@@ -196,7 +196,6 @@ export function GraphCanvas({
       graph.destroy();
       graphRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, edges, layout]);
 
   // --- update selection highlight WITHOUT rebuilding the graph ---

@@ -17,6 +17,7 @@ from app.infrastructure.models import (
     RelationType,
 )
 from app.schemas.graph import GraphEdge, GraphNode, GraphResponse
+from app.services.document_visibility import knowledge_base_document_filter
 
 
 @dataclass(frozen=True)
@@ -109,7 +110,11 @@ class GraphSyncService:
         )
 
     def _document_nodes(self, workspace_id: str) -> list[GraphStoreNode]:
-        statement = select(Document).where(Document.workspace_id == workspace_id)
+        statement = (
+            select(Document)
+            .where(Document.workspace_id == workspace_id)
+            .where(knowledge_base_document_filter())
+        )
         return [
             GraphStoreNode(
                 id=document.id,
@@ -128,6 +133,7 @@ class GraphSyncService:
             select(DocumentChunk)
             .join(Document, Document.id == DocumentChunk.doc_id)
             .where(Document.workspace_id == workspace_id)
+            .where(knowledge_base_document_filter())
         )
         return [
             GraphStoreNode(
@@ -187,6 +193,7 @@ class GraphSyncService:
             select(DocumentChunk)
             .join(Document, Document.id == DocumentChunk.doc_id)
             .where(Document.workspace_id == workspace_id)
+            .where(knowledge_base_document_filter())
         )
         return [
             GraphStoreEdge(

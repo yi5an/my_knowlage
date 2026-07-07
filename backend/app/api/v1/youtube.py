@@ -12,6 +12,7 @@ status endpoint until the card is ready.
 
 import logging
 import threading
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,27 +22,40 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.infrastructure.database import SessionLocal, get_db_session
-from app.infrastructure.models import Subscription, Video, Workspace
+from app.infrastructure.models import (
+    Document,
+    DocumentVersion,
+    Subscription,
+    Video,
+    Workspace,
+)
 from app.schemas.youtube import (
+    Chapter,
     ManualSummaryRequest,
     ManualSummaryResponse,
     SubscribeRequest,
     SubscriptionResponse,
+    VideoChunk,
     VideoMeta,
     VideoSummaryCard,
+    YouTubeAutoRetrySettings,
+    YouTubeAutoRetrySettingsUpdate,
+)
+from app.services.document_visibility import (
+    KNOWLEDGE_BASE_IMPORTED_KEY,
+    is_imported_to_knowledge_base,
 )
 from app.services.structured_output import (
-    MockStructuredOutputClient,
-    OpenAICompatibleStructuredOutputClient,
     StructuredOutputClient,
 )
+from app.services.workspace_settings import WorkspaceSettingsService
 from app.services.youtube.asr import build_asr_service_from_settings
 from app.services.youtube.fetcher import (
     FetcherError,
     YouTubeFetcher,
 )
 from app.services.youtube.orchestrator import VideoSummaryOrchestrator
-from app.services.youtube.summary import SummaryService
+from app.services.youtube.summary import build_summary_service_from_settings
 from app.services.youtube.transcript import TranscriptExtractor
 from app.services.youtube.translation import TranslationService
 from app.services.youtube.urls import UnparseableTargetError, parse_target
@@ -79,14 +93,7 @@ def get_transcript_extractor() -> TranscriptExtractor:
 
 def get_summary_client() -> StructuredOutputClient:
     settings = get_settings()
-    if settings.llm_api_key:
-        return OpenAICompatibleStructuredOutputClient(
-            api_key=settings.llm_api_key,
-            model=settings.llm_model,
-            base_url=settings.llm_base_url,
-            max_output_tokens=settings.llm_max_output_tokens,
-        )
-    return MockStructuredOutputClient()
+    return build_summary_service_from_settings(settings).llm_client
 
 
 def build_orchestrator(session: Session) -> VideoSummaryOrchestrator:
@@ -100,15 +107,8 @@ def build_orchestrator(session: Session) -> VideoSummaryOrchestrator:
     from app.services.youtube.fetcher import get_fetcher_from_settings
 
     settings = get_settings()
-    if settings.llm_api_key:
-        summary_client: StructuredOutputClient = OpenAICompatibleStructuredOutputClient(
-            api_key=settings.llm_api_key,
-            model=settings.llm_model,
-            base_url=settings.llm_base_url,
-            max_output_tokens=settings.llm_max_output_tokens,
-        )
-    else:
-        summary_client = MockStructuredOutputClient()
+    summary_service = build_summary_service_from_settings(settings)
+    summary_client = summary_service.llm_client
     # Use the REST-direct fetcher (urllib) — it works in restricted networks
     # where googleapiclient times out. Consistent with the scheduler path.
     fetcher = get_fetcher_from_settings(settings)
@@ -128,7 +128,7 @@ def build_orchestrator(session: Session) -> VideoSummaryOrchestrator:
         session=session,
         fetcher=fetcher,
         transcript_extractor=get_transcript_extractor(),
-        summary_service=SummaryService(summary_client),
+        summary_service=summary_service,
         translation_service=TranslationService(summary_client),
         translate_enabled=settings.translate_to_chinese,
         asr_service=asr_service,
@@ -162,6 +162,38 @@ def _subscription_response(sub: Subscription) -> SubscriptionResponse:
         last_video_id=sub.last_video_id,
         last_error=sub.last_error,
         enabled=sub.enabled,
+    )
+
+
+def _ensure_summary_ready(document: Document) -> None:
+    if document.parse_status == "completed" and document.summary_json is not None:
+        return
+    if document.parse_status == "failed":
+        detail = document.ai_summary or "总结生成失败"
+        raise HTTPException(status_code=409, detail=f"总结生成失败：{detail}")
+    raise HTTPException(status_code=409, detail="总结尚未生成完成，请稍后刷新。")
+
+
+# --- Workspace YouTube settings -------------------------------------------
+
+
+@router.get("/auto-retry-settings", response_model=YouTubeAutoRetrySettings)
+async def get_auto_retry_settings(
+    session: SessionDep,
+    workspace_id: Annotated[str, Query()] = "ws_default",
+) -> YouTubeAutoRetrySettings:
+    return WorkspaceSettingsService(session).get_youtube_auto_retry(workspace_id)
+
+
+@router.put("/auto-retry-settings", response_model=YouTubeAutoRetrySettings)
+async def update_auto_retry_settings(
+    payload: YouTubeAutoRetrySettingsUpdate,
+    session: SessionDep,
+    workspace_id: Annotated[str, Query()] = "ws_default",
+) -> YouTubeAutoRetrySettings:
+    return WorkspaceSettingsService(session).update_youtube_auto_retry(
+        workspace_id,
+        payload,
     )
 
 
@@ -259,11 +291,55 @@ async def get_summary_card(
     document_id: str,
     session: SessionDep,
 ) -> VideoSummaryCard:
-    from app.infrastructure.models import Document, DocumentVersion
-
     document = session.get(Document, document_id)
     if document is None or document.source_type != "youtube":
         raise HTTPException(status_code=404, detail="youtube summary not found")
+    _ensure_summary_ready(document)
+    return _summary_card_from_document(session, document)
+
+
+@router.post(
+    "/summaries/{document_id}/import-to-knowledge-base",
+    response_model=VideoSummaryCard,
+)
+async def import_summary_to_knowledge_base(
+    document_id: str,
+    session: SessionDep,
+) -> VideoSummaryCard:
+    """Manually import a staged YouTube summary into the knowledge base."""
+    document = session.get(Document, document_id)
+    if document is None or document.source_type != "youtube":
+        raise HTTPException(status_code=404, detail="youtube summary not found")
+    _ensure_summary_ready(document)
+
+    already_imported = is_imported_to_knowledge_base(document)
+    metadata = dict(document.metadata_ or {})
+    metadata[KNOWLEDGE_BASE_IMPORTED_KEY] = True
+    metadata["knowledge_base_imported_at"] = datetime.now(UTC).isoformat()
+    document.metadata_ = metadata
+    session.commit()
+
+    if not already_imported:
+        orchestrator = build_orchestrator(session)
+        if orchestrator.extraction_pipeline is not None:
+            try:
+                orchestrator.extraction_pipeline.run(
+                    workspace_id=document.workspace_id,
+                    doc_id=document.id,
+                    chunks=_video_chunks_from_document(session, document.id),
+                )
+            except Exception as exc:  # noqa: BLE001
+                session.rollback()
+                logger.warning(
+                    "manual knowledge-base extraction failed for %s: %s",
+                    document.id,
+                    exc,
+                )
+    session.refresh(document)
+    return _summary_card_from_document(session, document)
+
+
+def _summary_card_from_document(session: Session, document: Document) -> VideoSummaryCard:
     video = session.get(Video, document.video_id) if document.video_id else None
     summary_dict = document.summary_json or None
     mindmap_dict = document.mindmap_data or None
@@ -287,7 +363,33 @@ async def get_summary_card(
         summary=summary_dict,  # type: ignore[arg-type]
         mindmap=mindmap_dict,  # type: ignore[arg-type]
         transcript=transcript,
+        knowledge_base_imported=is_imported_to_knowledge_base(document),
     )
+
+
+def _video_chunks_from_document(session: Session, document_id: str) -> list[VideoChunk]:
+    from app.infrastructure.models import DocumentChunk
+
+    rows = session.scalars(
+        select(DocumentChunk)
+        .where(DocumentChunk.doc_id == document_id)
+        .order_by(DocumentChunk.chunk_index)
+    ).all()
+    chunks: list[VideoChunk] = []
+    for chunk in rows:
+        metadata = chunk.metadata_ or {}
+        chapter = metadata.get("chapter")
+        chunks.append(
+            VideoChunk(
+                index=chunk.chunk_index,
+                heading=chunk.heading,
+                content=chunk.content,
+                start_sec=float(chunk.start_offset or 0),
+                end_sec=float(chunk.end_offset or chunk.start_offset or 0),
+                chapter_title=chapter if isinstance(chapter, str) else None,
+            )
+        )
+    return chunks
 
 
 class SummaryJobStatus(BaseModel):
@@ -296,7 +398,9 @@ class SummaryJobStatus(BaseModel):
     Returned by the by-video endpoint so the frontend can show a spinner
     while the ASR/summary pipeline runs, and jump to the card once ready.
     ``status`` is one of: pending | processing | succeeded | no_transcript
-    | failed | unknown (no Video row yet — backend still fetching metadata).
+    | failed | access_denied | unknown (no Video row yet — backend still
+    fetching metadata). ``access_denied`` is a permanent block (members-only
+    / private / deleted / geo-restricted) — not retryable.
     """
 
     video_id: str
@@ -308,9 +412,13 @@ class SummaryJobStatus(BaseModel):
 # Map terminal-error Video.fetch_status values → public job status.
 # "fetched" is intentionally NOT here: it only means a transcript/ASR result
 # was obtained, not that the summary is done — see get_summary_status_by_video.
+# "access_denied" is a PERMANENT block (members-only / private / deleted /
+# geo-restricted) — surfaced distinctly so the UI shows a different tag and
+# the retry endpoint refuses to re-queue it.
 _FETCH_STATUS_TO_JOB = {
     "no_transcript": "no_transcript",
     "failed": "failed",
+    "access_denied": "access_denied",
 }
 
 
@@ -337,7 +445,7 @@ async def get_summary_status_by_video(
         return SummaryJobStatus(video_id=video_id, status="unknown")
 
     # Terminal-error states surface directly from the Video row.
-    if video.fetch_status in ("no_transcript", "failed"):
+    if video.fetch_status in ("no_transcript", "failed", "access_denied"):
         return SummaryJobStatus(
             video_id=video_id,
             status=_FETCH_STATUS_TO_JOB[video.fetch_status],
@@ -385,6 +493,10 @@ class SummaryListItem(BaseModel):
     tags: list[str] = Field(default_factory=list)
     created_at: str | None = None
     is_unread: bool = False
+    summary_status: str = "pending"
+    error: str | None = None
+    failure_stage: str | None = None
+    retryable: bool = False
 
 
 class DashboardStats(BaseModel):
@@ -393,6 +505,10 @@ class DashboardStats(BaseModel):
     subscriptions: int = 0
     summarized_videos: int = 0
     pending_videos: int = 0
+    # Permanently inaccessible videos (members-only / private / deleted /
+    # geo-restricted). Reported separately from pending so the dashboard can
+    # distinguish "still working" from "will never finish".
+    denied_videos: int = 0
     entities: int = 0
     relations: int = 0
 
@@ -403,39 +519,177 @@ async def list_summaries(
     workspace_id: Annotated[str, Query()] = "ws_default",
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> list[SummaryListItem]:
-    """List recent YouTube summaries (newest first)."""
-    from app.infrastructure.models import Document
+    """List recent YouTube videos/summaries (newest first).
 
-    rows = session.scalars(
-        select(Document)
-        .where(Document.workspace_id == workspace_id, Document.source_type == "youtube")
-        .order_by(Document.created_at.desc())
+    Includes failed/pending ``Video`` rows that never reached Document creation
+    so operators can see and retry transcript/ASR failures.
+    """
+    rows = session.execute(
+        select(Video, Document)
+        .outerjoin(Document, Document.video_id == Video.id)
+        .where(Video.workspace_id == workspace_id)
+        .order_by(Video.published_at.desc().nullslast(), Video.created_at.desc())
         .limit(limit)
     ).all()
-    items: list[SummaryListItem] = []
-    for doc in rows:
-        video = session.get(Video, doc.video_id) if doc.video_id else None
-        summary = doc.summary_json or {}
-        items.append(
-            SummaryListItem(
-                document_id=doc.id,
-                video_id=video.video_id if video else "",
-                title=doc.title,
-                channel_name=video.channel_name if video else None,
-                thumbnail_url=video.thumbnail_url if video else None,
-                duration_sec=video.duration_sec if video else None,
-                published_at=(
-                    video.published_at.isoformat()
-                    if video and video.published_at
-                    else None
-                ),
-                tldr=summary.get("tldr"),
-                tags=summary.get("tags", []),
-                created_at=doc.created_at.isoformat() if doc.created_at else None,
-                is_unread=bool(doc.is_unread),
-            )
+    return [_summary_list_item(video, doc) for video, doc in rows]
+
+
+def _summary_list_item(video: Video, doc: Document | None) -> SummaryListItem:
+    summary = (doc.summary_json or {}) if doc is not None else {}
+    status = doc.parse_status if doc is not None else video.fetch_status
+    error = None
+    if doc is not None and doc.parse_status == "failed":
+        error = doc.ai_summary
+    elif doc is None and video.fetch_status in ("failed", "no_transcript", "access_denied"):
+        error = video.error_message
+    # access_denied is a PERMANENT block — never offer a retry, since the
+    # video can't be fetched without channel membership / region change.
+    retryable = (
+        status != "completed"
+        and status != "access_denied"
+        and bool(video.video_id)
+    )
+    return SummaryListItem(
+        document_id=doc.id if doc is not None else "",
+        video_id=video.video_id,
+        title=(doc.title if doc is not None else video.title) or video.video_id,
+        channel_name=video.channel_name,
+        thumbnail_url=video.thumbnail_url,
+        duration_sec=video.duration_sec,
+        published_at=video.published_at.isoformat() if video.published_at else None,
+        tldr=summary.get("tldr"),
+        tags=summary.get("tags", []),
+        created_at=(
+            doc.created_at.isoformat()
+            if doc is not None and doc.created_at
+            else (video.created_at.isoformat() if video.created_at else None)
+        ),
+        is_unread=bool(doc.is_unread) if doc is not None else False,
+        summary_status=status,
+        error=error,
+        failure_stage=_failure_stage(video, doc),
+        retryable=retryable,
+    )
+
+
+def _failure_stage(video: Video, doc: Document | None) -> str | None:
+    if doc is not None:
+        if doc.parse_status == "failed":
+            return "summary"
+        if doc.parse_status == "processing":
+            return "processing"
+        return None
+    if video.fetch_status == "pending":
+        return "pending"
+    if video.fetch_status == "no_transcript":
+        return "transcript"
+    if video.fetch_status == "access_denied":
+        # Permanent block — the frontend renders a dedicated "无访问权限" tag
+        # from summary_status, so no failure_stage label is needed here.
+        return None
+    if video.fetch_status != "failed":
+        return None
+    error = (video.error_message or "").casefold()
+    if error.startswith("fetch:") or "rest call" in error:
+        return "capture"
+    if error.startswith("asr:") or "transcript" in error or "caption" in error:
+        return "transcript"
+    return "processing"
+
+
+def _video_meta_from_row(video: Video) -> VideoMeta:
+    chapters = []
+    for raw in video.chapters or []:
+        if isinstance(raw, dict):
+            try:
+                chapters.append(Chapter.model_validate(raw))
+            except Exception:  # noqa: BLE001 - ignore malformed historical metadata
+                continue
+    return VideoMeta(
+        video_id=video.video_id,
+        title=video.title or video.video_id,
+        channel_id=video.channel_id,
+        channel_name=video.channel_name,
+        duration_sec=video.duration_sec,
+        published_at=video.published_at,
+        thumbnail_url=video.thumbnail_url,
+        description=video.description,
+        chapters=chapters,
+    )
+
+
+def _run_summary_meta_in_background(
+    meta: VideoMeta,
+    workspace_id: str,
+    subscription_id: str | None,
+    *,
+    task_job_id: str,
+) -> None:
+    session = SessionLocal()
+    try:
+        orch = build_orchestrator(session)
+        result = orch.summarize_meta(
+            meta,
+            workspace_id=workspace_id,
+            subscription_id=subscription_id,
         )
-    return items
+        if not result.succeeded:
+            logger.warning(
+                "retry summary %s finished non-success: %s (%s)",
+                task_job_id,
+                result.status,
+                result.error,
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("retry summary %s crashed", task_job_id)
+    finally:
+        session.close()
+
+
+@router.post("/videos/{video_id}/retry", response_model=ManualSummaryResponse)
+async def retry_video(
+    video_id: str,
+    session: SessionDep,
+    workspace_id: Annotated[str, Query()] = "ws_default",
+) -> ManualSummaryResponse:
+    """Retry a failed/stale video immediately without waiting for polling."""
+    video = session.scalar(
+        select(Video).where(Video.workspace_id == workspace_id, Video.video_id == video_id)
+    )
+    if video is None:
+        raise HTTPException(status_code=404, detail="video not found")
+    if video.fetch_status == "access_denied":
+        # Permanent access block (members-only / private / deleted /
+        # geo-restricted): retrying can never succeed, so refuse instead of
+        # burning yt-dlp + ASR quota on a guaranteed re-failure.
+        raise HTTPException(
+            status_code=409,
+            detail="该视频因无访问权限（会员专属/私有/已删除/地区受限）已跳过，无法重试。",
+        )
+    doc = session.scalar(select(Document).where(Document.video_id == video.id))
+    video.fetch_status = "pending"
+    video.error_message = None
+    if doc is not None and doc.parse_status == "failed":
+        doc.parse_status = "processing"
+        doc.status = "processing"
+        doc.ai_summary = None
+    session.commit()
+
+    task_job_id = f"yt_retry_{video.video_id}_{threading.get_ident()}"
+    thread = threading.Thread(
+        target=_run_summary_meta_in_background,
+        args=(_video_meta_from_row(video), video.workspace_id, video.subscription_id),
+        kwargs={"task_job_id": task_job_id},
+        name=f"yt-retry-{video.video_id}",
+        daemon=True,
+    )
+    thread.start()
+    return ManualSummaryResponse(
+        video_id=video.video_id,
+        document_id=doc.id if doc is not None else "",
+        task_job_id=task_job_id,
+        status="processing",
+    )
 
 
 @router.post("/summaries/{document_id}/mark-read", status_code=204)
@@ -471,12 +725,14 @@ async def get_stats(
     videos = session.query(Video).filter_by(workspace_id=workspace_id).all()
     summarized = sum(1 for v in videos if v.fetch_status == "fetched")
     pending = sum(1 for v in videos if v.fetch_status in ("pending", "no_transcript", "failed"))
+    denied = sum(1 for v in videos if v.fetch_status == "access_denied")
     entities = session.query(Entity).filter_by(workspace_id=workspace_id).count()
     relations = session.query(EntityRelation).filter_by(workspace_id=workspace_id).count()
     return DashboardStats(
         subscriptions=subs,
         summarized_videos=summarized,
         pending_videos=pending,
+        denied_videos=denied,
         entities=entities,
         relations=relations,
     )

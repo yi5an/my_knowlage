@@ -246,11 +246,17 @@ class RestYouTubeFetcher:
 
     BASE_URL = "https://www.googleapis.com/youtube/v3"
 
-    def __init__(self, api_key: str, quota: _QuotaBudget | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        quota: _QuotaBudget | None = None,
+        proxy_url: str | None = None,
+    ) -> None:
         if not api_key:
             raise FetcherError("a YouTube Data API key is required")
         self.api_key = api_key
         self.quota = quota or _QuotaBudget()
+        self.proxy_url = proxy_url
 
     def _get(self, path: str, params: dict[str, str]) -> Any:
         import urllib.parse
@@ -259,7 +265,17 @@ class RestYouTubeFetcher:
         query = urllib.parse.urlencode({**params, "key": self.api_key})
         url = f"{self.BASE_URL}/{path}?{query}"
         try:
-            with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310
+            request = urllib.request.Request(url)
+            if self.proxy_url:
+                opener = urllib.request.build_opener(
+                    urllib.request.ProxyHandler(
+                        {"http": self.proxy_url, "https": self.proxy_url}
+                    )
+                )
+                response_context = opener.open(request, timeout=30)
+            else:
+                response_context = urllib.request.urlopen(request, timeout=30)  # noqa: S310
+            with response_context as resp:
                 import json
 
                 return json.loads(resp.read())
@@ -350,5 +366,8 @@ def get_fetcher_from_settings(settings: Any) -> YouTubeFetcher:
     """
     api_key = getattr(settings, "youtube_api_key", None)
     if api_key:
-        return RestYouTubeFetcher(api_key=api_key)
+        return RestYouTubeFetcher(
+            api_key=api_key,
+            proxy_url=getattr(settings, "youtube_proxy_url", None),
+        )
     return FakeYouTubeFetcher()

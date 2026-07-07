@@ -23,6 +23,7 @@ from app.schemas.youtube import (
     VideoChunk,
 )
 from app.services.structured_output import (
+    FallbackStructuredOutputClient,
     MockStructuredOutputClient,
     OpenAICompatibleStructuredOutputClient,
     StructuredOutputClient,
@@ -181,6 +182,11 @@ class SummaryService:
     MAP_REDUCE_TOKEN_THRESHOLD = 6000
     # Rough chars-per-token estimate for the heuristic.
     CHARS_PER_TOKEN = 4
+    # Summary map-reduce should use coarser windows than downstream entity
+    # extraction. One LLM call per 2-minute slice makes long videos painfully
+    # slow on subscription-routed models; 10-minute slices keep prompts compact
+    # while bounding the number of sequential calls.
+    MAP_REDUCE_WINDOW_SEC = 600
 
     def __init__(self, llm_client: StructuredOutputClient) -> None:
         self.llm_client = llm_client
@@ -241,7 +247,14 @@ class SummaryService:
     ) -> SummaryResult:
         from app.services.youtube.chunker import ChunkerConfig, chunk_transcript
 
-        chunks = chunk_transcript(transcript, chapters=chapters, config=ChunkerConfig())
+        chunks = chunk_transcript(
+            transcript,
+            chapters=chapters,
+            config=ChunkerConfig(
+                window_sec=self.MAP_REDUCE_WINDOW_SEC,
+                max_chapter_sec=self.MAP_REDUCE_WINDOW_SEC,
+            ),
+        )
         if not chunks:
             # Degenerate case: no chunkable content. Fall back to a full single call.
             prompt = build_summary_prompt(title, transcript, chapters)
@@ -360,12 +373,34 @@ def build_summary_service_from_settings(settings: Any) -> SummaryService:
     """
     api_key = getattr(settings, "llm_api_key", None)
     if api_key:
-        client: StructuredOutputClient = OpenAICompatibleStructuredOutputClient(
-            api_key=api_key,
-            model=getattr(settings, "llm_model", "gpt-4o-mini"),
-            base_url=getattr(settings, "llm_base_url", None),
-            max_output_tokens=getattr(settings, "llm_max_output_tokens", 2048),
-        )
+        models = _configured_llm_models(settings)
+        clients: list[tuple[str, StructuredOutputClient]] = [
+            (
+                model,
+                OpenAICompatibleStructuredOutputClient(
+                    api_key=api_key,
+                    model=model,
+                    base_url=getattr(settings, "llm_base_url", None),
+                    max_output_tokens=getattr(settings, "llm_max_output_tokens", 2048),
+                    timeout_seconds=getattr(settings, "llm_timeout_seconds", 120.0),
+                ),
+            )
+            for model in models
+        ]
+        client = clients[0][1] if len(clients) == 1 else FallbackStructuredOutputClient(clients)
     else:
         client = MockStructuredOutputClient()
     return SummaryService(client)
+
+
+def _configured_llm_models(settings: Any) -> list[str]:
+    primary = str(getattr(settings, "llm_model", "gpt-4o-mini"))
+    fallback_raw = getattr(settings, "llm_fallback_models", None)
+    fallback = []
+    if isinstance(fallback_raw, str) and fallback_raw.strip():
+        fallback = [m.strip() for m in fallback_raw.split(",") if m.strip()]
+    models: list[str] = []
+    for model in [primary, *fallback]:
+        if model and model not in models:
+            models.append(model)
+    return models

@@ -109,6 +109,22 @@ def test_long_transcript_triggers_map_reduce() -> None:
     assert summary.tldr == "merged global summary"
 
 
+def test_map_reduce_uses_coarse_chunks_to_limit_llm_calls() -> None:
+    transcript = _long_transcript()
+    client = CallCountingClient(
+        outputs={
+            ChunkSummary: ChunkSummary(section_summary="a section"),
+            SummaryResult: SummaryResult(tldr="merged global summary"),
+        }
+    )
+    service = SummaryService(client)
+
+    service.summarize("Long Video", transcript)
+
+    chunk_calls = [c for c in client.calls if c is ChunkSummary]
+    assert 1 < len(chunk_calls) <= 8
+
+
 def test_map_reduce_tolerates_chunk_failures() -> None:
     """If a chunk's LLM call fails, the rest should still merge."""
     transcript = _long_transcript()

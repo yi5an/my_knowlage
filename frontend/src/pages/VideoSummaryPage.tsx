@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  Alert,
   Button,
   Card,
   Col,
+  Alert,
   Empty,
   List,
   Row,
@@ -13,15 +13,24 @@ import {
   Tabs,
   Tag,
   Typography,
+  message,
 } from "antd";
-import { ArrowLeftOutlined, YoutubeOutlined, ClockCircleOutlined } from "@ant-design/icons";
+import {
+  ArrowLeftOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  DatabaseOutlined,
+  YoutubeOutlined,
+} from "@ant-design/icons";
 
 import {
   getSummaryCard,
+  importSummaryToKnowledgeBase,
   markSummaryRead,
   youtubeTimestampUrl,
   type VideoSummaryCard,
 } from "../services/youtubeApi";
+import { investmentApi } from "../services/investmentApi";
 import { MindmapView } from "../components/MindmapView";
 
 const { Title, Paragraph, Text } = Typography;
@@ -30,6 +39,8 @@ export function VideoSummaryPage() {
   const { documentId } = useParams<{ documentId: string }>();
   const [card, setCard] = useState<VideoSummaryCard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [creatingClaim, setCreatingClaim] = useState(false);
+  const [importingToKnowledgeBase, setImportingToKnowledgeBase] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -71,6 +82,34 @@ export function VideoSummaryPage() {
   }
 
   const { summary, mindmap } = card;
+
+  const handleCreateClaim = async () => {
+    setCreatingClaim(true);
+    try {
+      await investmentApi.createClaim({
+        claim_text: summary.tldr,
+        required_evidence: summary.key_points.map((p) => p.point),
+      });
+      message.success("已提取为待验证观点");
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreatingClaim(false);
+    }
+  };
+
+  const handleImportToKnowledgeBase = async () => {
+    setImportingToKnowledgeBase(true);
+    try {
+      const updated = await importSummaryToKnowledgeBase(card.document_id);
+      setCard(updated);
+      message.success("已加入知识库");
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImportingToKnowledgeBase(false);
+    }
+  };
 
   return (
     <main className="page">
@@ -116,6 +155,23 @@ export function VideoSummaryPage() {
                   style={{ padding: 0 }}
                 >
                   在 YouTube 观看
+                </Button>
+                {card.knowledge_base_imported ? (
+                  <Tag icon={<CheckCircleOutlined />} color="success">
+                    已加入知识库
+                  </Tag>
+                ) : (
+                  <Button
+                    type="primary"
+                    icon={<DatabaseOutlined />}
+                    loading={importingToKnowledgeBase}
+                    onClick={() => void handleImportToKnowledgeBase()}
+                  >
+                    加入知识库
+                  </Button>
+                )}
+                <Button loading={creatingClaim} onClick={() => void handleCreateClaim()}>
+                  提取为待验证观点
                 </Button>
               </Space>
               <Paragraph style={{ marginTop: 12, marginBottom: 0 }}>

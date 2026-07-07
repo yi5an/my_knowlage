@@ -159,3 +159,46 @@ def test_import_failure_records_task_job_error(client: TestClient, db_session: S
     task_job = db_session.get(TaskJob, payload["task_job_id"])
     assert task_job is not None
     assert task_job.error_message is not None
+
+
+def test_document_list_hides_unimported_youtube_summaries(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    normal = Document(
+        id="doc_visible",
+        workspace_id="ws_test",
+        title="Visible Note",
+        source_type="file",
+        parse_status="completed",
+        status="ready",
+        metadata_={},
+    )
+    staged_youtube = Document(
+        id="doc_staged_youtube",
+        workspace_id="ws_test",
+        title="Staged YouTube Summary",
+        source_type="youtube",
+        parse_status="completed",
+        status="ready",
+        metadata_={"knowledge_base_imported": False},
+    )
+    imported_youtube = Document(
+        id="doc_imported_youtube",
+        workspace_id="ws_test",
+        title="Imported YouTube Summary",
+        source_type="youtube",
+        parse_status="completed",
+        status="ready",
+        metadata_={"knowledge_base_imported": True},
+    )
+    db_session.add_all([normal, staged_youtube, imported_youtube])
+    db_session.commit()
+
+    response = client.get("/api/v1/documents?workspace_id=ws_test")
+
+    assert response.status_code == 200
+    ids = {item["id"] for item in response.json()}
+    assert "doc_visible" in ids
+    assert "doc_imported_youtube" in ids
+    assert "doc_staged_youtube" not in ids

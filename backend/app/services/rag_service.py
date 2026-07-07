@@ -18,6 +18,7 @@ from app.schemas.rag import (
     SearchResponse,
     SearchResult,
 )
+from app.services.document_visibility import knowledge_base_document_filter
 from app.services.embeddings import EmbeddingClient
 from app.services.rerankers import RerankerClient
 
@@ -54,6 +55,7 @@ class RagService:
             select(DocumentChunk, Document)
             .join(Document, Document.id == DocumentChunk.doc_id)
             .where(Document.workspace_id == workspace_id)
+            .where(knowledge_base_document_filter())
         )
         if chunk_ids:
             statement = statement.where(DocumentChunk.id.in_(chunk_ids))
@@ -186,6 +188,7 @@ class RagService:
             select(DocumentChunk, Document)
             .join(Document, Document.id == DocumentChunk.doc_id)
             .where(Document.workspace_id == workspace_id)
+            .where(knowledge_base_document_filter())
             .order_by(DocumentChunk.created_at.desc())
         )
         return [(row[0], row[1]) for row in self.session.execute(statement).all()]

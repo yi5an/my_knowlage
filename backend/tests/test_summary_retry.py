@@ -25,15 +25,14 @@ from app.infrastructure.models import (
 from app.schemas.youtube import (
     KeyPoint,
     MindmapData,
-    MindmapNode,
     SummaryResult,
-    Transcript,
 )
-from app.services.youtube.summary import SummaryService
 from app.services.youtube.summary_retry import (
     RETRY_COUNT_KEY,
+    RETRY_NEXT_AT_KEY,
     FailedSummaryRetryScanner,
 )
+
 
 @pytest.fixture()
 def session() -> Generator[Session, None, None]:
@@ -92,6 +91,7 @@ def _make_failed_doc(
     transcript_text: str,
     retry_count: int = 0,
     source_type: str = "youtube",
+    published_at: datetime | None = None,
 ) -> Document:
     """Insert a Video + failed Document + transcript version, return the doc."""
     video = Video(
@@ -100,6 +100,7 @@ def _make_failed_doc(
         video_id=f"yt_{doc_id}",
         title=title,
         duration_sec=120,
+        published_at=published_at,
         fetch_status="fetched",
     )
     session.add(video)
@@ -135,7 +136,10 @@ def _make_failed_doc(
 
 def test_scan_recovers_a_failed_summary(session: Session) -> None:
     doc = _make_failed_doc(
-        session, doc_id="doc_a", title="Video A", transcript_text="A long enough transcript to summarize properly here."
+        session,
+        doc_id="doc_a",
+        title="Video A",
+        transcript_text="A long enough transcript to summarize properly here.",
     )
     svc = _ScriptedSummaryService([_summary()])
     scanner = FailedSummaryRetryScanner(session=session, summary_service=svc)
@@ -155,9 +159,42 @@ def test_scan_recovers_a_failed_summary(session: Session) -> None:
     assert RETRY_COUNT_KEY not in (doc.metadata_ or {})
 
 
+def test_scan_prioritizes_newest_published_failed_summary(session: Session) -> None:
+    _make_failed_doc(
+        session,
+        doc_id="doc_old",
+        title="Old Video",
+        transcript_text="A long enough old transcript to summarize properly here.",
+        published_at=datetime(2026, 7, 1, tzinfo=UTC),
+    )
+    newest = _make_failed_doc(
+        session,
+        doc_id="doc_new",
+        title="New Video",
+        transcript_text="A long enough new transcript to summarize properly here.",
+        published_at=datetime(2026, 7, 6, tzinfo=UTC),
+    )
+    svc = _ScriptedSummaryService([_summary()])
+    scanner = FailedSummaryRetryScanner(
+        session=session,
+        summary_service=svc,
+        batch_size=1,
+    )
+
+    report = scanner.scan()
+
+    assert report.retried == 1
+    assert svc.calls == ["New Video"]
+    session.refresh(newest)
+    assert newest.parse_status == "completed"
+
+
 def test_scan_increments_retry_count_on_persistent_failure(session: Session) -> None:
     doc = _make_failed_doc(
-        session, doc_id="doc_b", title="Video B", transcript_text="Another sufficiently long transcript for the model."
+        session,
+        doc_id="doc_b",
+        title="Video B",
+        transcript_text="Another sufficiently long transcript for the model.",
     )
     svc = _ScriptedSummaryService([RuntimeError("still empty"), RuntimeError("still empty")])
     scanner = FailedSummaryRetryScanner(session=session, summary_service=svc, max_retries=3)
@@ -175,6 +212,33 @@ def test_scan_increments_retry_count_on_persistent_failure(session: Session) -> 
     session.refresh(doc)
     assert (doc.metadata_ or {})[RETRY_COUNT_KEY] == 2
     assert doc.parse_status == "failed"
+
+
+def test_scan_transient_llm_failure_sets_backoff_without_incrementing_count(
+    session: Session,
+) -> None:
+    doc = _make_failed_doc(
+        session,
+        doc_id="doc_transient",
+        title="Transient auth outage",
+        transcript_text="A long enough transcript to retry once the LLM auth recovers.",
+        retry_count=2,
+    )
+    svc = _ScriptedSummaryService([RuntimeError("auth_unavailable: no auth available")])
+    scanner = FailedSummaryRetryScanner(
+        session=session,
+        summary_service=svc,
+        max_retries=3,
+        backoff_minutes=30,
+    )
+
+    report = scanner.scan()
+
+    assert report.retried == 1
+    assert report.still_failing == 1
+    session.refresh(doc)
+    assert (doc.metadata_ or {})[RETRY_COUNT_KEY] == 2
+    assert RETRY_NEXT_AT_KEY in (doc.metadata_ or {})
 
 
 def test_scan_skips_document_at_retry_cap(session: Session) -> None:
@@ -201,7 +265,9 @@ def test_scan_recovers_after_prior_failures(session: Session) -> None:
         session,
         doc_id="doc_d",
         title="Video D",
-        transcript_text="Enough transcript text here to be comfortably summarizable by the model now.",
+        transcript_text=(
+            "Enough transcript text here to be comfortably summarizable by the model now."
+        ),
     )
     svc = _ScriptedSummaryService([RuntimeError("x"), _summary()])
     scanner = FailedSummaryRetryScanner(session=session, summary_service=svc, max_retries=3)
@@ -225,12 +291,20 @@ def test_scan_ignores_non_youtube_and_succeeded_docs(session: Session) -> None:
     )
     # A youtube doc that already succeeded (summary_json present) is skipped.
     ok_doc = _make_failed_doc(
-        session, doc_id="doc_ok", title="OK doc", transcript_text="Long enough transcript text here."
+        session,
+        doc_id="doc_ok",
+        title="OK doc",
+        transcript_text="Long enough transcript text here.",
     )
     ok_doc.parse_status = "completed"
     ok_doc.status = "ready"
-    from app.schemas.youtube import SummaryResult as SR  # noqa: F811
-    ok_doc.summary_json = {"tldr": "already done", "key_points": [], "quotes": [], "tags": [], "transcript_source": "manual"}
+    ok_doc.summary_json = {
+        "tldr": "already done",
+        "key_points": [],
+        "quotes": [],
+        "tags": [],
+        "transcript_source": "manual",
+    }
     session.commit()
 
     svc = _ScriptedSummaryService([_summary()])
@@ -243,7 +317,10 @@ def test_scan_ignores_non_youtube_and_succeeded_docs(session: Session) -> None:
 
 def test_scan_skips_too_short_transcript_and_marks_given_up(session: Session) -> None:
     doc = _make_failed_doc(
-        session, doc_id="doc_short", title="Short", transcript_text="hi"  # below MIN_TRANSCRIPT_CHARS
+        session,
+        doc_id="doc_short",
+        title="Short",
+        transcript_text="hi",  # below MIN_TRANSCRIPT_CHARS
     )
     svc = _ScriptedSummaryService([])
     scanner = FailedSummaryRetryScanner(session=session, summary_service=svc, max_retries=3)
@@ -258,7 +335,10 @@ def test_scan_skips_too_short_transcript_and_marks_given_up(session: Session) ->
 
 def test_scan_runs_extraction_pipeline_on_success(session: Session) -> None:
     _make_failed_doc(
-        session, doc_id="doc_e", title="Video E", transcript_text="A long transcript to feed the summarizer service now."
+        session,
+        doc_id="doc_e",
+        title="Video E",
+        transcript_text="A long transcript to feed the summarizer service now.",
     )
     pipeline = MagicMock()
     scanner = FailedSummaryRetryScanner(

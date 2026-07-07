@@ -34,6 +34,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_AUDIO_DOWNLOAD_ATTEMPTS = 3
+_AUDIO_DOWNLOAD_RETRY_MARKERS = (
+    "bytes read",
+    "more expected",
+    "read timed out",
+    "connection reset",
+    "connection aborted",
+    "unexpected_eof",
+    "unexpected eof",
+    "ssl",
+    "temporarily unavailable",
+)
+
 
 class AsrError(Exception):
     """Base error for the ASR fallback pipeline."""
@@ -49,6 +62,37 @@ class AudioSplitError(AsrError):
 
 class AsrTranscriptionError(AsrError):
     """The GLM-ASR endpoint rejected the request or returned no text."""
+
+
+# Substrings of yt-dlp's error text that indicate a PERMANENT access block —
+# the video can never be fetched by us, so retrying is pointless. We match
+# case-insensitively against the stringified exception (yt-dlp preserves the
+# full reason/subreason text — see _video.py:4039-4047 in the youtube extractor).
+#
+# Order does not matter; any hit classifies the video as access-denied.
+_ACCESS_DENIED_MARKERS = (
+    "join this channel",  # channel members-only content
+    "members-only",
+    "this video is private",  # private video
+    "private video",
+    "video unavailable",  # deleted / taken down
+    # GeoRestrictedError subreason: "The uploader has not made this video
+    # available in your country" (yt-dlp extractor _video.py).
+    "in your country",
+)
+
+
+def is_access_denied(exc: BaseException) -> bool:
+    """True if ``exc`` looks like a permanent YouTube access block.
+
+    yt-dlp surfaces these as ``DownloadError``/``ExtractorError`` (or
+    ``GeoRestrictedError``) whose ``str()`` carries the playability reason.
+    We treat them as terminal ``access_denied`` so the video is skipped
+    rather than retried, instead of being mislabeled as a transient ASR
+    failure that burns quota on every retry.
+    """
+    text = str(exc).casefold()
+    return any(marker in text for marker in _ACCESS_DENIED_MARKERS)
 
 
 @dataclass(frozen=True)
@@ -94,6 +138,7 @@ class GlmAsrService:
         segment_sec: int = 28,
         workspace: str = "./storage/asr",
         language: str | None = None,
+        proxy_url: str | None = None,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -102,6 +147,7 @@ class GlmAsrService:
         self.workspace = workspace
         # Hint for the model (e.g. "zh", "en"). None lets the model autodetect.
         self.language = language
+        self.proxy_url = proxy_url
 
     # ------------------------------------------------------------------ public
 
@@ -113,6 +159,11 @@ class GlmAsrService:
             audio_path = self._download_audio(video_id, workdir)
             duration = self._probe_duration(audio_path)
             windows = self._split_audio(audio_path, workdir, duration)
+            if not windows:
+                raise AudioSplitError(
+                    f"no audio windows produced for {video_id} "
+                    f"(duration={duration:.1f}s)"
+                )
             logger.info(
                 "asr: video %s → %d windows (%.1fs total)",
                 video_id,
@@ -144,24 +195,60 @@ class GlmAsrService:
 
         outtmpl = os.path.join(workdir, "audio.%(ext)s")
         ydl_opts = {
-            "format": "bestaudio/best",
+            # Prefer a smaller audio-only stream; ASR does not need max-bitrate
+            # audio, and smaller transfers survive unstable proxies better.
+            "format": "worstaudio[abr<=64]/worstaudio/bestaudio/best",
             "outtmpl": outtmpl,
             "quiet": True,
             "no_warnings": True,
             "noprogress": True,
             "noplaylist": True,
+            "continuedl": True,
+            "retries": 8,
+            "fragment_retries": 8,
+            "file_access_retries": 3,
+            "extractor_retries": 3,
+            "socket_timeout": 30,
+            # Chunk long HTTP transfers so a proxy hiccup only retries a small
+            # range instead of losing the whole audio file.
+            "http_chunk_size": 1024 * 1024,
         }
+        if self.proxy_url:
+            ydl_opts["proxy"] = self.proxy_url
         url = f"https://www.youtube.com/watch?v={video_id}"
-        try:
-            with YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-        except Exception as exc:  # noqa: BLE001
-            raise AudioDownloadError(f"yt-dlp failed for {video_id}: {exc}") from exc
+        last_exc: Exception | None = None
+        for attempt in range(1, _AUDIO_DOWNLOAD_ATTEMPTS + 1):
+            try:
+                with YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if (
+                    attempt >= _AUDIO_DOWNLOAD_ATTEMPTS
+                    or not _is_retryable_download_error(exc)
+                ):
+                    raise AudioDownloadError(
+                        f"yt-dlp failed for {video_id}: {exc}"
+                    ) from exc
+                logger.warning(
+                    "asr: yt-dlp transient download error for %s "
+                    "(attempt %d/%d): %s",
+                    video_id,
+                    attempt,
+                    _AUDIO_DOWNLOAD_ATTEMPTS,
+                    exc,
+                )
+                _remove_partial_audio_files(workdir)
+                time.sleep(float(attempt))
+        else:  # pragma: no cover - loop always breaks or raises
+            raise AudioDownloadError(f"yt-dlp failed for {video_id}: {last_exc}")
 
+        _remove_partial_audio_files(workdir)
         candidates = [
             os.path.join(workdir, f)
             for f in os.listdir(workdir)
-            if f.startswith("audio.")
+            if f.startswith("audio.") and not _is_partial_audio_file(f)
         ]
         if not candidates:
             raise AudioDownloadError(f"no audio file produced for {video_id}")
@@ -190,11 +277,21 @@ class GlmAsrService:
                 check=True,
                 timeout=30,
             )
-            return float(out.stdout.strip() or 0.0)
         except Exception as exc:  # noqa: BLE001
-            # Fallback: assume 0 → no windows. Caller handles empty.
-            logger.warning("ffprobe failed (%s); assuming unknown duration", exc)
-            return 0.0
+            raise AudioSplitError(f"ffprobe failed for {audio_path}: {exc}") from exc
+
+        duration_text = out.stdout.strip()
+        try:
+            duration = float(duration_text)
+        except ValueError as exc:
+            raise AudioSplitError(
+                f"ffprobe returned invalid duration for {audio_path}: {duration_text!r}"
+            ) from exc
+        if duration <= 0:
+            raise AudioSplitError(
+                f"ffprobe returned non-positive duration for {audio_path}: {duration:.1f}s"
+            )
+        return duration
 
     def _split_audio(
         self, audio_path: str, workdir: str, duration: float
@@ -339,11 +436,40 @@ def _mb(path: str) -> float:
         return 0.0
 
 
+def _is_retryable_download_error(exc: BaseException) -> bool:
+    text = str(exc).casefold()
+    return any(marker in text for marker in _AUDIO_DOWNLOAD_RETRY_MARKERS)
+
+
+def _remove_partial_audio_files(workdir: str) -> None:
+    for name in os.listdir(workdir):
+        if not name.startswith("audio."):
+            continue
+        if _is_partial_audio_file(name):
+            try:
+                os.remove(os.path.join(workdir, name))
+            except OSError:
+                logger.debug("could not remove partial audio file %s", name)
+
+
+def _is_partial_audio_file(name: str) -> bool:
+    return name.endswith((".part", ".ytdl")) or ".part-" in name
+
+
 class FakeAsrService:
     """Test double. Returns a canned transcript for known video_ids."""
 
-    def __init__(self, transcripts: dict[str, Transcript] | None = None) -> None:
+    def __init__(
+        self,
+        transcripts: dict[str, Transcript] | None = None,
+        *,
+        failure: AsrError | None = None,
+    ) -> None:
         self.transcripts = transcripts or {}
+        # When set, transcribe() raises this exact error (preserving __cause__)
+        # instead of the default no-canned-transcript AsrError. Used to
+        # simulate an AudioDownloadError carrying a yt-dlp access-denied reason.
+        self.failure = failure
         self.calls: list[str] = []
 
     def with_transcript(self, video_id: str, transcript: Transcript) -> FakeAsrService:
@@ -352,6 +478,8 @@ class FakeAsrService:
 
     def transcribe(self, video_id: str) -> Transcript:
         self.calls.append(video_id)
+        if self.failure is not None:
+            raise self.failure
         if video_id in self.transcripts:
             return self.transcripts[video_id]
         raise AsrError(f"no canned ASR transcript for {video_id}")
@@ -374,5 +502,6 @@ def build_asr_service_from_settings() -> AsrService | None:
         model=settings.asr_model,
         segment_sec=settings.asr_segment_sec,
         workspace=settings.asr_audio_workspace,
-        language=settings.youtube_preferred_language,
+        language=settings.asr_language,
+        proxy_url=settings.youtube_proxy_url,
     )

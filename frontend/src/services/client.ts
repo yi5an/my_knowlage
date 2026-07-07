@@ -41,7 +41,11 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     if (text) {
       try {
         const parsed = JSON.parse(text);
-        const msg = parsed?.error?.detail ?? parsed?.detail ?? parsed?.message;
+        const msg =
+          parsed?.error?.detail ??
+          parsed?.error?.message ??
+          parsed?.detail ??
+          parsed?.message;
         if (typeof msg === "string" && msg) detail = msg;
       } catch {
         if (text.length < 200) detail = text;
@@ -60,4 +64,3 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   }
   return JSON.parse(body) as T;
 }
-

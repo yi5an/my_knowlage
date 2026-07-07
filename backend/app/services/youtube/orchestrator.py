@@ -26,7 +26,8 @@ from app.schemas.youtube import (
     VideoChunk,
     VideoMeta,
 )
-from app.services.youtube.asr import AsrError, AsrService
+from app.services.document_visibility import is_imported_to_knowledge_base
+from app.services.youtube.asr import AsrError, AsrService, is_access_denied
 from app.services.youtube.chunker import chunk_transcript
 from app.services.youtube.extraction_pipeline import ExtractionPipeline
 from app.services.youtube.fetcher import YouTubeFetcher
@@ -36,6 +37,7 @@ from app.services.youtube.transcript import (
     TranscriptError,
     TranscriptExtractor,
 )
+from app.services.youtube.transcript_formatting import format_transcript_for_reading
 from app.services.youtube.translation import TranslationService
 from app.services.youtube.urls import parse_target
 
@@ -48,7 +50,7 @@ class SummaryJobResult:
 
     video_id: str
     document_id: str | None
-    status: str  # succeeded | no_transcript | failed
+    status: str  # succeeded | no_transcript | failed | access_denied
     error: str | None = None
     summary: SummaryResult | None = None
 
@@ -166,12 +168,16 @@ class VideoSummaryOrchestrator:
         video = self._upsert_video(meta, workspace_id, subscription_id)
         transcript, asr_used = self._extract_transcript(meta.video_id, video, preferred_language)
         if transcript is None:
-            # _extract_transcript already persisted status + error_message.
+            # _extract_transcript already persisted the terminal fetch_status
+            # (no_transcript | failed | access_denied) + error_message. Mirror
+            # it onto the result so callers (subscription tallies, the API
+            # layer) see the same classification without re-deriving it.
             err = video.error_message or "no transcript"
+            status = video.fetch_status if video.fetch_status else "failed"
             return SummaryJobResult(
                 video_id=meta.video_id,
                 document_id=None,
-                status="no_transcript" if not asr_used else "failed",
+                status=status,
                 error=err,
             )
 
@@ -223,10 +229,13 @@ class VideoSummaryOrchestrator:
         document.status = "ready"
         self.session.commit()
 
-        # Enrich the knowledge graph: extract entities/relations from the
-        # transcript. This is best-effort and never downgrades a successful
-        # summary — extraction failures are logged and swallowed.
-        if self.extraction_pipeline is not None:
+        # YouTube summaries are staged first. Entity/relation extraction runs
+        # only after the user explicitly imports the summary to the knowledge
+        # base.
+        if (
+            self.extraction_pipeline is not None
+            and is_imported_to_knowledge_base(document)
+        ):
             try:
                 self.extraction_pipeline.run(
                     workspace_id=workspace_id,
@@ -239,6 +248,25 @@ class VideoSummaryOrchestrator:
                     meta.video_id,
                     exc,
                 )
+
+        # Mirror the summary into the investment feed as an opinion-layer item
+        # (doc 04 §13). Best-effort: a failure here must NEVER downgrade a
+        # successful YouTube summary. Idempotent via dedupe_key.
+        try:
+            from app.services.investment.service import InvestmentService
+
+            InvestmentService(session=self.session).create_item_from_document(
+                document=document,
+                info_layer="opinion",
+                source_name=getattr(video, "channel_name", None) or "YouTube",
+                source_url=f"https://www.youtube.com/watch?v={meta.video_id}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "investment opinion item creation failed for %s (summary kept): %s",
+                meta.video_id,
+                exc,
+            )
 
         return SummaryJobResult(
             video_id=meta.video_id,
@@ -294,8 +322,18 @@ class VideoSummaryOrchestrator:
         try:
             transcript = self.asr_service.transcribe(video_id)
         except AsrError as asr_err:
-            video.fetch_status = "failed"
-            video.error_message = f"asr: {asr_err} (captions also failed: {caption_err})"
+            # A members-only / private / deleted / geo-restricted video is a
+            # PERMANENT access block, not a transient failure: retrying would
+            # just re-hit the same wall and waste yt-dlp + GLM-ASR quota.
+            # yt-dlp preserves the playability reason on __cause__, so we can
+            # classify it as a terminal ``access_denied`` state that the retry
+            # endpoint refuses to re-queue.
+            if asr_err.__cause__ is not None and is_access_denied(asr_err.__cause__):
+                video.fetch_status = "access_denied"
+                video.error_message = f"access denied: {asr_err}"
+            else:
+                video.fetch_status = "failed"
+                video.error_message = f"asr: {asr_err} (captions also failed: {caption_err})"
             self.session.commit()
             return None, True
         if not transcript.segments:
@@ -371,19 +409,24 @@ class VideoSummaryOrchestrator:
             status="processing",
             # New summary → unread until the user opens its card.
             is_unread=True,
-            metadata_={"channel": meta.channel_name, "video_id": meta.video_id},
+            metadata_={
+                "channel": meta.channel_name,
+                "video_id": meta.video_id,
+                "knowledge_base_imported": False,
+            },
         )
         self.session.add(document)
         self.session.flush()
 
-        # Store the full transcript as version 1 for traceability.
+        # Store the full transcript as readable paragraphs for traceability.
+        transcript_text = format_transcript_for_reading(transcript)
         version = DocumentVersion(
             id=f"docver_{uuid4().hex}",
             doc_id=document.id,
             version_no=1,
             title=meta.title,
-            content_md=" ".join(seg.text for seg in transcript.segments),
-            content_text=" ".join(seg.text for seg in transcript.segments),
+            content_md=transcript_text,
+            content_text=transcript_text,
             change_summary="imported from youtube transcript",
             created_by="youtube_pipeline",
         )

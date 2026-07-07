@@ -59,7 +59,7 @@ class EntityExtractionJobHandler:
         session: Session,
         llm_client: StructuredOutputClient,
     ) -> dict[str, Any]:
-        doc_id = _document_id(job)
+        doc_id = _required_document_id(job)
         workspace_id = job.workspace_id
         service = EntityExtractionService(session=session, llm_client=llm_client)
         chunks = _document_chunks(session, doc_id)
@@ -138,7 +138,7 @@ class RelationExtractionJobHandler:
         session: Session,
         llm_client: StructuredOutputClient,
     ) -> dict[str, Any]:
-        doc_id = _document_id(job)
+        doc_id = _required_document_id(job)
         workspace_id = job.workspace_id
         service = RelationExtractionService(session=session, llm_client=llm_client)
         chunks = _document_chunks(session, doc_id)
@@ -245,6 +245,8 @@ class TaskJobProcessor:
 
     def _after_extraction(self, session: Session, job: TaskJob) -> None:
         doc_id = _document_id(job)
+        if doc_id is None:
+            return  # non-document job (e.g. investment_fetch) — nothing to update
         document = session.get(Document, doc_id)
         if document is None:
             return
@@ -305,11 +307,23 @@ class TaskJobProcessor:
         logger.warning("task job %s (%s) failed: %s", job.id, job.job_type, message)
 
 
-def _document_id(job: TaskJob) -> str:
+def _document_id(job: TaskJob) -> str | None:
+    """Return the job's target document id, or None if the job isn't doc-scoped.
+
+    Some job types (e.g. ``investment_fetch``) target other entities and carry
+    no ``input.document_id``; callers that only need a doc id for doc-status
+    bookkeeping must handle None.
+    """
     doc_id = (job.input or {}).get("document_id")
+    return str(doc_id) if doc_id else None
+
+
+def _required_document_id(job: TaskJob) -> str:
+    """Document id for extraction handlers, which are always document-scoped."""
+    doc_id = _document_id(job)
     if not doc_id:
         raise ValueError(f"task job {job.id} has no input.document_id")
-    return str(doc_id)
+    return doc_id
 
 
 def _document_chunks(session: Session, doc_id: str) -> list[DocumentChunk]:
