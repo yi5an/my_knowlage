@@ -48,6 +48,19 @@ class Workspace(UpdatedTimestampMixin, Base):
     storage_mode: Mapped[str] = mapped_column(String(32), default="local", server_default="local")
 
 
+class WorkspaceSetting(UpdatedTimestampMixin, Base):
+    __tablename__ = "workspace_setting"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "key", name="uq_workspace_setting_key"),
+        Index("idx_workspace_setting_workspace", "workspace_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
+    value: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
+
+
 class UserProfile(TimestampMixin, Base):
     __tablename__ = "user_profile"
 
@@ -660,6 +673,14 @@ class InvestmentItem(UpdatedTimestampMixin, Base):
     suggested_impact_horizon: Mapped[str | None] = mapped_column(String(32))
     suggested_thesis_impact: Mapped[str | None] = mapped_column(String(32))
     classification_reason: Mapped[str | None] = mapped_column(Text())
+
+    @property
+    def attachments(self) -> list[dict[str, object]]:
+        """Structured attachments captured in ``raw_payload`` for API responses."""
+        raw_attachments = (self.raw_payload or {}).get("attachments")
+        if not isinstance(raw_attachments, list):
+            return []
+        return [a for a in raw_attachments if isinstance(a, dict)]
 
 
 class InvestmentThesis(UpdatedTimestampMixin, Base):

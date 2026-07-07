@@ -437,9 +437,16 @@ class InvestmentService:
         """Translate untranslated items' title/summary to Chinese."""
         from app.services.investment.translation import InvestmentTranslationService
 
-        return InvestmentTranslationService(
-            session=self.session, llm_client=llm_client  # type: ignore[arg-type]
-        ).translate_untranslated(workspace_id=workspace_id, limit=limit)
+        try:
+            return InvestmentTranslationService(
+                session=self.session, llm_client=llm_client  # type: ignore[arg-type]
+            ).translate_untranslated(
+                workspace_id=workspace_id,
+                limit=limit,
+                raise_on_failure=True,
+            )
+        except RuntimeError as exc:
+            raise AppError("translation_failed", str(exc), 502) from exc
 
     def verify_claim(
         self,

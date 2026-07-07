@@ -3,6 +3,8 @@ and mindmap assembly. Uses the MockStructuredOutputClient so no real LLM
 is contacted.
 """
 
+from types import SimpleNamespace
+
 from app.schemas.youtube import (
     Chapter,
     KeyPoint,
@@ -17,6 +19,7 @@ from app.services.structured_output import (
 )
 from app.services.youtube.summary import (
     SummaryService,
+    _configured_llm_models,
     _sanitize_timestamps,
     build_mindmap,
     build_summary_prompt,
@@ -44,6 +47,15 @@ def test_build_summary_prompt_includes_chapters() -> None:
     chapters = [Chapter(title="Intro", start_sec=0, start_str="00:00")]
     prompt = build_summary_prompt("T", transcript, chapters=chapters)
     assert "00:00 Intro" in prompt
+
+
+def test_configured_llm_models_preserves_allowed_fallback_order() -> None:
+    settings = SimpleNamespace(
+        llm_model="gpt-5.5",
+        llm_fallback_models="glm-5.2,gpt-5.5",
+    )
+
+    assert _configured_llm_models(settings) == ["gpt-5.5", "glm-5.2"]
 
 
 def test_summarize_returns_validated_summary_and_mindmap() -> None:

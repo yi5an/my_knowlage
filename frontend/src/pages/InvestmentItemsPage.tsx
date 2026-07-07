@@ -4,6 +4,7 @@ import {
   Card,
   Empty,
   Input,
+  message,
   Segmented,
   Space,
   Spin,
@@ -59,6 +60,7 @@ export function InvestmentItemsPage() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<InvestmentItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [translating, setTranslating] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,13 +83,27 @@ export function InvestmentItemsPage() {
     void load();
   }, [load]);
 
+  const handleTranslate = useCallback(async () => {
+    setTranslating(true);
+    try {
+      const result = await investmentApi.translateItems("ws_default", 100);
+      message.success(`已翻译 ${result.translated} 条，跳过 ${result.skipped} 条`);
+      await load();
+    } catch (e) {
+      const detail = e instanceof ApiError ? e.message : String(e);
+      message.error(`翻译失败：${detail}`);
+    } finally {
+      setTranslating(false);
+    }
+  }, [load]);
+
   const filtered = useMemo(() => {
     if (!search.trim()) return items;
     const q = search.trim().toLowerCase();
-    return items.filter(
-      (i) =>
-        i.title.toLowerCase().includes(q) ||
-        (i.source_name ?? "").toLowerCase().includes(q),
+    return items.filter((i) =>
+      [i.title, i.title_zh, i.summary, i.summary_zh, i.source_name]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q)),
     );
   }, [items, search]);
 
@@ -106,6 +122,15 @@ export function InvestmentItemsPage() {
           >
             {r.title_zh ?? r.title}
           </Typography.Link>
+          {(r.summary_zh ?? r.summary) && (
+            <Typography.Text
+              type="secondary"
+              ellipsis
+              style={{ fontSize: 12, maxWidth: 520 }}
+            >
+              {r.summary_zh ?? r.summary}
+            </Typography.Text>
+          )}
           {r.source_url && (
             <Typography.Link ellipsis style={{ fontSize: 12, maxWidth: 320 }}>
               {r.source_url}
@@ -143,6 +168,22 @@ export function InvestmentItemsPage() {
       width: 100,
       render: (s: ActionStatus) => <ReviewStatusTag status={s} />,
     },
+    {
+      title: "操作",
+      key: "actions",
+      width: 100,
+      render: (_, r) => (
+        <Button
+          type="link"
+          onClick={() => {
+            setSelected(r);
+            setDrawerOpen(true);
+          }}
+        >
+          查看详情
+        </Button>
+      ),
+    },
   ];
 
   return (
@@ -166,6 +207,9 @@ export function InvestmentItemsPage() {
               style={{ width: 240 }}
             />
             <Button onClick={() => void load()}>刷新</Button>
+            <Button loading={translating} onClick={() => void handleTranslate()}>
+              翻译未翻译内容
+            </Button>
           </Space>
         </Space>
 

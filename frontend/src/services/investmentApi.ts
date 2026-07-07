@@ -66,6 +66,14 @@ export interface InvestmentItem {
   suggested_impact_horizon?: string | null;
   suggested_thesis_impact?: string | null;
   classification_reason?: string | null;
+  attachments?: InvestmentAttachment[];
+}
+
+export interface InvestmentAttachment {
+  title: string;
+  url: string;
+  content_type?: string | null;
+  text_excerpt?: string | null;
 }
 
 export interface InvestmentWatchlist {
@@ -302,6 +310,13 @@ export const investmentApi = {
   updateItem(id: string, payload: UpdateItemPayload): Promise<InvestmentItem> {
     return apiRequest(`/investment/items/${id}`, { method: "PATCH", body: payload });
   },
+  classifyItem(id: string): Promise<InvestmentItem> {
+    return apiRequest(`/investment/items/${id}/classify`, { method: "POST" });
+  },
+  translateItems(workspaceId = WS, limit = 20): Promise<{ translated: number; skipped: number }> {
+    const q = buildQuery({ workspace_id: workspaceId, limit });
+    return apiRequest(`/investment/items/translate${q}`, { method: "POST" });
+  },
 
   // watchlist
   listWatchlist(workspaceId = WS): Promise<InvestmentWatchlist[]> {
@@ -369,5 +384,8 @@ export const investmentApi = {
     }>,
   ): Promise<InvestmentClaim> {
     return apiRequest(`/investment/claims/${id}`, { method: "PATCH", body: payload });
+  },
+  verifyClaim(id: string): Promise<InvestmentClaim> {
+    return apiRequest(`/investment/claims/${id}/verify`, { method: "POST" });
   },
 };

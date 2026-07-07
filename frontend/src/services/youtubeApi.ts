@@ -45,6 +45,7 @@ export interface VideoSummaryCard {
   document_id: string;
   video_id: string;
   title: string;
+  knowledge_base_imported: boolean;
   channel_name: string | null;
   duration_sec: number | null;
   published_at: string | null;
@@ -83,6 +84,14 @@ export interface PollResponse {
   videos: { video_id: string; title: string; channel_id: string }[];
 }
 
+export interface YouTubeAutoRetrySettings {
+  workspace_id: string;
+  enabled: boolean;
+  max_attempts: number;
+  backoff_minutes: number;
+  batch_size: number;
+}
+
 // --- API calls ---
 
 export function youtubeTimestampUrl(videoId: string, timestamp: number): string {
@@ -104,6 +113,15 @@ export function getSummaryCard(documentId: string): Promise<VideoSummaryCard> {
   return apiRequest<VideoSummaryCard>(`/youtube/summaries/${documentId}`);
 }
 
+export function importSummaryToKnowledgeBase(
+  documentId: string,
+): Promise<VideoSummaryCard> {
+  return apiRequest<VideoSummaryCard>(
+    `/youtube/summaries/${documentId}/import-to-knowledge-base`,
+    { method: "POST" },
+  );
+}
+
 /**
  * Background job status returned by the by-video poll endpoint.
  *  - processing: ASR/translation/summary pipeline still running
@@ -113,7 +131,13 @@ export function getSummaryCard(documentId: string): Promise<VideoSummaryCard> {
  */
 export interface SummaryJobStatus {
   video_id: string;
-  status: "processing" | "unknown" | "succeeded" | "no_transcript" | "failed";
+  status:
+    | "processing"
+    | "unknown"
+    | "succeeded"
+    | "no_transcript"
+    | "failed"
+    | "access_denied";
   document_id?: string | null;
   error?: string | null;
 }
@@ -150,6 +174,11 @@ export async function pollSummaryUntilDone(
     if (status.status === "no_transcript") {
       throw new Error("该视频没有字幕,且未启用语音识别(ASR),无法总结。");
     }
+    if (status.status === "access_denied") {
+      throw new Error(
+        "该视频无访问权限（会员专属/私有/已删除/地区受限），已跳过。",
+      );
+    }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error("总结超时,请稍后刷新查看。");
@@ -182,10 +211,30 @@ export function triggerPoll(workspaceId = "ws_default"): Promise<PollResponse> {
   return apiRequest<PollResponse>(`/youtube/poll?workspace_id=${workspaceId}`, { method: "POST" });
 }
 
+export function getAutoRetrySettings(
+  workspaceId = "ws_default",
+): Promise<YouTubeAutoRetrySettings> {
+  return apiRequest<YouTubeAutoRetrySettings>(
+    `/youtube/auto-retry-settings?workspace_id=${workspaceId}`,
+  );
+}
+
+export function updateAutoRetrySettings(
+  settings: Omit<YouTubeAutoRetrySettings, "workspace_id">,
+  workspaceId = "ws_default",
+): Promise<YouTubeAutoRetrySettings> {
+  return apiRequest<YouTubeAutoRetrySettings>(
+    `/youtube/auto-retry-settings?workspace_id=${workspaceId}`,
+    { method: "PUT", body: settings },
+  );
+}
+
 export interface DashboardStats {
   subscriptions: number;
   summarized_videos: number;
   pending_videos: number;
+  /** Permanently inaccessible videos (members-only / private / deleted / geo-blocked). */
+  denied_videos: number;
   entities: number;
   relations: number;
 }
@@ -203,6 +252,10 @@ export interface SummaryListItem {
   created_at: string | null;
   /** True until the user opens this summary's card (shows a star). */
   is_unread: boolean;
+  summary_status: "pending" | "processing" | "completed" | "failed" | string;
+  error: string | null;
+  failure_stage?: "capture" | "transcript" | "summary" | "pending" | "processing" | null;
+  retryable?: boolean;
 }
 
 export function getDashboardStats(workspaceId = "ws_default"): Promise<DashboardStats> {
@@ -215,6 +268,16 @@ export function listSummaries(
 ): Promise<SummaryListItem[]> {
   return apiRequest<SummaryListItem[]>(
     `/youtube/summaries?workspace_id=${workspaceId}&limit=${limit}`,
+  );
+}
+
+export function retryVideo(
+  videoId: string,
+  workspaceId = "ws_default",
+): Promise<ManualSummaryResponse> {
+  return apiRequest<ManualSummaryResponse>(
+    `/youtube/videos/${videoId}/retry?workspace_id=${workspaceId}`,
+    { method: "POST" },
   );
 }
 

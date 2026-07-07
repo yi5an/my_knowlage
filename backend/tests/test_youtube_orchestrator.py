@@ -14,6 +14,7 @@ from app.infrastructure.database import Base
 from app.infrastructure.models import (
     Document,
     DocumentChunk,
+    DocumentVersion,
     InvestmentItem,
     Video,
     Workspace,
@@ -132,6 +133,13 @@ def test_summarize_url_full_loop(session: Session) -> None:
     assert document.mindmap_data is not None
     assert document.transcript_lang == "en"
     assert document.status == "ready"
+    assert document.metadata_["knowledge_base_imported"] is False
+
+    version = session.query(DocumentVersion).filter_by(doc_id=document.id).one()
+    assert version.content_text == (
+        "[00:00] Welcome to the video. GPT-5 improves reasoning by forty percent. "
+        "We cut inference cost by ten times."
+    )
 
     # Chunks persisted with time offsets.
     chunks = session.query(DocumentChunk).all()

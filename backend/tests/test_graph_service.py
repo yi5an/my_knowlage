@@ -48,6 +48,49 @@ def test_graph_sync_creates_nodes_and_edges(graph_service: GraphSyncService) -> 
     assert result.edge_count >= 6
 
 
+def test_graph_sync_hides_unimported_youtube_summary(
+    graph_service: GraphSyncService,
+    db_session: Session,
+) -> None:
+    db_session.add(
+        Document(
+            id="doc_staged_youtube",
+            workspace_id="ws_graph",
+            title="Staged YouTube Summary",
+            source_type="youtube",
+            parse_status="completed",
+            metadata_={"knowledge_base_imported": False},
+        )
+    )
+    db_session.add(
+        DocumentVersion(
+            id="version_staged_youtube",
+            doc_id="doc_staged_youtube",
+            version_no=1,
+            title="Staged YouTube Summary",
+            content_md="not imported",
+        )
+    )
+    db_session.add(
+        DocumentChunk(
+            id="chunk_staged_youtube",
+            doc_id="doc_staged_youtube",
+            version_id="version_staged_youtube",
+            chunk_index=0,
+            content="not imported",
+        )
+    )
+    db_session.commit()
+
+    response = graph_service.search("*", workspace_id="ws_graph", limit=50)
+
+    ids = {node.id for node in response.nodes}
+    assert "doc_graph" in ids
+    assert "chunk_graph" in ids
+    assert "doc_staged_youtube" not in ids
+    assert "chunk_staged_youtube" not in ids
+
+
 def test_one_hop_neighbors(graph_service: GraphSyncService) -> None:
     response = graph_service.neighbors(
         entity_id="entity_nvda",

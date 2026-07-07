@@ -25,6 +25,7 @@ from app.schemas.investment import (
     InvestmentTranslationSchema,
 )
 from app.services.investment.fetch_job_handler import (
+    INVESTMENT_CLASSIFICATION_JOB_TYPE,
     INVESTMENT_FETCH_JOB_TYPE,
     INVESTMENT_TRANSLATION_JOB_TYPE,
     InvestmentFetchJobHandler,
@@ -59,6 +60,7 @@ def _make_item(
     summary: str | None = None,
     item_id: str | None = None,
     title_zh: str | None = None,
+    summary_zh: str | None = None,
 ) -> InvestmentItem:
     item = InvestmentItem(
         id=item_id or f"inv_{uuid4().hex}",
@@ -69,6 +71,7 @@ def _make_item(
         source_credibility="official",
         dedupe_key=f"dk_{uuid4().hex}",
         title_zh=title_zh,
+        summary_zh=summary_zh,
     )
     session.add(item)
     session.commit()
@@ -113,17 +116,46 @@ def test_skips_already_chinese_items_without_llm_call(session: Session):
 
 
 def test_does_not_requery_already_translated_items(session: Session):
-    # title_zh already set → not picked up by translate_untranslated.
-    _make_item(session, "already done", title_zh="已翻译")
+    # title_zh and summary_zh already set → not picked up by translate_untranslated.
+    _make_item(session, "already done", "done summary", title_zh="已翻译", summary_zh="已翻译摘要")
     _make_item(session, "needs translation")
 
     # No client: the "needs translation" (English) item is in the to_translate
     # bucket but with no client the service returns translated=0. The
-    # pre-translated item is never queried at all (WHERE title_zh IS NULL).
+    # pre-translated item is never queried at all.
     result = InvestmentTranslationService(
         session=session, llm_client=None
     ).translate_untranslated()
     assert result["translated"] == 0
+
+
+def test_retranslates_summary_when_refetch_clears_summary_zh(session: Session):
+    item = _make_item(
+        session,
+        "Federal Reserve issues FOMC statement",
+        "The Committee decided to maintain the target range.",
+        title_zh="美联储发布FOMC声明",
+        summary_zh=None,
+    )
+    canned = InvestmentTranslationSchema(
+        translations=[
+            InvestmentTranslationItem(
+                item_id=item.id,
+                title_zh="美联储发布FOMC声明",
+                summary_zh="委员会决定维持目标区间。",
+            )
+        ]
+    )
+    client = MockStructuredOutputClient(outputs={InvestmentTranslationSchema: canned})
+
+    result = InvestmentTranslationService(
+        session=session, llm_client=client
+    ).translate_untranslated()
+
+    assert result["translated"] == 1
+    session.refresh(item)
+    assert item.title_zh == "美联储发布FOMC声明"
+    assert item.summary_zh == "委员会决定维持目标区间。"
 
 
 def test_llm_failure_degrades_gracefully(session: Session):
@@ -138,6 +170,22 @@ def test_llm_failure_degrades_gracefully(session: Session):
     ).translate_untranslated()
     assert result["translated"] == 0
     # original title/summary untouched
+    item = session.scalar(select(InvestmentItem))
+    assert item.title_zh is None
+
+
+def test_llm_failure_can_be_raised_for_user_visible_retry(session: Session):
+    _make_item(session, "Some English title", "summary")
+
+    class _BoomClient:
+        def generate(self, prompt, schema):  # noqa: ANN001
+            raise RuntimeError("LLM is down")
+
+    with pytest.raises(RuntimeError, match="investment translation failed"):
+        InvestmentTranslationService(
+            session=session, llm_client=_BoomClient()  # type: ignore[arg-type]
+        ).translate_untranslated(raise_on_failure=True)
+
     item = session.scalar(select(InvestmentItem))
     assert item.title_zh is None
 
@@ -173,6 +221,31 @@ def test_translation_handler_uses_llm_client(session: Session):
     assert en.title_zh == "FOMC声明"
 
 
+def test_translation_handler_raises_when_llm_fails(session: Session):
+    _make_item(session, "FOMC statement", "rate held")
+
+    class _BoomClient:
+        def generate(self, prompt, schema):  # noqa: ANN001
+            raise RuntimeError("LLM is down")
+
+    job = TaskJob(
+        id="job_t_fail",
+        workspace_id="ws_default",
+        job_type=INVESTMENT_TRANSLATION_JOB_TYPE,
+        target_type="investment_source",
+        target_id="src_x",
+        status="running",
+        input={"source_id": "src_x", "workspace_id": "ws_default"},
+    )
+    session.add(job)
+    session.commit()
+
+    with pytest.raises(RuntimeError, match="investment translation failed"):
+        InvestmentTranslationJobHandler().handle(
+            job, session, _BoomClient()  # type: ignore[arg-type]
+        )
+
+
 # --- fetch handler enqueues translation -----------------------------------
 
 
@@ -189,7 +262,7 @@ class _FakeHttp:
         pass
 
 
-def test_successful_fetch_enqueues_translation_job(session: Session):
+def test_successful_fetch_enqueues_translation_and_classification_jobs(session: Session):
     src = InvestmentSource(
         id="src_t",
         workspace_id="ws_default",
@@ -222,6 +295,14 @@ def test_successful_fetch_enqueues_translation_job(session: Session):
     assert len(translation_jobs) == 1
     assert translation_jobs[0].status == "pending"
     assert translation_jobs[0].input["source_id"] == src.id
+    classification_jobs = list(
+        session.scalars(
+            select(TaskJob).where(TaskJob.job_type == INVESTMENT_CLASSIFICATION_JOB_TYPE)
+        )
+    )
+    assert len(classification_jobs) == 1
+    assert classification_jobs[0].status == "pending"
+    assert classification_jobs[0].input["source_id"] == src.id
 
 
 def test_fetch_does_not_duplicate_translation_job(session: Session):
@@ -267,6 +348,55 @@ def test_fetch_does_not_duplicate_translation_job(session: Session):
         )
     )
     assert len(translation_jobs) == 1  # the pre-existing one, no duplicate
+
+
+def test_dedupe_fetch_enqueues_translation_for_existing_untranslated_items(
+    session: Session,
+):
+    src = InvestmentSource(
+        id="src_existing_untranslated",
+        workspace_id="ws_default",
+        source_type="rss",
+        name="Existing RSS",
+        url="https://x/existing.xml",
+        default_info_layer="macro_calendar",
+        enabled=True,
+    )
+    session.add(src)
+    job = TaskJob(
+        id="job_existing_fetch",
+        workspace_id="ws_default",
+        job_type=INVESTMENT_FETCH_JOB_TYPE,
+        target_type="investment_source",
+        target_id=src.id,
+        status="running",
+        input={"source_id": src.id},
+    )
+    session.add(job)
+    session.commit()
+
+    handler = InvestmentFetchJobHandler(http_client=_FakeHttp())
+    handler.handle(job, session, llm_client=None)
+    session.execute(
+        TaskJob.__table__.delete().where(
+            TaskJob.job_type.in_(
+                [INVESTMENT_TRANSLATION_JOB_TYPE, INVESTMENT_CLASSIFICATION_JOB_TYPE]
+            )
+        )
+    )
+    session.commit()
+
+    output = handler.handle(job, session, llm_client=None)
+
+    assert output["items_created"] == 0
+    assert output["items_skipped"] == 1
+    translation_jobs = list(
+        session.scalars(
+            select(TaskJob).where(TaskJob.job_type == INVESTMENT_TRANSLATION_JOB_TYPE)
+        )
+    )
+    assert len(translation_jobs) == 1
+    assert translation_jobs[0].status == "pending"
 
 
 def _raw_item() -> InvestmentRawItem:

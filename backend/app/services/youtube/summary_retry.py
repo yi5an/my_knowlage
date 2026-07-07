@@ -28,12 +28,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.infrastructure.models import Document, DocumentVersion, Video
 from app.schemas.youtube import Transcript, TranscriptSegment
+from app.services.structured_output import is_transient_structured_output_failure
 from app.services.youtube.chunker import chunk_transcript
 from app.services.youtube.extraction_pipeline import ExtractionPipeline
 from app.services.youtube.summary import SummaryService
@@ -44,6 +46,7 @@ logger = logging.getLogger(__name__)
 # been attempted. Stored in the existing JSON column so no migration is
 # needed and the count survives restarts.
 RETRY_COUNT_KEY = "summary_retry_count"
+RETRY_NEXT_AT_KEY = "summary_retry_next_at"
 
 # Transcripts shorter than this aren't worth a summary attempt (and tend to
 # produce empty LLM responses), so they're skipped rather than retried.
@@ -80,11 +83,19 @@ class FailedSummaryRetryScanner:
         extraction_pipeline: ExtractionPipeline | None = None,
         *,
         max_retries: int = 3,
+        workspace_id: str | None = None,
+        batch_size: int | None = None,
+        backoff_minutes: int = 0,
+        now: datetime | None = None,
     ) -> None:
         self.session = session
         self.summary_service = summary_service
         self.extraction_pipeline = extraction_pipeline
         self.max_retries = max_retries
+        self.workspace_id = workspace_id
+        self.batch_size = batch_size
+        self.backoff_minutes = backoff_minutes
+        self.now = now or datetime.now(UTC)
 
     def scan(self) -> RetryReport:
         """Find and retry failed summaries. Returns aggregate counts.
@@ -93,19 +104,35 @@ class FailedSummaryRetryScanner:
         never aborts the rest of the sweep. The session is committed per
         document to make progress durable.
         """
+        conditions = [
+            Document.source_type == "youtube",
+            Document.parse_status == "failed",
+            Document.summary_json.is_(None),
+        ]
+        if self.workspace_id is not None:
+            conditions.append(Document.workspace_id == self.workspace_id)
         docs = self.session.scalars(
-            select(Document).where(
-                Document.source_type == "youtube",
-                Document.parse_status == "failed",
-                Document.summary_json.is_(None),
+            select(Document)
+            .outerjoin(Video, Document.video_id == Video.id)
+            .where(*conditions)
+            .order_by(
+                Video.published_at.desc().nullslast(),
+                Video.created_at.desc(),
+                Document.created_at.desc(),
             )
         ).all()
 
         retried = succeeded = still_failing = skipped = 0
         for doc in docs:
+            if self.batch_size is not None and retried >= self.batch_size:
+                break
             meta = dict(doc.metadata_ or {})
             count = int(meta.get(RETRY_COUNT_KEY, 0))
             if count >= self.max_retries:
+                skipped += 1
+                continue
+            next_at = _parse_datetime(meta.get(RETRY_NEXT_AT_KEY))
+            if next_at is not None and next_at > self.now:
                 skipped += 1
                 continue
 
@@ -135,11 +162,22 @@ class FailedSummaryRetryScanner:
                     self.max_retries,
                     exc,
                 )
-                count += 1
-                meta[RETRY_COUNT_KEY] = count
+                is_transient = is_transient_structured_output_failure(exc)
+                if not is_transient:
+                    count += 1
+                    meta[RETRY_COUNT_KEY] = count
+                if self.backoff_minutes > 0:
+                    meta[RETRY_NEXT_AT_KEY] = (
+                        self.now + timedelta(minutes=self.backoff_minutes)
+                    ).isoformat()
                 # Keep the latest error inline for debugging, prefixed so
                 # the failed-state reason stays readable.
-                doc.ai_summary = f"summary retry {count} failed: {exc}"
+                label = (
+                    "summary retry transient failure"
+                    if is_transient
+                    else f"summary retry {count} failed"
+                )
+                doc.ai_summary = f"{label}: {exc}"
                 doc.metadata_ = meta
                 self.session.commit()
                 still_failing += 1
@@ -154,6 +192,7 @@ class FailedSummaryRetryScanner:
             doc.status = "ready"
             # Clear the retry counter now that it succeeded.
             meta.pop(RETRY_COUNT_KEY, None)
+            meta.pop(RETRY_NEXT_AT_KEY, None)
             doc.metadata_ = meta
             doc.is_unread = True
             self.session.commit()
@@ -229,3 +268,15 @@ class FailedSummaryRetryScanner:
                 )
             ],
         )
+
+
+def _parse_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed

@@ -20,6 +20,7 @@ from app.infrastructure.models import (
 )
 from app.schemas.documents import DocumentContentUpdateRequest
 from app.services.document_parsers import DocumentParserRouter, ParsedDocument
+from app.services.document_visibility import knowledge_base_document_filter
 
 
 class DocumentService:
@@ -129,7 +130,11 @@ class DocumentService:
             return None, task_job
 
     def list_documents(self, workspace_id: str | None = None) -> list[Document]:
-        statement = select(Document).order_by(Document.updated_at.desc())
+        statement = (
+            select(Document)
+            .where(knowledge_base_document_filter())
+            .order_by(Document.updated_at.desc())
+        )
         if workspace_id is not None:
             statement = statement.where(Document.workspace_id == workspace_id)
         return list(self.session.scalars(statement))

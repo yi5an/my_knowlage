@@ -89,6 +89,7 @@ def test_sec_sends_user_agent_header(monkeypatch):
     assert called_url == "https://data.sec.gov/submissions/CIK0000320193.json"
     assert headers is not None
     assert headers["User-Agent"] == "KnowPilot/0.1 test@example.com"
+    assert headers["Accept-Encoding"] == "gzip, deflate"
 
 
 def test_sec_raises_when_user_agent_missing(monkeypatch):

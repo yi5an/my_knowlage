@@ -145,7 +145,48 @@ def test_chunk_indexing_writes_vector_id(rag_service: RagService, db_session: Se
     assert search.results[0].chunk_id == chunk.id
 
 
-def seed_chunk(db_session: Session, chunk_id: str, content: str) -> DocumentChunk:
+def test_rag_skips_unimported_youtube_summary(
+    rag_service: RagService,
+    db_session: Session,
+) -> None:
+    staged = seed_chunk(
+        db_session,
+        chunk_id="chunk_staged_youtube",
+        content="This staged YouTube summary should stay out of search.",
+        source_type="youtube",
+        metadata={"knowledge_base_imported": False},
+    )
+    imported = seed_chunk(
+        db_session,
+        chunk_id="chunk_imported_youtube",
+        content="This imported YouTube summary should be searchable.",
+        source_type="youtube",
+        metadata={"knowledge_base_imported": True},
+    )
+
+    response = rag_service.search(
+        SearchRequest(
+            query="YouTube summary searchable",
+            workspace_id="ws_test",
+            mode=SearchMode.keyword,
+            limit=10,
+        )
+    )
+
+    chunk_ids = {result.chunk_id for result in response.results}
+    assert imported.id in chunk_ids
+    assert staged.id not in chunk_ids
+    assert rag_service.index_chunks("ws_test", chunk_ids=[staged.id]) == []
+
+
+def seed_chunk(
+    db_session: Session,
+    chunk_id: str,
+    content: str,
+    *,
+    source_type: str = "manual",
+    metadata: dict[str, object] | None = None,
+) -> DocumentChunk:
     workspace = db_session.get(Workspace, "ws_test")
     if workspace is None:
         workspace = Workspace(id="ws_test", name="Test Workspace")
@@ -155,8 +196,9 @@ def seed_chunk(db_session: Session, chunk_id: str, content: str) -> DocumentChun
         id=f"doc_{chunk_id}",
         workspace_id="ws_test",
         title="Search Notes",
-        source_type="manual",
+        source_type=source_type,
         parse_status="completed",
+        metadata_=metadata or {},
     )
     version = DocumentVersion(
         id=f"version_{chunk_id}",

@@ -31,6 +31,7 @@ from app.services.investment.fetchers import (
     InvestmentRawItem,
     SourceConfigError,
 )
+from app.services.investment.repositories import InvestmentItemRepository
 from app.services.investment.service import (
     INVESTMENT_FETCH_JOB_TYPE,
     InvestmentService,
@@ -168,6 +169,126 @@ def test_handler_dedupe_is_idempotent(session: Session):
     assert output["items_created"] == 0
     assert output["items_skipped"] == 2
     assert len(list(session.scalars(select(InvestmentItem)))) == 2
+
+
+def test_dedupe_updates_existing_item_when_refetch_has_better_summary(session: Session):
+    src = _make_source(session)
+    repo = InvestmentItemRepository(session)
+    raw_first = InvestmentRawItem(
+        external_id="https://fed.gov/a",
+        title="FOMC statement",
+        url="https://fed.gov/a",
+        source_name="Fed RSS",
+        published_at=None,
+        summary="FOMC statement",
+        raw_payload={"summary": "FOMC statement"},
+    )
+    better_summary = "The committee maintained the target range and described inflation risks."
+    raw_second = InvestmentRawItem(
+        external_id="https://fed.gov/a",
+        title="FOMC statement",
+        url="https://fed.gov/a",
+        source_name="Fed RSS",
+        published_at=None,
+        summary=better_summary,
+        raw_payload={
+            "summary": better_summary,
+            "detail_summary": better_summary,
+        },
+    )
+
+    assert repo.upsert_from_raw(raw_first, workspace_id="ws_default", source=src) is True
+    session.commit()
+    assert repo.upsert_from_raw(raw_second, workspace_id="ws_default", source=src) is False
+    session.commit()
+
+    item = session.scalar(select(InvestmentItem))
+    assert item is not None
+    assert item.summary == raw_second.summary
+    assert item.raw_payload["detail_summary"] == raw_second.summary
+    document = session.get(Document, item.document_id)
+    assert document is not None
+    assert document.ai_summary == raw_second.summary
+
+
+def test_dedupe_replaces_polluted_summary_with_cleaner_refetch(session: Session):
+    src = _make_source(session)
+    repo = InvestmentItemRepository(session)
+    polluted_summary = (
+        "An official website of the United States Government Official websites use .gov. "
+        "Share sensitive information only on official, secure websites. "
+        "For release at 2:00 p.m. EDT Share The attached tables and charts summarize "
+        "the economic projections. For media inquiries, please email press@example.gov."
+    )
+    clean_summary = (
+        "The attached tables and charts summarize the economic projections made by "
+        "Federal Open Market Committee participants."
+    )
+    raw_first = InvestmentRawItem(
+        external_id="https://fed.gov/projections",
+        title="Economic projections",
+        url="https://fed.gov/projections",
+        source_name="Fed RSS",
+        published_at=None,
+        summary=polluted_summary,
+        raw_payload={"summary": polluted_summary},
+    )
+    raw_second = InvestmentRawItem(
+        external_id="https://fed.gov/projections",
+        title="Economic projections",
+        url="https://fed.gov/projections",
+        source_name="Fed RSS",
+        published_at=None,
+        summary=clean_summary,
+        raw_payload={"summary": clean_summary, "detail_summary": clean_summary},
+    )
+
+    assert repo.upsert_from_raw(raw_first, workspace_id="ws_default", source=src) is True
+    session.commit()
+    assert repo.upsert_from_raw(raw_second, workspace_id="ws_default", source=src) is False
+    session.commit()
+
+    item = session.scalar(select(InvestmentItem))
+    assert item is not None
+    assert item.summary == clean_summary
+    assert item.summary_zh is None
+    document = session.get(Document, item.document_id)
+    assert document is not None
+    assert document.ai_summary == clean_summary
+
+
+def test_dedupe_replaces_overlong_attachment_summary_with_bounded_refetch(session: Session):
+    src = _make_source(session)
+    repo = InvestmentItemRepository(session)
+    old_summary = "Policy release. Attachment excerpt - Long PDF: " + ("x" * 5000)
+    new_summary = "Policy release. Attachment excerpt - Long PDF: " + ("x" * 1200)
+    raw_first = InvestmentRawItem(
+        external_id="https://fed.gov/attachment",
+        title="Policy release",
+        url="https://fed.gov/attachment",
+        source_name="Fed RSS",
+        published_at=None,
+        summary=old_summary,
+        raw_payload={"summary": old_summary},
+    )
+    raw_second = InvestmentRawItem(
+        external_id="https://fed.gov/attachment",
+        title="Policy release",
+        url="https://fed.gov/attachment",
+        source_name="Fed RSS",
+        published_at=None,
+        summary=new_summary,
+        raw_payload={"summary": new_summary},
+    )
+
+    assert repo.upsert_from_raw(raw_first, workspace_id="ws_default", source=src) is True
+    session.commit()
+    assert repo.upsert_from_raw(raw_second, workspace_id="ws_default", source=src) is False
+    session.commit()
+
+    item = session.scalar(select(InvestmentItem))
+    assert item is not None
+    assert item.summary == new_summary
 
 
 # --- handler: failure path ------------------------------------------------

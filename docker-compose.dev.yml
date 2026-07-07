@@ -8,6 +8,18 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+    environment:
+      YOUTUBE_PROXY_URL: ${YOUTUBE_PROXY_URL:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      ALL_PROXY: ${ALL_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,postgres,redis,backend,frontend}
+      http_proxy: ${HTTP_PROXY:-}
+      https_proxy: ${HTTPS_PROXY:-}
+      all_proxy: ${ALL_PROXY:-}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,postgres,redis,backend,frontend}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - postgres
       - redis
@@ -47,4 +59,3 @@ volumes:
   postgres_data:
   redis_data:
   frontend_node_modules:
-

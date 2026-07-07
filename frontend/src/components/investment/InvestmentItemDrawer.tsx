@@ -1,5 +1,16 @@
-import { Button, DatePicker, Drawer, Form, Input, Select, Space } from "antd";
-import { useEffect } from "react";
+import {
+  Button,
+  DatePicker,
+  Divider,
+  Drawer,
+  Form,
+  Input,
+  Select,
+  Space,
+  Typography,
+  message,
+} from "antd";
+import { useEffect, useState } from "react";
 import {
   investmentApi,
   type ActionStatus,
@@ -69,10 +80,18 @@ export function InvestmentItemDrawer({
   onUpdated?: () => void;
 }) {
   const [form] = Form.useForm();
+  const [classifying, setClassifying] = useState(false);
+  const displaySummary = item?.summary_zh ?? item?.summary;
+  const originalSummary =
+    item?.summary_zh && item.summary && item.summary_zh !== item.summary ? item.summary : null;
+  const attachments = item?.attachments ?? [];
 
   useEffect(() => {
     if (item) {
       form.setFieldsValue({
+        source: item.source_name
+          ? `${item.source_name}${item.source_url ? ` · ${item.source_url}` : ""}`
+          : "",
         title: item.title,
         summary: item.summary ?? "",
         importance: item.importance,
@@ -94,6 +113,19 @@ export function InvestmentItemDrawer({
     onClose();
   };
 
+  const handleClassify = async () => {
+    setClassifying(true);
+    try {
+      await investmentApi.classifyItem(item.id);
+      message.success("自动分类完成");
+      onUpdated?.();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setClassifying(false);
+    }
+  };
+
   return (
     <Drawer
       open={open}
@@ -107,6 +139,9 @@ export function InvestmentItemDrawer({
       width={520}
       footer={
         <Space style={{ float: "right" }}>
+          <Button loading={classifying} onClick={handleClassify}>
+            自动分类
+          </Button>
           <Button onClick={onClose}>取消</Button>
           <Button type="primary" onClick={handleSave}>
             保存
@@ -114,6 +149,78 @@ export function InvestmentItemDrawer({
         </Space>
       }
     >
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <div>
+          <Typography.Text type="secondary">来源</Typography.Text>
+          <div style={{ marginTop: 4 }}>
+            <Typography.Text>{item.source_name ?? "未知来源"}</Typography.Text>
+            {item.source_url && (
+              <Button
+                type="link"
+                href={item.source_url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ paddingInline: 8 }}
+              >
+                打开源站原文
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <Typography.Title level={5} style={{ marginBottom: 8 }}>
+            内容详情
+          </Typography.Title>
+          <Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 0 }}>
+            {displaySummary || "暂无内容摘要。"}
+          </Typography.Paragraph>
+          {originalSummary && (
+            <>
+              <Typography.Text type="secondary">原文摘要</Typography.Text>
+              <Typography.Paragraph
+                type="secondary"
+                style={{ whiteSpace: "pre-wrap", marginTop: 4, marginBottom: 0 }}
+              >
+                {originalSummary}
+              </Typography.Paragraph>
+            </>
+          )}
+        </div>
+
+        {attachments.length > 0 && (
+          <div>
+            <Typography.Title level={5} style={{ marginBottom: 8 }}>
+              附件
+            </Typography.Title>
+            <Space direction="vertical" size={10} style={{ width: "100%" }}>
+              {attachments.map((attachment) => (
+                <div key={attachment.url}>
+                  <Typography.Link href={attachment.url} target="_blank" rel="noreferrer">
+                    {attachment.title}
+                  </Typography.Link>
+                  {attachment.content_type && (
+                    <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                      {attachment.content_type.toUpperCase()}
+                    </Typography.Text>
+                  )}
+                  {attachment.text_excerpt && (
+                    <Typography.Paragraph
+                      type="secondary"
+                      style={{ whiteSpace: "pre-wrap", marginTop: 4, marginBottom: 0 }}
+                    >
+                      {attachment.text_excerpt}
+                    </Typography.Paragraph>
+                  )}
+                </div>
+              ))}
+            </Space>
+          </div>
+        )}
+      </Space>
+
+      <Divider />
+
       <Form form={form} layout="vertical">
         <Form.Item label="来源" name="source">
           <Input

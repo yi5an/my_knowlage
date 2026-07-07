@@ -21,13 +21,14 @@ def _build_polling_scheduler() -> IntervalScheduler | None:
     stopped in the lifespan shutdown.
     """
     from app.infrastructure.database import SessionLocal
+    from app.services.workspace_settings import WorkspaceSettingsService
     from app.services.youtube.asr import build_asr_service_from_settings
+    from app.services.youtube.auto_retry import YouTubeAutoRetryScanner
     from app.services.youtube.extraction_pipeline import DefaultExtractionPipeline
     from app.services.youtube.fetcher import get_fetcher_from_settings
     from app.services.youtube.orchestrator import VideoSummaryOrchestrator
     from app.services.youtube.subscription_service import SubscriptionService
     from app.services.youtube.summary import build_summary_service_from_settings
-    from app.services.youtube.summary_retry import FailedSummaryRetryScanner
     from app.services.youtube.transcript import ChainedTranscriptExtractor
     from app.services.youtube.translation import TranslationService
 
@@ -63,17 +64,26 @@ def _build_polling_scheduler() -> IntervalScheduler | None:
                     result.total_summarized,
                 )
 
-            # Best-effort sweep: re-summarize YouTube documents left in a
-            # failed state by a transient error (e.g. the LLM once returned
-            # an empty object). Runs every poll cycle so recoverable failures
-            # self-heal without operator intervention. Shares the same real
-            # LLM client as the orchestrator above.
-            scanner = FailedSummaryRetryScanner(
-                session=session,
-                summary_service=summary_service,
-                extraction_pipeline=extraction_pipeline,
-            )
-            scanner.scan()
+            # Best-effort sweep: when enabled per workspace from the Settings
+            # page, retry failed summary documents and failed Video rows with
+            # bounded attempts/backoff. Shares the same real orchestrator and
+            # LLM client as subscription polling.
+            for retry_settings in (
+                WorkspaceSettingsService(session).list_enabled_youtube_auto_retry()
+            ):
+                report = YouTubeAutoRetryScanner(
+                    session=session,
+                    orchestrator=orchestrator,
+                    settings=retry_settings,
+                ).scan()
+                if report.retried:
+                    logger.info(
+                        "auto retry cycle (%s): %d retried, %d succeeded, %d failing",
+                        retry_settings.workspace_id,
+                        report.retried,
+                        report.succeeded,
+                        report.still_failing,
+                    )
         finally:
             session.close()
 
@@ -191,4 +201,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

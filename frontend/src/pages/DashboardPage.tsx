@@ -41,6 +41,7 @@ const EMPTY_STATS: DashboardStats = {
   subscriptions: 0,
   summarized_videos: 0,
   pending_videos: 0,
+  denied_videos: 0,
   entities: 0,
   relations: 0,
 };

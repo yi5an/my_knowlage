@@ -13,6 +13,9 @@ from app.services.youtube.fetcher import FakeYouTubeFetcher, FetcherError
 from app.services.youtube.transcript import (
     FakeTranscriptExtractor,
     NoTranscriptError,
+    TranscriptUnavailableError,
+    YouTubeTranscriptExtractor,
+    YtDlpTranscriptExtractor,
 )
 from app.services.youtube.urls import UnparseableTargetError, parse_target
 
@@ -101,6 +104,73 @@ def test_fake_transcript_extractor() -> None:
     assert extractor.extract("vid1").segments[0].text == "hello"
     with pytest.raises(NoTranscriptError):
         extractor.extract("nope")
+
+
+def test_youtube_transcript_extractor_wraps_network_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore[import-untyped]
+
+    def boom(video_id: str) -> object:
+        raise OSError("network is unreachable")
+
+    monkeypatch.setattr(YouTubeTranscriptApi, "list_transcripts", boom)
+
+    with pytest.raises(TranscriptUnavailableError, match="network is unreachable"):
+        YouTubeTranscriptExtractor().extract("dQw4w9WgXcQ")
+
+
+def test_youtube_transcript_extractor_passes_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore[import-untyped]
+
+    seen: dict[str, object] = {}
+
+    def fake_list(video_id: str, proxies: dict[str, str] | None = None) -> list[object]:
+        seen["video_id"] = video_id
+        seen["proxies"] = proxies
+        return []
+
+    monkeypatch.setattr(YouTubeTranscriptApi, "list_transcripts", fake_list)
+
+    with pytest.raises(NoTranscriptError):
+        YouTubeTranscriptExtractor(proxy_url="http://127.0.0.1:7890").extract("abc123")
+
+    assert seen == {
+        "video_id": "abc123",
+        "proxies": {
+            "http": "http://127.0.0.1:7890",
+            "https": "http://127.0.0.1:7890",
+        },
+    }
+
+
+def test_ytdlp_transcript_extractor_passes_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeYoutubeDL:
+        def __init__(self, opts: dict[str, object]) -> None:
+            captured.update(opts)
+
+        def __enter__(self) -> "FakeYoutubeDL":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def download(self, urls: list[str]) -> None:
+            captured["urls"] = urls
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", FakeYoutubeDL)
+
+    with pytest.raises(NoTranscriptError):
+        YtDlpTranscriptExtractor(proxy_url="http://127.0.0.1:7890").extract("abc123")
+
+    assert captured["proxy"] == "http://127.0.0.1:7890"
+    assert captured["urls"] == ["https://www.youtube.com/watch?v=abc123"]
 
 
 # --- Chunker: window fallback ----------------------------------------------

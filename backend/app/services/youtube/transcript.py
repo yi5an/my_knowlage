@@ -10,7 +10,7 @@ are surfaced as explicit error types rather than silent None returns.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from app.schemas.youtube import Transcript, TranscriptSegment
 
@@ -63,6 +63,9 @@ class YouTubeTranscriptExtractor:
     the optional dep), and so tests can monkeypatch it.
     """
 
+    def __init__(self, proxy_url: str | None = None) -> None:
+        self.proxy_url = proxy_url
+
     def extract(self, video_id: str, preferred_language: str | None = None) -> Transcript:
         from youtube_transcript_api import (  # type: ignore[import-untyped]
             TranscriptsDisabled,
@@ -73,9 +76,17 @@ class YouTubeTranscriptExtractor:
         )
 
         try:
-            fetched_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            if self.proxy_url:
+                fetched_list = YouTubeTranscriptApi.list_transcripts(
+                    video_id,
+                    proxies={"http": self.proxy_url, "https": self.proxy_url},
+                )
+            else:
+                fetched_list = YouTubeTranscriptApi.list_transcripts(video_id)
         except (VideoUnavailable, TranscriptsDisabled) as exc:
             raise NoTranscriptError(str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - network/client errors vary by backend
+            raise TranscriptUnavailableError(str(exc)) from exc
 
         # Collect all available transcripts by iterating the TranscriptList.
         # Each item has .language_code and .is_generated.
@@ -139,6 +150,9 @@ class YtDlpTranscriptExtractor:
     start ms + duration), which is easier to parse robustly than VTT.
     """
 
+    def __init__(self, proxy_url: str | None = None) -> None:
+        self.proxy_url = proxy_url
+
     def extract(self, video_id: str, preferred_language: str | None = None) -> Transcript:
         import json
         import os
@@ -174,6 +188,8 @@ class YtDlpTranscriptExtractor:
                 "noprogress": True,
                 "noplaylist": True,
             }
+            if self.proxy_url:
+                ydl_opts["proxy"] = self.proxy_url
             url = f"https://www.youtube.com/watch?v={video_id}"
             try:
                 with YoutubeDL(ydl_opts) as ydl:
@@ -230,7 +246,7 @@ class YtDlpTranscriptExtractor:
         return lang_code, is_auto
 
     @staticmethod
-    def _parse_json3(payload: dict) -> list[_RawSegment]:
+    def _parse_json3(payload: dict[str, Any]) -> list[_RawSegment]:
         """Convert YouTube JSON3 caption format into raw segments.
 
         Each event has ``tStartMs`` (ms), optional ``dDurationMs`` (ms), and
@@ -274,7 +290,13 @@ class ChainedTranscriptExtractor:
 
     def __init__(self, extractors: list[TranscriptExtractor] | None = None) -> None:
         if extractors is None:
-            extractors = [YtDlpTranscriptExtractor(), YouTubeTranscriptExtractor()]
+            from app.core.config import get_settings
+
+            proxy_url = get_settings().youtube_proxy_url
+            extractors = [
+                YtDlpTranscriptExtractor(proxy_url=proxy_url),
+                YouTubeTranscriptExtractor(proxy_url=proxy_url),
+            ]
         self.extractors = extractors
 
     def extract(self, video_id: str, preferred_language: str | None = None) -> Transcript:

@@ -151,8 +151,8 @@ def test_extraction_pipeline_empty_chunks(session: Session) -> None:
     assert session.query(Entity).count() == 0
 
 
-def test_orchestrator_runs_extraction_after_summary(session: Session) -> None:
-    """End-to-end: orchestrator summarizes, then extraction enriches the graph."""
+def test_orchestrator_does_not_extract_before_manual_import(session: Session) -> None:
+    """Summary stays staged until the user manually adds it to the knowledge base."""
     transcript = Transcript(
         video_id=VIDEO_ID,
         segments=[
@@ -195,9 +195,8 @@ def test_orchestrator_runs_extraction_after_summary(session: Session) -> None:
     result = orchestrator.summarize_url(VIDEO_ID, workspace_id="ws_default")
 
     assert result.succeeded
-    # Entities were extracted as part of the same pipeline run.
-    assert session.query(Entity).count() >= 3
-    assert session.query(EntityRelation).count() >= 1
+    assert session.query(Entity).count() == 0
+    assert session.query(EntityRelation).count() == 0
 
 
 def test_orchestrator_summary_survives_extraction_failure(session: Session) -> None:

@@ -4,11 +4,12 @@ Fetched items (Fed RSS / SEC / BLS / FRED) are usually in English. This
 service translates a batch of untranslated items (``title_zh IS NULL``) in a
 single LLM call and writes back ``title_zh`` / ``summary_zh``.
 
-Degrades gracefully: if the LLM client is missing/mock or the call fails, the
-items keep their original-language title/summary and nothing is raised (the
-fetch pipeline is never blocked by translation). Already-Chinese items are
-detected and skipped (their ``title_zh`` is set to the original so they're not
-re-processed).
+By default this degrades gracefully: if the LLM client is missing/mock or the
+call fails, items keep their original-language title/summary and nothing is
+raised. User-triggered retries and background translation jobs can opt into
+``raise_on_failure`` so real LLM/auth failures are visible instead of looking
+like a successful no-op. Already-Chinese items are detected and skipped (their
+``title_zh`` is set to the original so they're not re-processed).
 """
 
 from __future__ import annotations
@@ -43,19 +44,28 @@ class InvestmentTranslationService:
         self.llm_client = llm_client
 
     def translate_untranslated(
-        self, workspace_id: str = "ws_default", limit: int = 20
+        self,
+        workspace_id: str = "ws_default",
+        limit: int = 20,
+        *,
+        raise_on_failure: bool = False,
     ) -> dict[str, int]:
-        """Translate up to ``limit`` items lacking ``title_zh``.
+        """Translate up to ``limit`` items lacking Chinese title or summary.
 
-        Returns ``{"translated": N, "skipped": M}``. Never raises on LLM
-        failure — logs and returns what got through.
+        Returns ``{"translated": N, "skipped": M}``. By default logs LLM
+        failures and returns what got through; with ``raise_on_failure=True``,
+        raises a RuntimeError so callers can surface the failure.
         """
         items = list(
             self.session.scalars(
                 select(InvestmentItem)
                 .where(
                     InvestmentItem.workspace_id == workspace_id,
-                    InvestmentItem.title_zh.is_(None),
+                    (InvestmentItem.title_zh.is_(None))
+                    | (
+                        InvestmentItem.summary.is_not(None)
+                        & InvestmentItem.summary_zh.is_(None)
+                    ),
                 )
                 .order_by(InvestmentItem.created_at)
                 .limit(limit)
@@ -64,18 +74,23 @@ class InvestmentTranslationService:
         if not items:
             return {"translated": 0, "skipped": 0}
 
-        # Already-Chinese items: set title_zh = title so they're not re-queried,
-        # without an LLM call.
+        # Already-Chinese fields are copied directly so they're not re-queried,
+        # while mixed-language rows still go through the LLM for missing fields.
         to_translate: list[InvestmentItem] = []
         skipped = 0
         for item in items:
-            if _looks_chinese(item.title):
+            needs_title = item.title_zh is None
+            needs_summary = bool(item.summary and item.summary_zh is None)
+            if needs_title and _looks_chinese(item.title):
                 item.title_zh = item.title
-                if item.summary:
-                    item.summary_zh = item.summary
-                skipped += 1
-            else:
+                needs_title = False
+            if needs_summary and _looks_chinese(item.summary):
+                item.summary_zh = item.summary
+                needs_summary = False
+            if needs_title or needs_summary:
                 to_translate.append(item)
+            else:
+                skipped += 1
         if skipped:
             self.session.commit()
 
@@ -84,6 +99,8 @@ class InvestmentTranslationService:
 
         if self.llm_client is None:
             logger.info("investment translation skipped: no LLM client configured")
+            if raise_on_failure:
+                raise RuntimeError("investment translation failed: no LLM client configured")
             return {"translated": 0, "skipped": skipped}
 
         try:
@@ -91,8 +108,10 @@ class InvestmentTranslationService:
                 build_investment_translation_prompt(to_translate),
                 InvestmentTranslationSchema,
             )
-        except Exception:  # noqa: BLE001 — LLM failure must not block the pipeline
+        except Exception as exc:  # noqa: BLE001 — default mode must not block fetching
             logger.exception("investment translation LLM call failed; items keep original text")
+            if raise_on_failure:
+                raise RuntimeError(f"investment translation failed: {exc}") from exc
             return {"translated": 0, "skipped": skipped}
 
         id_to_translation = {t.item_id: t for t in result.translations}
@@ -101,9 +120,15 @@ class InvestmentTranslationService:
             t = id_to_translation.get(item.id)
             if t is None or not t.title_zh:
                 continue
-            item.title_zh = t.title_zh
-            item.summary_zh = t.summary_zh if t.summary_zh else item.summary
-            translated += 1
+            changed = False
+            if item.title_zh is None:
+                item.title_zh = t.title_zh
+                changed = True
+            if item.summary and item.summary_zh is None:
+                item.summary_zh = t.summary_zh if t.summary_zh else item.summary
+                changed = True
+            if changed:
+                translated += 1
         if translated:
             self.session.commit()
         logger.info(

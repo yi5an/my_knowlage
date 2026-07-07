@@ -1,7 +1,35 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 
 import { GraphCanvas } from "./GraphCanvas";
+
+vi.mock("@antv/g6", () => {
+  class MockGraph {
+    render() {
+      return Promise.resolve();
+    }
+    fitView() {
+      return undefined;
+    }
+    destroy() {
+      return undefined;
+    }
+    on() {
+      return undefined;
+    }
+    off() {
+      return undefined;
+    }
+    setElementState() {
+      return Promise.resolve();
+    }
+    focusElement() {
+      return Promise.resolve();
+    }
+  }
+
+  return { Graph: MockGraph };
+});
 
 /**
  * G6 v5 renders to canvas/webgl, which jsdom doesn't support, so we can't

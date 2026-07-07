@@ -12,6 +12,7 @@ import {
   Spin,
   Tag,
   Typography,
+  message,
 } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
@@ -48,6 +49,7 @@ export function InvestmentClaimsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [verifying, setVerifying] = useState<Record<string, boolean>>({});
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
@@ -88,6 +90,19 @@ export function InvestmentClaimsPage() {
     void load();
   };
 
+  const handleVerify = async (claim: InvestmentClaim) => {
+    setVerifying((current) => ({ ...current, [claim.id]: true }));
+    try {
+      await investmentApi.verifyClaim(claim.id);
+      message.success("验证完成");
+      void load();
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setVerifying((current) => ({ ...current, [claim.id]: false }));
+    }
+  };
+
   return (
     <main className="page">
       <PageHeader
@@ -104,7 +119,18 @@ export function InvestmentClaimsPage() {
             <List
               dataSource={claims}
               renderItem={(c) => (
-                <List.Item>
+                <List.Item
+                  actions={[
+                    <Button
+                      key="verify"
+                      size="small"
+                      loading={!!verifying[c.id]}
+                      onClick={() => void handleVerify(c)}
+                    >
+                      验证观点
+                    </Button>,
+                  ]}
+                >
                   <List.Item.Meta
                     title={
                       <Space>

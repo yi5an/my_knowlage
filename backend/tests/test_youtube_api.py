@@ -18,12 +18,14 @@ from app.api.v1.youtube import (
     get_youtube_fetcher,
 )
 from app.infrastructure.database import Base, get_db_session
+from app.infrastructure.models import Document, Video, Workspace
 from app.main import app
 from app.schemas.youtube import (
     KeyPoint,
     SummaryResult,
     Transcript,
     TranscriptSegment,
+    VideoChunk,
     VideoMeta,
 )
 from app.services.structured_output import MockStructuredOutputClient
@@ -33,6 +35,19 @@ from app.services.youtube.summary import SummaryService
 from app.services.youtube.transcript import FakeTranscriptExtractor
 
 VIDEO_ID = "dQw4w9WgXcQ"
+
+
+class RecordingExtractionPipeline:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, list[VideoChunk]]] = []
+
+    def run(
+        self,
+        workspace_id: str,
+        doc_id: str,
+        chunks: list[VideoChunk],
+    ) -> None:
+        self.calls.append((workspace_id, doc_id, chunks))
 
 
 @pytest.fixture()
@@ -46,7 +61,13 @@ def db_session() -> Generator[Session, None, None]:
     Base.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     with session_factory() as session:
+        session.info["factory"] = session_factory
         yield session
+
+
+@pytest.fixture()
+def recording_pipeline() -> RecordingExtractionPipeline:
+    return RecordingExtractionPipeline()
 
 
 def _fake_fetcher() -> FakeYouTubeFetcher:
@@ -89,30 +110,37 @@ def _mock_summary_client() -> MockStructuredOutputClient:
 
 @pytest.fixture()
 def client(
-    db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_pipeline: RecordingExtractionPipeline,
 ) -> Generator[TestClient, None, None]:
     fetcher = _fake_fetcher()
     extractor = _fake_extractor()
     summary_client = _mock_summary_client()
 
+    session_factory = db_session.info["factory"]
+
     def override_orchestrator(_session: Session | None = None) -> VideoSummaryOrchestrator:
         # build_orchestrator is called both by DI (no arg, ignored here) and by
-        # the background thread with its own session. In tests we always want
-        # the shared in-memory session so the orchestrator writes rows the
-        # poll endpoint can see.
+        # the background thread with its own session. Use the session supplied
+        # by the caller when present so the background thread and polling
+        # request do not share one SQLAlchemy Session concurrently.
         return VideoSummaryOrchestrator(
-            session=db_session,
+            session=_session or db_session,
             fetcher=fetcher,
             transcript_extractor=extractor,
             summary_service=SummaryService(summary_client),
+            extraction_pipeline=recording_pipeline,
         )
 
     # Background summarizer calls build_orchestrator directly (not DI), so
     # patch the module-level factory to inject the same fakes there too.
     monkeypatch.setattr("app.api.v1.youtube.build_orchestrator", override_orchestrator)
     # Background thread + pre-flight open their own SessionLocal(); route both
-    # at the shared in-memory session so fakes and rows stay consistent.
-    monkeypatch.setattr("app.api.v1.youtube.SessionLocal", lambda: db_session)
+    # to independent sessions on the shared in-memory engine so fakes and rows
+    # stay visible without concurrent use of one Session.
+    monkeypatch.setattr("app.api.v1.youtube.SessionLocal", session_factory)
     app.dependency_overrides[get_db_session] = lambda: db_session
     app.dependency_overrides[get_youtube_fetcher] = lambda: fetcher
     app.dependency_overrides[get_transcript_extractor] = lambda: extractor
@@ -147,9 +175,365 @@ def test_manual_summary_endpoint(client: TestClient) -> None:
 
     card = client.get(f"/api/v1/youtube/summaries/{document_id}").json()
     assert card["title"] == "GPT-5 Deep Dive"
+    assert card["knowledge_base_imported"] is False
     assert card["summary"]["tldr"] == "A concise overview."
     assert card["summary"]["key_points"][0]["timestamp_str"] == "00:10"
     assert card["mindmap"] is not None
+
+
+def test_manual_import_summary_to_knowledge_base(
+    client: TestClient,
+    db_session: Session,
+    recording_pipeline: RecordingExtractionPipeline,
+) -> None:
+    response = client.post(
+        "/api/v1/youtube/summarize",
+        json={"url": f"https://youtu.be/{VIDEO_ID}", "workspace_id": "ws_default"},
+    )
+    assert response.status_code == 200
+
+    document_id = ""
+    for _ in range(50):
+        status = client.get(f"/api/v1/youtube/summaries/by-video/{VIDEO_ID}").json()
+        if status["status"] == "succeeded":
+            document_id = status["document_id"]
+            break
+    assert document_id, "background summary never reported succeeded"
+    assert recording_pipeline.calls == []
+
+    imported = client.post(
+        f"/api/v1/youtube/summaries/{document_id}/import-to-knowledge-base"
+    )
+
+    assert imported.status_code == 200
+    assert imported.json()["knowledge_base_imported"] is True
+    document = db_session.get(Document, document_id)
+    assert document is not None
+    assert document.metadata_["knowledge_base_imported"] is True
+    assert recording_pipeline.calls
+    assert recording_pipeline.calls[0][1] == document_id
+
+
+def test_summary_history_preserves_failed_video_records(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="history_ws", name="history_ws"))
+    completed_video = Video(
+        id="video_completed",
+        workspace_id="history_ws",
+        video_id="completed123",
+        title="Completed video",
+        fetch_status="fetched",
+    )
+    failed_video = Video(
+        id="video_failed",
+        workspace_id="history_ws",
+        video_id="failed123",
+        title="Failed video",
+        fetch_status="fetched",
+        published_at=datetime(2026, 7, 2, tzinfo=UTC),
+    )
+    db_session.add_all([completed_video, failed_video])
+    db_session.add_all(
+        [
+            Document(
+                id="doc_completed",
+                workspace_id="history_ws",
+                title="Completed summary",
+                source_type="youtube",
+                source_uri="https://youtu.be/completed123",
+                status="ready",
+                parse_status="completed",
+                video_id=completed_video.id,
+                summary_json={"tldr": "Ready summary", "tags": ["AI"]},
+            ),
+            Document(
+                id="doc_failed",
+                workspace_id="history_ws",
+                title="Failed summary shell",
+                source_type="youtube",
+                source_uri="https://youtu.be/failed123",
+                status="error",
+                parse_status="failed",
+                video_id=failed_video.id,
+                ai_summary="summary failed: upstream timeout",
+                summary_json=None,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/youtube/summaries?workspace_id=history_ws")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["document_id"] for item in body] == ["doc_failed", "doc_completed"]
+    assert body[0]["summary_status"] == "failed"
+    assert body[0]["error"] == "summary failed: upstream timeout"
+    assert body[0]["tldr"] is None
+    assert body[1]["summary_status"] == "completed"
+    assert body[1]["tldr"] == "Ready summary"
+
+    failed_detail = client.get("/api/v1/youtube/summaries/doc_failed")
+
+    assert failed_detail.status_code == 409
+    assert (
+        failed_detail.json()["error"]["message"]
+        == "总结生成失败：summary failed: upstream timeout"
+    )
+
+
+def test_summary_history_includes_failed_and_pending_video_rows_without_documents(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="video_only_ws", name="video_only_ws"))
+    db_session.add_all(
+        [
+            Video(
+                id="video_failed_no_doc",
+                workspace_id="video_only_ws",
+                video_id="failednodoc1",
+                title="Failed before document",
+                channel_name="AI Channel",
+                fetch_status="failed",
+                error_message="asr: empty transcription",
+                published_at=datetime(2026, 7, 4, tzinfo=UTC),
+            ),
+            Video(
+                id="video_pending_no_doc",
+                workspace_id="video_only_ws",
+                video_id="pendingnodoc",
+                title="Pending without document",
+                channel_name="AI Channel",
+                fetch_status="pending",
+                published_at=datetime(2026, 7, 3, tzinfo=UTC),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/youtube/summaries?workspace_id=video_only_ws")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["video_id"] for item in body] == ["failednodoc1", "pendingnodoc"]
+    assert body[0]["document_id"] == ""
+    assert body[0]["summary_status"] == "failed"
+    assert body[0]["failure_stage"] == "transcript"
+    assert body[0]["retryable"] is True
+    assert body[0]["error"] == "asr: empty transcription"
+    assert body[1]["summary_status"] == "pending"
+    assert body[1]["failure_stage"] == "pending"
+    assert body[1]["retryable"] is True
+
+
+def test_retry_failed_video_starts_background_processing(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="retry_ws", name="retry_ws"))
+    db_session.add(
+        Video(
+            id="video_retry",
+            workspace_id="retry_ws",
+            video_id=VIDEO_ID,
+            title="Failed before retry",
+            channel_id="UC_example",
+            channel_name="AI Channel",
+            fetch_status="failed",
+            error_message="asr: empty transcription",
+            published_at=datetime(2026, 7, 4, tzinfo=UTC),
+        )
+    )
+    db_session.commit()
+
+    response = client.post(f"/api/v1/youtube/videos/{VIDEO_ID}/retry?workspace_id=retry_ws")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["video_id"] == VIDEO_ID
+    assert body["status"] == "processing"
+
+    document_id = ""
+    for _ in range(50):
+        status = client.get(f"/api/v1/youtube/summaries/by-video/{VIDEO_ID}").json()
+        if status["status"] == "succeeded":
+            document_id = status["document_id"]
+            break
+        assert status["status"] in ("processing", "unknown"), status
+    assert document_id, "retry never reported succeeded"
+
+
+def test_summary_list_shows_access_denied_as_not_retryable(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """A members-only video surfaces as ``access_denied`` with no retry button."""
+    db_session.add(Workspace(id="denied_ws", name="denied_ws"))
+    db_session.add(
+        Video(
+            id="video_denied",
+            workspace_id="denied_ws",
+            video_id="denied123",
+            title="Members-only talk",
+            channel_name="Paywall Channel",
+            fetch_status="access_denied",
+            error_message="access denied: yt-dlp failed for denied123: "
+            "Join this channel to get access to members-only content",
+            published_at=datetime(2026, 7, 4, tzinfo=UTC),
+        )
+    )
+    db_session.commit()
+
+    # List endpoint: distinct status, error surfaced, retryable=False.
+    response = client.get("/api/v1/youtube/summaries?workspace_id=denied_ws")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    item = body[0]
+    assert item["summary_status"] == "access_denied"
+    assert item["failure_stage"] is None
+    assert item["retryable"] is False
+    assert item["error"] and "access denied" in item["error"].lower()
+
+    # By-video poll endpoint: also surfaces access_denied + error.
+    status_resp = client.get("/api/v1/youtube/summaries/by-video/denied123")
+    assert status_resp.status_code == 200
+    status = status_resp.json()
+    assert status["status"] == "access_denied"
+    assert status["error"] and "access denied" in status["error"].lower()
+
+
+def test_retry_access_denied_video_returns_409(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """The retry endpoint must refuse to re-queue a permanently-blocked video."""
+    db_session.add(Workspace(id="denied_retry_ws", name="denied_retry_ws"))
+    db_session.add(
+        Video(
+            id="video_denied_retry",
+            workspace_id="denied_retry_ws",
+            video_id="deniedretry1",
+            title="Private video",
+            channel_name="Some Channel",
+            fetch_status="access_denied",
+            error_message="access denied: This video is private",
+            published_at=datetime(2026, 7, 4, tzinfo=UTC),
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/youtube/videos/deniedretry1/retry?workspace_id=denied_retry_ws"
+    )
+
+    assert response.status_code == 409
+    detail = response.json()["error"]["message"]
+    assert "无访问权限" in detail
+
+
+def test_youtube_auto_retry_settings_roundtrip(client: TestClient) -> None:
+    default_response = client.get(
+        "/api/v1/youtube/auto-retry-settings?workspace_id=retry_settings_ws"
+    )
+
+    assert default_response.status_code == 200
+    assert default_response.json() == {
+        "workspace_id": "retry_settings_ws",
+        "enabled": False,
+        "max_attempts": 3,
+        "backoff_minutes": 30,
+        "batch_size": 1,
+    }
+
+    update = client.put(
+        "/api/v1/youtube/auto-retry-settings?workspace_id=retry_settings_ws",
+        json={
+            "enabled": True,
+            "max_attempts": 5,
+            "backoff_minutes": 60,
+            "batch_size": 2,
+        },
+    )
+
+    assert update.status_code == 200
+    assert update.json() == {
+        "workspace_id": "retry_settings_ws",
+        "enabled": True,
+        "max_attempts": 5,
+        "backoff_minutes": 60,
+        "batch_size": 2,
+    }
+
+    persisted = client.get(
+        "/api/v1/youtube/auto-retry-settings?workspace_id=retry_settings_ws"
+    )
+    assert persisted.status_code == 200
+    assert persisted.json()["enabled"] is True
+
+
+def test_summary_history_orders_by_video_published_time(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="ordered_ws", name="ordered_ws"))
+    older_video = Video(
+        id="video_older_published",
+        workspace_id="ordered_ws",
+        video_id="olderpublished",
+        title="Older published video",
+        fetch_status="fetched",
+        published_at=datetime(2016, 8, 6, tzinfo=UTC),
+    )
+    newer_video = Video(
+        id="video_newer_published",
+        workspace_id="ordered_ws",
+        video_id="newerpublished",
+        title="Newer published video",
+        fetch_status="fetched",
+        published_at=datetime(2026, 7, 1, tzinfo=UTC),
+    )
+    db_session.add_all([older_video, newer_video])
+    db_session.add_all(
+        [
+            Document(
+                id="doc_older_published",
+                workspace_id="ordered_ws",
+                title="Older published summary",
+                source_type="youtube",
+                source_uri="https://youtu.be/olderpublished",
+                status="ready",
+                parse_status="completed",
+                video_id=older_video.id,
+                summary_json={"tldr": "Older video summary", "tags": []},
+                created_at=datetime(2026, 7, 2, tzinfo=UTC),
+            ),
+            Document(
+                id="doc_newer_published",
+                workspace_id="ordered_ws",
+                title="Newer published summary",
+                source_type="youtube",
+                source_uri="https://youtu.be/newerpublished",
+                status="ready",
+                parse_status="completed",
+                video_id=newer_video.id,
+                summary_json={"tldr": "Newer video summary", "tags": []},
+                created_at=datetime(2026, 7, 1, tzinfo=UTC),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/youtube/summaries?workspace_id=ordered_ws")
+
+    assert response.status_code == 200
+    assert [item["document_id"] for item in response.json()] == [
+        "doc_newer_published",
+        "doc_older_published",
+    ]
 
 
 def test_manual_summary_rejects_channel_url(client: TestClient) -> None:

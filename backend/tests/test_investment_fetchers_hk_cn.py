@@ -31,7 +31,7 @@ CNINFO_HTML = (
     "</body></html>"
 ).encode()
 
-# A page with no announcement links at all -> fetcher returns empty, no fake data.
+# A page with no announcement links at all -> explicit parse error, no fake data.
 EMPTY_HTML = b"<html><body><p>no results found</p></body></html>"
 
 
@@ -69,10 +69,10 @@ def test_hkex_parses_announcement_links():
     assert first.source_name == "HKEX"
 
 
-def test_hkex_empty_page_yields_no_items_not_fake_data():
+def test_hkex_empty_page_raises_parse_error_not_fake_data():
     src = _make_source("hkex", "https://www1.hkexnews.hk/search/titlesearch.xhtml")
-    items = HkexFetcher().fetch(src, FakeHttpClient(EMPTY_HTML))
-    assert items == []
+    with pytest.raises(SourceConfigError, match="No announcement links"):
+        HkexFetcher().fetch(src, FakeHttpClient(EMPTY_HTML))
 
 
 def test_hkex_missing_url_raises():
@@ -93,10 +93,10 @@ def test_cninfo_parses_announcement_links():
     assert items[0].source_name == "CNINFO"
 
 
-def test_cninfo_empty_page_yields_no_items():
+def test_cninfo_empty_page_raises_parse_error():
     src = _make_source("cninfo", "https://www.cninfo.com.cn/search")
-    items = CninfoFetcher().fetch(src, FakeHttpClient(EMPTY_HTML))
-    assert items == []
+    with pytest.raises(SourceConfigError, match="No announcement links"):
+        CninfoFetcher().fetch(src, FakeHttpClient(EMPTY_HTML))
 
 
 def test_cninfo_missing_url_raises():

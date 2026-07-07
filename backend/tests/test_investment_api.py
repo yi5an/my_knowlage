@@ -111,6 +111,35 @@ def test_create_and_list_item(client: TestClient):
     assert empty.json() == []
 
 
+def test_item_response_includes_attachments_from_raw_payload(client: TestClient):
+    resp = client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "Fed projections",
+            "raw_payload": {
+                "attachments": [
+                    {
+                        "title": "Accessible Materials",
+                        "url": "https://www.federalreserve.gov/monetarypolicy/projections.htm",
+                        "content_type": "html",
+                        "text_excerpt": "Median federal funds rate 3.6 percent.",
+                    }
+                ]
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["attachments"] == [
+        {
+            "title": "Accessible Materials",
+            "url": "https://www.federalreserve.gov/monetarypolicy/projections.htm",
+            "content_type": "html",
+            "text_excerpt": "Median federal funds rate 3.6 percent.",
+        }
+    ]
+
+
 def test_update_item(client: TestClient):
     item = client.post("/api/v1/investment/items", json={"title": "x"}).json()
     patched = client.patch(
@@ -120,6 +149,28 @@ def test_update_item(client: TestClient):
     assert patched.status_code == 200
     assert patched.json()["importance"] == "high"
     assert patched.json()["action_status"] == "researched"
+
+
+def test_translate_items_returns_structured_error_on_llm_failure(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client.post("/api/v1/investment/items", json={"title": "FOMC statement"})
+
+    class _BoomClient:
+        def generate(self, prompt, schema):  # noqa: ANN001
+            raise RuntimeError("auth_unavailable")
+
+    monkeypatch.setattr(
+        "app.api.v1.investment._build_llm_client",
+        lambda: _BoomClient(),
+    )
+
+    resp = client.post("/api/v1/investment/items/translate?limit=100")
+
+    assert resp.status_code == 502
+    assert resp.json()["error"]["code"] == "translation_failed"
+    assert "investment translation failed" in resp.json()["error"]["message"]
 
 
 # --- source + poll ---------------------------------------------------------

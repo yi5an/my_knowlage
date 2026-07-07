@@ -165,6 +165,25 @@ class SubscriptionResponse(BaseModel):
     enabled: bool
 
 
+class YouTubeAutoRetrySettings(BaseModel):
+    """Workspace-level automatic retry configuration for YouTube failures."""
+
+    workspace_id: str = Field(default="ws_default")
+    enabled: bool = False
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    backoff_minutes: int = Field(default=30, ge=1, le=1440)
+    batch_size: int = Field(default=1, ge=1, le=20)
+
+
+class YouTubeAutoRetrySettingsUpdate(BaseModel):
+    """Mutable fields accepted by the settings API."""
+
+    enabled: bool = False
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    backoff_minutes: int = Field(default=30, ge=1, le=1440)
+    batch_size: int = Field(default=1, ge=1, le=20)
+
+
 class ManualSummaryRequest(BaseModel):
     """Manual one-off summary: paste a URL, get a summary card."""
 
@@ -186,6 +205,7 @@ class VideoSummaryCard(BaseModel):
     document_id: str
     video_id: str
     title: str
+    knowledge_base_imported: bool = False
     channel_name: str | None = None
     duration_sec: int | None = None
     published_at: datetime | None = None

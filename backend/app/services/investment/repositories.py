@@ -51,7 +51,7 @@ class InvestmentItemRepository:
             )
         )
         if existing is not None:
-            # Idempotent re-fetch: do not touch the existing row.
+            self._refresh_existing(existing, raw)
             return False
 
         document = self._upsert_document(raw, workspace_id=workspace_id, source=source)
@@ -73,6 +73,47 @@ class InvestmentItemRepository:
         self.session.add(item)
         self.session.flush()
         return True
+
+    def _refresh_existing(self, item: InvestmentItem, raw: InvestmentRawItem) -> None:
+        """Refresh source-owned metadata on a dedupe hit.
+
+        User-confirmed investment judgement fields are intentionally left
+        untouched, but source title/summary/raw payload can improve on a
+        re-fetch (for example after RSS detail-page enrichment is enabled).
+        """
+        title_changed = bool(raw.title and raw.title != item.title)
+        summary_changed = _is_better_summary(
+            current=item.summary,
+            incoming=raw.summary,
+            title=raw.title or item.title,
+        )
+        if title_changed:
+            item.title = raw.title
+            item.title_zh = None
+        if summary_changed:
+            item.summary = raw.summary
+            item.summary_zh = None
+        if raw.published_at is not None and raw.published_at != item.published_at:
+            item.published_at = raw.published_at
+        item.raw_payload = {**(item.raw_payload or {}), **dict(raw.raw_payload)}
+
+        if item.document_id:
+            document = self.session.get(Document, item.document_id)
+            if document is not None:
+                if title_changed:
+                    document.title = raw.title
+                if summary_changed:
+                    document.ai_summary = raw.summary
+                document.metadata_ = {
+                    **(document.metadata_ or {}),
+                    "source_name": raw.source_name,
+                    "published_at": raw.published_at.isoformat()
+                    if raw.published_at
+                    else (document.metadata_ or {}).get("published_at"),
+                    "external_id": raw.external_id,
+                    **{k: v for k, v in raw.raw_payload.items() if k != "summary"},
+                }
+        self.session.flush()
 
     def _upsert_document(
         self,
@@ -115,6 +156,52 @@ def _credibility_for(source_type: str) -> str:
     if source_type in ("hkex", "cninfo"):
         return "official"
     return "unverified"
+
+
+def _is_better_summary(*, current: str | None, incoming: str | None, title: str) -> bool:
+    """True when an incoming source summary contains meaningfully more text."""
+    if not incoming:
+        return False
+    incoming_clean = incoming.strip()
+    current_clean = (current or "").strip()
+    title_clean = title.strip()
+    if not current_clean:
+        return True
+    if current_clean.casefold() == title_clean.casefold() and (
+        incoming_clean.casefold() != title_clean.casefold()
+    ):
+        return True
+    if _is_polluted_summary(current_clean) and not _is_polluted_summary(incoming_clean):
+        return True
+    if _is_bounded_attachment_refresh(current_clean, incoming_clean):
+        return True
+    return len(incoming_clean) > len(current_clean) + 20
+
+
+def _is_polluted_summary(value: str) -> bool:
+    """Detect page chrome accidentally captured as article text."""
+    lowered = value.casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            "an official website of the united states government",
+            "official websites use .gov",
+            "share sensitive information only on official, secure websites",
+            "for media inquiries",
+        )
+    )
+
+
+def _is_bounded_attachment_refresh(current: str, incoming: str) -> bool:
+    marker = "attachment excerpt -"
+    current_lower = current.casefold()
+    incoming_lower = incoming.casefold()
+    return (
+        marker in current_lower
+        and marker in incoming_lower
+        and len(current) > 3000
+        and len(incoming) < len(current) - 500
+    )
 
 
 class InvestmentSourceRepository:

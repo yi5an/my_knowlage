@@ -210,6 +210,13 @@ class InvestmentItemUpdate(BaseModel):
     review_at: datetime | None = None
 
 
+class InvestmentAttachmentResponse(BaseModel):
+    title: str
+    url: str
+    content_type: str | None = None
+    text_excerpt: str | None = None
+
+
 class InvestmentItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -239,6 +246,7 @@ class InvestmentItemResponse(BaseModel):
     suggested_impact_horizon: str | None = None
     suggested_thesis_impact: str | None = None
     classification_reason: str | None = None
+    attachments: list[InvestmentAttachmentResponse] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

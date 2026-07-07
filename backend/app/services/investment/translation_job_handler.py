@@ -39,7 +39,11 @@ class InvestmentTranslationJobHandler:
         # enqueue more translation jobs if many items are pending.
         result = InvestmentTranslationService(
             session=session, llm_client=llm_client
-        ).translate_untranslated(workspace_id=workspace_id, limit=20)
+        ).translate_untranslated(
+            workspace_id=workspace_id,
+            limit=20,
+            raise_on_failure=True,
+        )
 
         logger.info(
             "investment translation job %s (source=%s): %s",

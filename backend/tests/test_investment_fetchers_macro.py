@@ -35,8 +35,10 @@ FRED_RESPONSE = {
 class FakeHttpClient:
     def __init__(self, body: bytes) -> None:
         self.body = body
+        self.calls: list[str] = []
 
     def get(self, url: str, headers: dict[str, str] | None = None) -> tuple[bytes, str]:
+        self.calls.append(url)
         return self.body, url
 
     def close(self) -> None:
@@ -73,6 +75,14 @@ def test_bls_works_without_api_key(monkeypatch):
     src = _make_source("bls", {"series": ["LNS14000000"]})
     items = BlsFetcher().fetch(src, FakeHttpClient(json.dumps(BLS_RESPONSE).encode()))
     assert len(items) == 2
+
+
+def test_bls_sends_registration_key_when_configured(monkeypatch):
+    monkeypatch.setattr(get_settings(), "bls_api_key", "bls-key")
+    src = _make_source("bls", {"series": ["CUSR0000SA0"]})
+    http = FakeHttpClient(json.dumps(BLS_RESPONSE).encode())
+    BlsFetcher().fetch(src, http)
+    assert "registrationkey=bls-key" in http.calls[0]
 
 
 def test_bls_missing_series_raises():

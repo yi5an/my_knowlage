@@ -155,7 +155,11 @@ class SubscriptionService:
             )
             if result.status == "succeeded":
                 summarized += 1
-            elif result.status == "no_transcript":
+            elif result.status in ("no_transcript", "access_denied"):
+                # Both are terminal "this video won't be summarized" outcomes:
+                # no_transcript = no captions; access_denied = members-only /
+                # private / deleted / geo-restricted. Neither is a failure of
+                # the pipeline, so count as skipped rather than failed.
                 skipped += 1
             else:
                 failed += 1

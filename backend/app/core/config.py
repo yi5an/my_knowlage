@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     youtube_api_key: str | None = Field(default=None, alias="YOUTUBE_API_KEY")
     youtube_preferred_language: str | None = Field(default=None, alias="YOUTUBE_PREFERRED_LANGUAGE")
     youtube_default_poll_interval: int = Field(default=3600, alias="YOUTUBE_DEFAULT_POLL_INTERVAL")
+    youtube_proxy_url: str | None = Field(default=None, alias="YOUTUBE_PROXY_URL")
 
     # Translation: translate non-Chinese transcripts to Chinese before summarizing.
     translate_to_chinese: bool = Field(default=True, alias="TRANSLATE_TO_CHINESE")
@@ -46,8 +47,10 @@ class Settings(BaseSettings):
     # LLM configuration (OpenAI-compatible). When unset, a mock client is used.
     llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
     llm_model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
+    llm_fallback_models: str | None = Field(default=None, alias="LLM_FALLBACK_MODELS")
     llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
-    llm_max_output_tokens: int = Field(default=2048, alias="LLM_MAX_OUTPUT_TOKENS")
+    llm_max_output_tokens: int = Field(default=8192, alias="LLM_MAX_OUTPUT_TOKENS")
+    llm_timeout_seconds: float = Field(default=120.0, alias="LLM_TIMEOUT_SECONDS")
 
     # Web search provider for the deep-research agent (Tavily).
     # Required for research tasks; a missing key makes research fail explicitly.
@@ -75,6 +78,7 @@ class Settings(BaseSettings):
         default="https://open.bigmodel.cn/api/paas/v4", alias="GLM_ASR_BASE_URL"
     )
     asr_model: str = Field(default="glm-asr-2512", alias="GLM_ASR_MODEL")
+    asr_language: str | None = Field(default=None, alias="ASR_LANGUAGE")
     # Per-request limits for GLM-ASR-2512. The API caps each transcription
     # call at ~30s of audio, so long videos must be split into these windows.
     asr_segment_sec: int = Field(default=28, alias="ASR_SEGMENT_SEC")
