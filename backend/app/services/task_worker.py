@@ -50,6 +50,15 @@ class JobHandler(Protocol):
         ...
 
 
+class JobDeferred(Exception):
+    """A handler needs to wait for external async work and be retried later."""
+
+    def __init__(self, output: dict[str, Any], progress: int = 0) -> None:
+        super().__init__("job deferred")
+        self.output = output
+        self.progress = progress
+
+
 class EntityExtractionJobHandler:
     """Run entity extraction over every chunk of the job's target document."""
 
@@ -234,6 +243,9 @@ class TaskJobProcessor:
         self._mark_running(session, job)
         try:
             output = handler.handle(job, session, self.llm_client)
+        except JobDeferred as exc:
+            self._mark_deferred(session, job, exc.output, exc.progress)
+            return
         except Exception as exc:  # noqa: BLE001 - top-level failure -> failed job
             self._mark_failed(session, job, f"{type(exc).__name__}: {exc}")
             return
@@ -305,6 +317,14 @@ class TaskJobProcessor:
             setattr(document, field, "failed")
         session.commit()
         logger.warning("task job %s (%s) failed: %s", job.id, job.job_type, message)
+
+    def _mark_deferred(
+        self, session: Session, job: TaskJob, output: dict[str, Any], progress: int
+    ) -> None:
+        job.status = "pending"
+        job.output = output
+        job.progress = progress
+        session.commit()
 
 
 def _document_id(job: TaskJob) -> str | None:

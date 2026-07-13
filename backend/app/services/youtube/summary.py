@@ -21,6 +21,7 @@ from app.schemas.youtube import (
     Transcript,
     TranscriptSegment,
     VideoChunk,
+    VideoFrameAnalysisResult,
 )
 from app.services.structured_output import (
     FallbackStructuredOutputClient,
@@ -49,19 +50,53 @@ def _format_chapters(chapters: list[Chapter]) -> str:
     return "\n".join(f"{c.start_str} {c.title}" for c in chapters)
 
 
+def format_visual_evidence(frames: list[VideoFrameAnalysisResult] | None) -> str:
+    if not frames:
+        return "(none)"
+    parts: list[str] = []
+    for frame in frames[:24]:
+        notes = frame.structured_notes or {}
+        title = notes.get("title") or ""
+        bullets = notes.get("bullets") or []
+        bullet_text = ""
+        if isinstance(bullets, list) and bullets:
+            bullet_text = "\n".join(f"  - {str(item)}" for item in bullets[:8])
+        parts.append(
+            "\n".join(
+                part
+                for part in [
+                    f"[{frame.timestamp_str}] {frame.frame_type} confidence={frame.confidence:.2f}",
+                    f"Title: {title}" if title else "",
+                    bullet_text,
+                    f"OCR: {frame.ocr_text}" if not bullet_text else "",
+                ]
+                if part
+            )
+        )
+    return "\n\n".join(parts)
+
+
 def build_summary_prompt(
-    title: str, transcript: Transcript, chapters: list[Chapter]
+    title: str,
+    transcript: Transcript,
+    chapters: list[Chapter],
+    visual_frames: list[VideoFrameAnalysisResult] | None = None,
 ) -> str:
     duration = int(transcript.total_duration_sec)
     chapter_block = _format_chapters(chapters) if chapters else "(none)"
+    visual_block = format_visual_evidence(visual_frames)
     return (
         f"{_SUMMARY_SYSTEM_HINT}\n\n"
         f"Video title: {title}\n"
         f"Total duration (seconds): {duration}\n"
         f"Transcript source: {transcript.source}\n"
         f"Chapters:\n{chapter_block}\n\n"
+        f"Visual evidence from sampled frames (PPT/mind-map/chart/table text):\n"
+        f"{visual_block}\n\n"
         f"Transcript:\n{_format_transcript(transcript)}\n\n"
-        "Produce the summary JSON now."
+        "Produce the summary JSON now. Use visual evidence when it adds facts "
+        "that are missing from the transcript, but keep timestamps grounded in "
+        "the transcript or visual frame timestamps."
     )
 
 
@@ -196,6 +231,7 @@ class SummaryService:
         title: str,
         transcript: Transcript,
         chapters: list[Chapter] | None = None,
+        visual_frames: list[VideoFrameAnalysisResult] | None = None,
     ) -> tuple[SummaryResult, MindmapData]:
         chapters = chapters or []
         if self._needs_map_reduce(transcript):
@@ -204,9 +240,9 @@ class SummaryService:
                 title,
                 self._transcript_chars(transcript),
             )
-            summary = self._summarize_map_reduce(title, transcript, chapters)
+            summary = self._summarize_map_reduce(title, transcript, chapters, visual_frames)
         else:
-            prompt = build_summary_prompt(title, transcript, chapters)
+            prompt = build_summary_prompt(title, transcript, chapters, visual_frames)
             summary = self.llm_client.generate(prompt, SummaryResult)
         summary = _sanitize_timestamps(summary, int(transcript.total_duration_sec))
         mindmap = self._build_mindmap(title, summary, chapters)
@@ -243,7 +279,11 @@ class SummaryService:
         return sum(len(s.text) for s in transcript.segments)
 
     def _summarize_map_reduce(
-        self, title: str, transcript: Transcript, chapters: list[Chapter]
+        self,
+        title: str,
+        transcript: Transcript,
+        chapters: list[Chapter],
+        visual_frames: list[VideoFrameAnalysisResult] | None = None,
     ) -> SummaryResult:
         from app.services.youtube.chunker import ChunkerConfig, chunk_transcript
 
@@ -257,7 +297,7 @@ class SummaryService:
         )
         if not chunks:
             # Degenerate case: no chunkable content. Fall back to a full single call.
-            prompt = build_summary_prompt(title, transcript, chapters)
+            prompt = build_summary_prompt(title, transcript, chapters, visual_frames)
             return self.llm_client.generate(prompt, SummaryResult)
 
         # MAP: summarize each chunk independently.
@@ -277,7 +317,13 @@ class SummaryService:
             return SummaryResult(tldr="(summary unavailable: all chunks failed)")
 
         # REDUCE: merge chunk summaries into one global summary.
-        merge_prompt = build_merge_prompt(title, chunk_summaries, chapters, transcript.source)
+        merge_prompt = build_merge_prompt(
+            title,
+            chunk_summaries,
+            chapters,
+            transcript.source,
+            visual_frames,
+        )
         merged = self.llm_client.generate(merge_prompt, SummaryResult)
         return merged
 
@@ -330,6 +376,7 @@ def build_merge_prompt(
     chunk_summaries: list[ChunkSummary],
     chapters: list[Chapter],
     transcript_source: str,
+    visual_frames: list[VideoFrameAnalysisResult] | None = None,
 ) -> str:
     """Prompt for the REDUCE step: merge per-chunk summaries into one card."""
     parts = []
@@ -343,12 +390,14 @@ def build_merge_prompt(
     merged_text = "\n\n".join(parts)
 
     chapter_block = _format_chapters(chapters) if chapters else "(none)"
+    visual_block = format_visual_evidence(visual_frames)
     return (
         f"{_SUMMARY_SYSTEM_HINT}\n\n"
         f"You are producing the FINAL summary of a long video from per-section notes.\n"
         f"Video title: {title}\n"
         f"Transcript source: {transcript_source}\n"
         f"Chapters:\n{chapter_block}\n\n"
+        f"Visual evidence from sampled frames:\n{visual_block}\n\n"
         f"Per-section notes:\n{merged_text}\n\n"
         "Synthesize these into the final SummaryResult: a single TL;DR, 3-6 "
         "deduplicated key points (keep original timestamps), 1-3 best quotes, "

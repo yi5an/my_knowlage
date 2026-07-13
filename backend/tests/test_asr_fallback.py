@@ -26,9 +26,11 @@ from app.schemas.youtube import (
 from app.services.structured_output import MockStructuredOutputClient
 from app.services.youtube.asr import (
     _ACCESS_DENIED_MARKERS,
+    AsrTranscriptionError,
     AudioDownloadError,
     AudioSplitError,
     FakeAsrService,
+    FallbackAsrService,
     GlmAsrService,
     build_asr_service_from_settings,
     is_access_denied,
@@ -72,6 +74,17 @@ def _asr_transcript() -> Transcript:
         segments=[
             TranscriptSegment(text="今天我们讨论人工智能。", start_sec=0, duration_sec=28),
             TranscriptSegment(text="大模型的推理能力在提升。", start_sec=28, duration_sec=28),
+        ],
+    )
+
+
+def _short_asr_transcript() -> Transcript:
+    return Transcript(
+        video_id="n0Subs00001",
+        language="zh",
+        source="auto",
+        segments=[
+            TranscriptSegment(text="频", start_sec=0, duration_sec=28),
         ],
     )
 
@@ -293,6 +306,55 @@ def test_asr_language_does_not_inherit_caption_preference(
 
     assert isinstance(service, GlmAsrService)
     assert service.language is None
+
+
+def test_fallback_asr_uses_secondary_when_primary_is_too_short() -> None:
+    """SenseVoice can return one-character junk; secondary ASR should take over."""
+    primary = FakeAsrService().with_transcript("n0Subs00001", _short_asr_transcript())
+    secondary = FakeAsrService().with_transcript("n0Subs00001", _asr_transcript())
+    service = FallbackAsrService(
+        primary=primary,
+        fallback=secondary,
+        min_chars_per_segment=4,
+    )
+
+    transcript = service.transcribe("n0Subs00001")
+
+    assert transcript.segments[0].text == "今天我们讨论人工智能。"
+    assert primary.calls == ["n0Subs00001"]
+    assert secondary.calls == ["n0Subs00001"]
+
+
+def test_fallback_asr_keeps_primary_when_quality_is_acceptable() -> None:
+    primary = FakeAsrService().with_transcript("n0Subs00001", _asr_transcript())
+    secondary = FakeAsrService().with_transcript("n0Subs00001", _short_asr_transcript())
+    service = FallbackAsrService(
+        primary=primary,
+        fallback=secondary,
+        min_chars_per_segment=4,
+    )
+
+    transcript = service.transcribe("n0Subs00001")
+
+    assert transcript.segments[0].text == "今天我们讨论人工智能。"
+    assert primary.calls == ["n0Subs00001"]
+    assert secondary.calls == []
+
+
+def test_fallback_asr_uses_secondary_when_primary_raises() -> None:
+    primary = FakeAsrService(failure=AsrTranscriptionError("primary quota"))
+    secondary = FakeAsrService().with_transcript("n0Subs00001", _asr_transcript())
+    service = FallbackAsrService(
+        primary=primary,
+        fallback=secondary,
+        min_chars_per_segment=4,
+    )
+
+    transcript = service.transcribe("n0Subs00001")
+
+    assert transcript.segments[0].text == "今天我们讨论人工智能。"
+    assert primary.calls == ["n0Subs00001"]
+    assert secondary.calls == ["n0Subs00001"]
 
 
 def test_transcript_error_without_asr_is_failed(session: Session) -> None:

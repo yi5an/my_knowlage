@@ -18,7 +18,7 @@ from app.api.v1.youtube import (
     get_youtube_fetcher,
 )
 from app.infrastructure.database import Base, get_db_session
-from app.infrastructure.models import Document, Video, Workspace
+from app.infrastructure.models import Document, Video, VideoFrameAnalysis, Workspace
 from app.main import app
 from app.schemas.youtube import (
     KeyPoint,
@@ -179,6 +179,131 @@ def test_manual_summary_endpoint(client: TestClient) -> None:
     assert card["summary"]["tldr"] == "A concise overview."
     assert card["summary"]["key_points"][0]["timestamp_str"] == "00:10"
     assert card["mindmap"] is not None
+    assert card["visual_frames"] == []
+
+
+def test_summary_card_returns_visual_frames(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="visual_ws", name="visual_ws"))
+    video = Video(
+        id="video_visual",
+        workspace_id="visual_ws",
+        video_id="visual123",
+        title="Visual video",
+        fetch_status="fetched",
+    )
+    db_session.add(video)
+    db_session.add(
+        Document(
+            id="doc_visual",
+            workspace_id="visual_ws",
+            title="Visual summary",
+            source_type="youtube",
+            source_uri="https://youtu.be/visual123",
+            status="ready",
+            parse_status="completed",
+            video_id=video.id,
+            summary_json={"tldr": "Visual summary", "key_points": [], "quotes": [], "tags": []},
+            mindmap_data={"root_title": "Visual summary", "children": []},
+        )
+    )
+    db_session.add(
+        VideoFrameAnalysis(
+            id="vfa_1",
+            workspace_id="visual_ws",
+            video_id=video.id,
+            timestamp_sec=30,
+            timestamp_str="00:30",
+            image_path="/storage/youtube_frames/visual123/frame_0001.jpg",
+            perceptual_hash="abc",
+            frame_type="mindmap",
+            ocr_text="行业轮动思维导图",
+            ocr_blocks=[
+                {
+                    "text": "行业轮动思维导图",
+                    "bbox": [0, 0, 100, 20],
+                    "confidence": 0.95,
+                    "reading_order": 1,
+                }
+            ],
+            structured_notes={"title": "行业轮动思维导图", "bullets": []},
+            confidence=0.95,
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/youtube/summaries/doc_visual")
+
+    assert response.status_code == 200
+    frame = response.json()["visual_frames"][0]
+    assert frame["timestamp_str"] == "00:30"
+    assert frame["frame_type"] == "mindmap"
+    assert frame["image_url"] == "/api/v1/youtube/visual-frames/vfa_1/image"
+    assert frame["structured_notes"]["title"] == "行业轮动思维导图"
+
+
+def test_update_visual_frame_mindmap_tree(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="visual_edit_ws", name="visual_edit_ws"))
+    video = Video(
+        id="video_visual_edit",
+        workspace_id="visual_edit_ws",
+        video_id="visualedit123",
+        title="Visual editable video",
+        fetch_status="fetched",
+    )
+    db_session.add(video)
+    db_session.add(
+        VideoFrameAnalysis(
+            id="vfa_edit",
+            workspace_id="visual_edit_ws",
+            video_id=video.id,
+            timestamp_sec=0,
+            timestamp_str="00:00",
+            image_path="/storage/youtube_frames/visualedit123/frame_0001.jpg",
+            perceptual_hash="edit",
+            frame_type="mindmap",
+            ocr_text="旧脑图",
+            ocr_blocks=[],
+            structured_notes={
+                "title": "旧脑图",
+                "bullets": ["旧节点"],
+                "tree": {"title": "旧脑图", "children": []},
+            },
+            confidence=0.9,
+        )
+    )
+    db_session.commit()
+
+    response = client.put(
+        "/api/v1/youtube/visual-frames/vfa_edit/mindmap",
+        json={
+            "tree": {
+                "title": "编辑后的脑图",
+                "children": [
+                    {
+                        "title": "汽车行业",
+                        "children": [
+                            {"title": "新增节点", "children": []},
+                        ],
+                    }
+                ],
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["structured_notes"]["title"] == "编辑后的脑图"
+    assert body["structured_notes"]["bullets"] == ["旧节点"]
+    assert body["structured_notes"]["tree"]["children"][0]["title"] == "汽车行业"
+    row = db_session.get(VideoFrameAnalysis, "vfa_edit")
+    assert row is not None
+    assert row.structured_notes["tree"]["children"][0]["children"][0]["title"] == "新增节点"
 
 
 def test_manual_import_summary_to_knowledge_base(
@@ -404,6 +529,50 @@ def test_summary_list_shows_access_denied_as_not_retryable(
     status = status_resp.json()
     assert status["status"] == "access_denied"
     assert status["error"] and "access denied" in status["error"].lower()
+
+
+def test_summary_list_video_terminal_status_overrides_stale_processing_doc(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """A deleted video with a stale processing doc must not look retryable."""
+    db_session.add(Workspace(id="stale_denied_ws", name="stale_denied_ws"))
+    video = Video(
+        id="video_stale_denied",
+        workspace_id="stale_denied_ws",
+        video_id="deleted123",
+        title="Reuploaded title",
+        channel_name="AI Channel",
+        fetch_status="access_denied",
+        error_message="access denied: Video unavailable. This video has been removed",
+        published_at=datetime(2026, 7, 4, tzinfo=UTC),
+    )
+    db_session.add(video)
+    db_session.add(
+        Document(
+            id="doc_stale_processing",
+            workspace_id="stale_denied_ws",
+            title="Reuploaded title",
+            source_type="youtube",
+            source_uri="https://youtu.be/deleted123",
+            status="processing",
+            parse_status="processing",
+            video_id=video.id,
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/youtube/summaries?workspace_id=stale_denied_ws")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    item = body[0]
+    assert item["document_id"] == "doc_stale_processing"
+    assert item["summary_status"] == "access_denied"
+    assert item["failure_stage"] is None
+    assert item["retryable"] is False
+    assert item["error"] and "removed" in item["error"].lower()
 
 
 def test_retry_access_denied_video_returns_409(

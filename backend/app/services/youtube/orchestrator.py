@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -24,6 +25,7 @@ from app.schemas.youtube import (
     SummaryResult,
     Transcript,
     VideoChunk,
+    VideoFrameAnalysisResult,
     VideoMeta,
 )
 from app.services.document_visibility import is_imported_to_knowledge_base
@@ -72,6 +74,7 @@ class VideoSummaryOrchestrator:
         translation_service: TranslationService | None = None,
         translate_enabled: bool = True,
         asr_service: AsrService | None = None,
+        visual_analysis_service: Any | None = None,
     ) -> None:
         self.session = session
         self.fetcher = fetcher
@@ -81,6 +84,7 @@ class VideoSummaryOrchestrator:
         self.translation_service = translation_service
         self.translate_enabled = translate_enabled
         self.asr_service = asr_service
+        self.visual_analysis_service = visual_analysis_service
 
     def summarize_url(
         self,
@@ -166,6 +170,7 @@ class VideoSummaryOrchestrator:
         preferred_language: str | None = None,
     ) -> SummaryJobResult:
         video = self._upsert_video(meta, workspace_id, subscription_id)
+        visual_frames = self._analyze_visual_frames(video, meta.video_id)
         transcript, asr_used = self._extract_transcript(meta.video_id, video, preferred_language)
         if transcript is None:
             # _extract_transcript already persisted the terminal fetch_status
@@ -203,7 +208,10 @@ class VideoSummaryOrchestrator:
         )
         try:
             summary, mindmap = self.summary_service.summarize(
-                title=meta.title, transcript=transcript, chapters=meta.chapters
+                title=meta.title,
+                transcript=transcript,
+                chapters=meta.chapters,
+                visual_frames=visual_frames,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("summary failed for %s: %s", meta.video_id, exc)
@@ -274,6 +282,24 @@ class VideoSummaryOrchestrator:
             status="succeeded",
             summary=summary,
         )
+
+    def _analyze_visual_frames(
+        self,
+        video: Video,
+        youtube_video_id: str,
+    ) -> list[VideoFrameAnalysisResult]:
+        if self.visual_analysis_service is None:
+            return []
+        try:
+            analyze = self.visual_analysis_service.analyze
+            return list(analyze(video, youtube_video_id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("visual analysis failed for %s: %s", youtube_video_id, exc)
+            metadata = dict(video.metadata_ or {})
+            metadata["visual_analysis_warning"] = str(exc)
+            video.metadata_ = metadata
+            self.session.commit()
+            return []
 
     def _extract_transcript(
         self,

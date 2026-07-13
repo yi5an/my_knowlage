@@ -29,6 +29,38 @@ export interface SummaryResult {
   transcript_source: "manual" | "auto";
 }
 
+export interface OcrBlock {
+  text: string;
+  bbox: number[];
+  confidence: number;
+  reading_order?: number | null;
+  region_type?: string | null;
+}
+
+export interface VisualMindmapTreeNode {
+  title: string;
+  children: VisualMindmapTreeNode[];
+}
+
+export interface VideoFrameAnalysis {
+  id: string | null;
+  timestamp_sec: number;
+  timestamp_str: string;
+  image_path: string;
+  image_url: string | null;
+  frame_type: "slide" | "mindmap" | "chart" | "table" | "screen_text" | "other";
+  ocr_text: string;
+  ocr_blocks: OcrBlock[];
+  structured_notes: {
+    title?: string;
+    bullets?: string[];
+    text?: string;
+    tree?: VisualMindmapTreeNode;
+    [key: string]: unknown;
+  };
+  confidence: number;
+}
+
 export interface MindmapNode {
   title: string;
   timestamp?: number | null;
@@ -53,6 +85,7 @@ export interface VideoSummaryCard {
   summary: SummaryResult | null;
   mindmap: MindmapData | null;
   transcript: string | null;
+  visual_frames: VideoFrameAnalysis[];
 }
 
 export interface Subscription {
@@ -111,6 +144,16 @@ export function summarizeVideo(
 
 export function getSummaryCard(documentId: string): Promise<VideoSummaryCard> {
   return apiRequest<VideoSummaryCard>(`/youtube/summaries/${documentId}`);
+}
+
+export function updateVisualFrameMindmap(
+  frameId: string,
+  tree: VisualMindmapTreeNode,
+): Promise<VideoFrameAnalysis> {
+  return apiRequest<VideoFrameAnalysis>(`/youtube/visual-frames/${frameId}/mindmap`, {
+    method: "PUT",
+    body: { tree },
+  });
 }
 
 export function importSummaryToKnowledgeBase(

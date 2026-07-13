@@ -13,11 +13,13 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,postgres,redis,backend,frontend}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,postgres,redis,backend,frontend,paddleocr}
       http_proxy: ${HTTP_PROXY:-}
       https_proxy: ${HTTPS_PROXY:-}
       all_proxy: ${ALL_PROXY:-}
-      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,postgres,redis,backend,frontend}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,postgres,redis,backend,frontend,paddleocr}
+      YOUTUBE_VISUAL_ANALYSIS_ENABLED: ${YOUTUBE_VISUAL_ANALYSIS_ENABLED:-false}
+      OCR_BASE_URL: ${OCR_BASE_URL:-http://paddleocr:8866}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -54,6 +56,16 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+
+  paddleocr:
+    build:
+      context: ./deploy/paddleocr-service
+    profiles:
+      - ocr
+    expose:
+      - "8866"
+    environment:
+      PADDLEOCR_LANG: ${PADDLEOCR_LANG:-ch}
 
 volumes:
   postgres_data:

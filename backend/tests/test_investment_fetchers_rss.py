@@ -13,7 +13,10 @@ from app.services.investment.fetchers import (
     FederalReserveRssFetcher,
     RssFetcher,
     SourceConfigError,
+    XNitterFetcher,
+    XRssHubFetcher,
     _extract_html_summary,
+    get_fetcher,
 )
 
 # A realistic-shaped Fed monetary-policy RSS excerpt (2 entries).
@@ -41,14 +44,31 @@ FED_RSS = b"""<?xml version="1.0" encoding="UTF-8"?>
 class FakeHttpClient:
     """Records requests and returns a canned body for any URL."""
 
-    def __init__(self, body: bytes, bodies_by_url: dict[str, bytes] | None = None) -> None:
+    def __init__(
+        self,
+        body: bytes,
+        bodies_by_url: dict[str, bytes] | None = None,
+        posts_by_url: dict[str, bytes] | None = None,
+    ) -> None:
         self.body = body
         self.bodies_by_url = bodies_by_url or {}
+        self.posts_by_url = posts_by_url or {}
         self.calls: list[tuple[str, dict[str, str] | None]] = []
+        self.posts: list[tuple[str, dict[str, str] | None, dict[str, str] | None]] = []
 
     def get(self, url: str, headers: dict[str, str] | None = None) -> tuple[bytes, str]:
         self.calls.append((url, headers))
         return self.bodies_by_url.get(url, self.body), url
+
+    def post(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        data: dict[str, str] | str | None = None,
+    ) -> tuple[bytes, str]:
+        self.posts.append((url, headers, data if isinstance(data, dict) else None))
+        return self.posts_by_url.get(url, b""), url
 
 
 def _make_source(source_type: str, url: str, name: str = "Fed RSS") -> InvestmentSource:
@@ -111,6 +131,115 @@ def test_rss_fetcher_fetches_detail_when_feed_summary_is_only_title():
         "https://fed.gov/feed.xml",
         "https://fed.gov/monetary/20240731a.htm",
     ]
+
+
+def test_rss_fetcher_respects_config_limit():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel>
+      <item><title>One</title><link>https://x/1</link><description>One summary</description></item>
+      <item><title>Two</title><link>https://x/2</link><description>Two summary</description></item>
+      <item><title>Three</title><link>https://x/3</link>
+      <description>Three summary</description></item>
+    </channel></rss>"""
+    source = _make_source("rss", "https://x/feed")
+    source.config = {"limit": 2}
+
+    items = RssFetcher().fetch(source, FakeHttpClient(feed))
+
+    assert [item.title for item in items] == ["One", "Two"]
+
+
+def test_google_news_rss_uses_source_url_and_fetches_source_summary():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel>
+      <item><title>Fed policymakers' inflation concerns grew - Reuters</title>
+      <link>https://news.google.com/rss/articles/abc?url=https%3A%2F%2Fwww.reuters.com%2Fmarkets%2Fus%2Ffed-minutes-2026-07-13%2F&amp;oc=5</link>
+      <guid>https://news.google.com/rss/articles/abc?oc=5</guid>
+      <description>Fed policymakers' inflation concerns grew - Reuters</description></item>
+    </channel></rss>"""
+    detail = (
+        b"<!doctype html><html><head>"
+        b'<meta property="og:description" content="Federal Reserve officials '
+        b'were increasingly worried about persistent inflation risks.">'
+        b"</head><body><article><p>Full article body.</p></article></body></html>"
+    )
+    http = FakeHttpClient(
+        feed,
+        {
+            "https://www.reuters.com/markets/us/fed-minutes-2026-07-13/": detail,
+        },
+    )
+
+    items = RssFetcher().fetch(
+        _make_source(
+            "rss",
+            "https://news.google.com/rss/search?q=Federal%20Reserve",
+            name="Google News - Fed",
+        ),
+        http,
+    )
+
+    assert items[0].url == "https://www.reuters.com/markets/us/fed-minutes-2026-07-13/"
+    assert items[0].external_id == "https://www.reuters.com/markets/us/fed-minutes-2026-07-13/"
+    assert items[0].summary == (
+        "Federal Reserve officials were increasingly worried about persistent inflation risks."
+    )
+    assert items[0].raw_payload["google_news_url"] == "https://news.google.com/rss/articles/abc?url=https%3A%2F%2Fwww.reuters.com%2Fmarkets%2Fus%2Ffed-minutes-2026-07-13%2F&oc=5"
+    assert [call[0] for call in http.calls] == [
+        "https://news.google.com/rss/search?q=Federal%20Reserve",
+        "https://www.reuters.com/markets/us/fed-minutes-2026-07-13/",
+    ]
+
+
+def test_google_news_opaque_rss_decodes_source_url_and_fetches_source_summary():
+    token = "CBMiopaque"
+    feed = f"""<?xml version="1.0"?><rss version="2.0"><channel>
+      <item><title>Fed minutes due - Reuters</title>
+      <link>https://news.google.com/rss/articles/{token}?oc=5</link>
+      <guid>https://news.google.com/rss/articles/{token}?oc=5</guid>
+      <description>Fed minutes due - Reuters</description></item>
+    </channel></rss>""".encode()
+    google_article = b"""<!doctype html><html><body>
+      <c-wiz><div jscontroller="x" data-n-a-sg="sig123" data-n-a-ts="1783943717"></div></c-wiz>
+    </body></html>"""
+    batch_response = (
+        b")]}'\n\n"
+        b'[["wrb.fr","Fbv4je","[\\"garturlres\\",\\"https://www.reuters.com/business/fed-minutes-2026-07-08/\\",1]",null,null,null,""],["di",40],["af.httprm",39,"1",2]]'
+    )
+    detail = (
+        b"<!doctype html><html><head>"
+        b'<meta name="description" content="Analysts debated how Federal Reserve minutes '
+        b'could change under new leadership.">'
+        b"</head><body></body></html>"
+    )
+    http = FakeHttpClient(
+        feed,
+        {
+            "https://news.google.com/rss/articles/CBMiopaque": google_article,
+            "https://news.google.com/articles/CBMiopaque": google_article,
+            "https://www.reuters.com/business/fed-minutes-2026-07-08/": detail,
+        },
+        {
+            "https://news.google.com/_/DotsSplashUi/data/batchexecute": batch_response,
+        },
+    )
+
+    items = RssFetcher().fetch(
+        _make_source(
+            "rss",
+            "https://news.google.com/rss/search?q=Federal%20Reserve",
+            name="Google News - Fed",
+        ),
+        http,
+    )
+
+    assert items[0].url == "https://www.reuters.com/business/fed-minutes-2026-07-08/"
+    assert items[0].external_id == "https://www.reuters.com/business/fed-minutes-2026-07-08/"
+    assert items[0].summary == (
+        "Analysts debated how Federal Reserve minutes could change under new leadership."
+    )
+    assert items[0].raw_payload["google_news_url"] == (
+        "https://news.google.com/rss/articles/CBMiopaque?oc=5"
+    )
+    assert http.posts[0][0] == "https://news.google.com/_/DotsSplashUi/data/batchexecute"
 
 
 def test_fed_rss_fetcher_includes_attachment_links_and_content():
@@ -319,6 +448,67 @@ def test_rss_entry_uses_link_when_guid_missing():
     items = RssFetcher().fetch(_make_source("rss", "https://x/feed"), FakeHttpClient(rss_no_guid))
     assert len(items) == 1
     assert items[0].external_id == "https://x/y"
+
+
+def test_x_rsshub_fetcher_builds_feed_url_from_username():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel>
+      <item><title>Important market thread</title>
+      <link>https://x.com/investor/status/123</link>
+      <guid>https://x.com/investor/status/123</guid>
+      <pubDate>Mon, 13 Jul 2026 08:00:00 GMT</pubDate>
+      <description>Gold ETF flows are recovering.</description></item>
+    </channel></rss>"""
+    http = FakeHttpClient(feed)
+    source = _make_source("x_rss", "", name="X investor")
+    source.config = {
+        "username": "@investor",
+        "rsshub_base_url": "https://rsshub.example",
+    }
+
+    items = XRssHubFetcher().fetch(source, http)
+
+    assert http.calls[0][0] == "https://rsshub.example/twitter/user/investor"
+    assert len(items) == 1
+    assert items[0].source_name == "X investor"
+    assert items[0].url == "https://x.com/investor/status/123"
+    assert items[0].raw_payload["platform"] == "x"
+    assert items[0].raw_payload["collection_method"] == "rsshub"
+
+
+def test_x_nitter_fetcher_builds_feed_url_from_username():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel>
+      <item><title>Policy signal</title>
+      <link>https://nitter.example/macro/status/456</link>
+      <guid>https://nitter.example/macro/status/456</guid>
+      <description>Central bank balance sheet update.</description></item>
+    </channel></rss>"""
+    http = FakeHttpClient(feed)
+    source = _make_source("x_nitter", "", name="Macro mirror")
+    source.config = {
+        "username": "macro",
+        "nitter_base_url": "https://nitter.example",
+    }
+
+    items = XNitterFetcher().fetch(source, http)
+
+    assert http.calls[0][0] == "https://nitter.example/macro/rss"
+    assert items[0].raw_payload["platform"] == "x"
+    assert items[0].raw_payload["collection_method"] == "nitter"
+
+
+def test_x_feed_fetcher_requires_url_or_username():
+    source = _make_source("x_rss", "", name="Broken X")
+    try:
+        XRssHubFetcher().fetch(source, FakeHttpClient(FED_RSS))
+    except SourceConfigError as exc:
+        assert "username" in str(exc)
+    else:
+        raise AssertionError("expected SourceConfigError")
+
+
+def test_x_fetchers_are_registered():
+    assert isinstance(get_fetcher("x_rss"), XRssHubFetcher)
+    assert isinstance(get_fetcher("x_nitter"), XNitterFetcher)
 
 
 def test_published_parsed_is_utc_aware():

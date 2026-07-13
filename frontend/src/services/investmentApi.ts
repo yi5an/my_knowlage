@@ -25,6 +25,9 @@ export type ActionStatus =
 export type Importance = "low" | "medium" | "high";
 export type SourceType =
   | "rss"
+  | "x_rss"
+  | "x_nitter"
+  | "x_brightdata"
   | "sec_edgar"
   | "federal_reserve_rss"
   | "bls"

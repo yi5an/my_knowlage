@@ -26,6 +26,9 @@ import {
 
 const TYPE_LABEL: Record<SourceType, string> = {
   rss: "RSS",
+  x_rss: "X / RSSHub",
+  x_nitter: "X / Nitter",
+  x_brightdata: "X / Bright Data",
   sec_edgar: "SEC EDGAR",
   federal_reserve_rss: "美联储 RSS",
   bls: "BLS",
@@ -86,11 +89,12 @@ export function InvestmentSourcesPage() {
   const handleCreate = async () => {
     const values = await form.validateFields();
     const sourceType = values.source_type as SourceType;
+    const isXSource = sourceType === "x_rss" || sourceType === "x_nitter" || sourceType === "x_brightdata";
     const payload: Parameters<typeof investmentApi.createSource>[0] = {
       source_type: sourceType,
       name: values.name,
-      default_info_layer: values.default_info_layer ?? "news",
-      poll_interval_seconds: values.poll_interval_seconds ?? 3600,
+      default_info_layer: values.default_info_layer ?? (isXSource ? "opinion" : "news"),
+      poll_interval_seconds: values.poll_interval_seconds ?? (sourceType === "x_brightdata" ? 21600 : 3600),
     };
     // SEC needs a CIK in config; BLS/FRED need series IDs in config;
     // rss/federal_reserve_rss/hkex/cninfo use url.
@@ -106,6 +110,24 @@ export function InvestmentSourcesPage() {
         series: _splitSeries(values.series),
         limit: values.limit ?? 5,
       };
+    } else if (sourceType === "x_brightdata") {
+      payload.config = {
+        profile_urls: _splitSeries(values.profile_urls).map((v) =>
+          v.startsWith("http") ? v : `https://x.com/${v.replace(/^@/, "")}`,
+        ),
+      };
+    } else if (isXSource) {
+      const target = String(values.x_target || "").trim();
+      if (/^https?:\/\//i.test(target)) {
+        payload.url = target;
+      } else {
+        payload.config = {
+          username: target.replace(/^@/, ""),
+          ...(sourceType === "x_rss"
+            ? { rsshub_base_url: values.x_base_url || "https://rsshub.app" }
+            : { nitter_base_url: values.x_base_url || "https://nitter.net" }),
+        };
+      }
     } else {
       payload.url = values.url;
     }
@@ -216,7 +238,7 @@ export function InvestmentSourcesPage() {
     <main className="page">
       <PageHeader
         title="数据源"
-        description="配置真实数据源（SEC / 美联储 / RSS）。无配置时不显示任何示例数据。"
+        description="配置真实数据源（SEC / 美联储 / RSS / X 镜像源）。无配置时不显示任何示例数据。"
         extra={<Button type="primary" onClick={() => setOpen(true)}>新增数据源</Button>}
       />
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} showIcon />}
@@ -261,6 +283,9 @@ export function InvestmentSourcesPage() {
             <Select
               options={[
                 { value: "rss", label: "RSS / Atom" },
+                { value: "x_brightdata", label: "X / Bright Data（账号高频采集）" },
+                { value: "x_rss", label: "X / RSSHub（公开推文）" },
+                { value: "x_nitter", label: "X / Nitter 镜像（公开推文）" },
                 { value: "federal_reserve_rss", label: "美联储 RSS" },
                 { value: "sec_edgar", label: "SEC EDGAR（按 CIK）" },
                 { value: "bls", label: "BLS（按序列，宏观）" },
@@ -268,6 +293,14 @@ export function InvestmentSourcesPage() {
                 { value: "hkex", label: "港交所 HKEX（公告搜索）" },
                 { value: "cninfo", label: "巨潮 CNINFO（公告搜索）" },
               ]}
+              onChange={(value) => {
+                if (value === "x_rss" || value === "x_nitter" || value === "x_brightdata") {
+                  form.setFieldsValue({
+                    default_info_layer: "opinion",
+                    poll_interval_seconds: value === "x_brightdata" ? 21600 : 3600,
+                  });
+                }
+              }}
             />
           </Form.Item>
           <Form.Item shouldUpdate={(prev, cur) => prev.source_type !== cur.source_type} noStyle>
@@ -309,6 +342,39 @@ export function InvestmentSourcesPage() {
                   </>
                 );
               }
+              if (st === "x_brightdata") {
+                return (
+                  <Form.Item
+                    label="X 账号 URL（每行一个）"
+                    name="profile_urls"
+                    rules={[{ required: true }]}
+                  >
+                    <Input.TextArea rows={4} placeholder={"https://x.com/elonmusk\nhttps://x.com/realDonaldTrump\nhttps://x.com/nvidia"} />
+                  </Form.Item>
+                );
+              }
+              if (st === "x_rss" || st === "x_nitter") {
+                return (
+                  <>
+                    <Form.Item
+                      label="X 用户名或 Feed URL"
+                      name="x_target"
+                      rules={[{ required: true }]}
+                    >
+                      <Input placeholder="@investor 或 https://rsshub.app/twitter/user/investor" />
+                    </Form.Item>
+                    <Form.Item label="镜像/RSS 基础地址" name="x_base_url">
+                      <Input
+                        placeholder={
+                          st === "x_rss"
+                            ? "https://rsshub.app"
+                            : "https://nitter.net"
+                        }
+                      />
+                    </Form.Item>
+                  </>
+                );
+              }
               // rss / federal_reserve_rss / hkex / cninfo → URL
               return (
                 <Form.Item label="URL" name="url" rules={[{ required: true }]}>
@@ -336,6 +402,12 @@ export function InvestmentSourcesPage() {
               const hints: string[] = [];
               if (st === "sec_edgar") hints.push("SEC 抓取需在服务端配置 SEC_USER_AGENT");
               if (st === "fred") hints.push("FRED 抓取需在服务端配置 FRED_API_KEY");
+              if (st === "x_rss" || st === "x_nitter") {
+                hints.push("X 镜像源不消耗官方 credits，但可能随镜像可用性失败");
+              }
+              if (st === "x_brightdata") {
+                hints.push("Bright Data 抓取会消耗额度；高频版默认每 6 小时一次");
+              }
               if (hints.length === 0) return null;
               return (
                 <Typography.Text type="secondary">

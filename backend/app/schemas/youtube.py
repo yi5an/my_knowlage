@@ -8,7 +8,7 @@ service logic (schema-driven development per AGENTS.md rule #2).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -77,6 +77,67 @@ class VideoMeta(BaseModel):
     thumbnail_url: str | None = None
     description: str | None = None
     chapters: list[Chapter] = Field(default_factory=list)
+
+
+# --- Visual frame analysis --------------------------------------------------
+
+
+class OcrBlock(BaseModel):
+    """One OCR line/block detected on a video frame."""
+
+    text: str
+    bbox: list[float] = Field(description="[x1, y1, x2, y2] in image pixels")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reading_order: int | None = None
+    region_type: str | None = None
+
+
+FrameType = Literal["slide", "mindmap", "chart", "table", "screen_text", "other"]
+
+
+class VideoFrameAnalysisResult(BaseModel):
+    """Structured visual evidence extracted from one retained video frame."""
+
+    timestamp_sec: float = Field(ge=0)
+    timestamp_str: str
+    image_path: str
+    perceptual_hash: str
+    frame_type: FrameType = "other"
+    ocr_text: str = ""
+    ocr_blocks: list[OcrBlock] = Field(default_factory=list)
+    structured_notes: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class VideoFrameAnalysisResponse(BaseModel):
+    """Frame analysis as exposed by the summary-card API."""
+
+    id: str | None = None
+    timestamp_sec: float
+    timestamp_str: str
+    image_path: str
+    image_url: str | None = None
+    frame_type: FrameType
+    ocr_text: str
+    ocr_blocks: list[OcrBlock] = Field(default_factory=list)
+    structured_notes: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 0.0
+
+
+class VisualMindmapTreeNode(BaseModel):
+    """Editable visual mindmap tree reconstructed from a video frame."""
+
+    title: str = Field(min_length=1, max_length=300)
+    children: list[VisualMindmapTreeNode] = Field(default_factory=list, max_length=80)
+
+
+VisualMindmapTreeNode.model_rebuild()
+
+
+class VisualMindmapUpdateRequest(BaseModel):
+    """Payload for saving user edits to a visual-frame mindmap."""
+
+    tree: VisualMindmapTreeNode
 
 
 # --- Summary contract (the card data model) ---------------------------------
@@ -214,3 +275,4 @@ class VideoSummaryCard(BaseModel):
     mindmap: MindmapData | None = None
     transcript: str | None = None
     transcript_url: HttpUrl | None = None
+    visual_frames: list[VideoFrameAnalysisResponse] = Field(default_factory=list)

@@ -60,6 +60,45 @@ class FakeHttpClient:
         pass
 
 
+class FakeBrightDataClient:
+    def __init__(self) -> None:
+        self.submitted_urls: list[list[str]] = []
+        self.status = "running"
+
+    def submit_x_posts_by_profiles(self, urls: list[str]) -> str:
+        self.submitted_urls.append(urls)
+        return "sd_test"
+
+    def snapshot_status(self, snapshot_id: str) -> str:
+        assert snapshot_id == "sd_test"
+        return self.status
+
+    def download_snapshot(self, snapshot_id: str) -> list[dict[str, object]]:
+        assert snapshot_id == "sd_test"
+        return [
+            {
+                "id": "post_1",
+                "url": "https://x.com/elonmusk/status/1",
+                "description": "Tesla released a new AI update.",
+                "date_posted": "2026-07-13T08:00:00.000Z",
+                "user_posted": "elonmusk",
+                "likes": 100,
+                "views": 1000,
+            }
+        ]
+
+
+class FlakyBrightDataClient(FakeBrightDataClient):
+    def snapshot_status(self, snapshot_id: str) -> str:
+        raise SourceConfigError("temporary SSL EOF")
+
+
+class SubmitFailingBrightDataClient(FakeBrightDataClient):
+    def submit_x_posts_by_profiles(self, urls: list[str]) -> str:
+        self.submitted_urls.append(urls)
+        raise SourceConfigError("submit timeout")
+
+
 @pytest.fixture()
 def engine():
     eng = create_engine(
@@ -108,6 +147,22 @@ def _make_source(session: Session, source_type: str = "rss") -> InvestmentSource
     return src
 
 
+def _make_brightdata_source(session: Session) -> InvestmentSource:
+    src = InvestmentSource(
+        id="src_bright",
+        workspace_id="ws_default",
+        source_type="x_brightdata",
+        name="X Elon Musk",
+        config={"profile_urls": ["https://x.com/elonmusk"]},
+        default_info_layer="opinion",
+        poll_interval_seconds=21600,
+        enabled=True,
+    )
+    session.add(src)
+    session.commit()
+    return src
+
+
 # --- handler: persist + dedupe --------------------------------------------
 
 
@@ -146,6 +201,141 @@ def test_handler_persists_document_and_item(session: Session):
     assert src_after.last_polled_at is not None
     assert src_after.next_poll_at is not None
     assert src_after.last_error is None
+
+
+def test_brightdata_fetch_defers_until_snapshot_ready(
+    session_factory: sessionmaker[Session],
+):
+    with session_factory() as setup:
+        setup.add(Workspace(id="ws_default", name="Default"))
+        src = _make_brightdata_source(setup)
+        job = TaskJob(
+            id="job_bright",
+            workspace_id="ws_default",
+            job_type=INVESTMENT_FETCH_JOB_TYPE,
+            target_type="investment_source",
+            target_id=src.id,
+            status="pending",
+            input={"source_id": src.id},
+        )
+        setup.add(job)
+        setup.commit()
+
+    fake = FakeBrightDataClient()
+    handler = InvestmentFetchJobHandler(brightdata_client=fake)
+    processor = TaskJobProcessor(session_factory, llm_client=None)
+    from app.services.task_worker import _HANDLERS
+
+    previous = _HANDLERS.get(INVESTMENT_FETCH_JOB_TYPE)
+    _HANDLERS[INVESTMENT_FETCH_JOB_TYPE] = handler
+    try:
+        assert processor.run_once() == 1
+        with session_factory() as s:
+            deferred = s.get(TaskJob, "job_bright")
+            assert deferred is not None
+            assert deferred.status == "pending"
+            assert deferred.output["snapshot_id"] == "sd_test"
+            assert deferred.output["stage"] == "waiting_snapshot"
+            assert fake.submitted_urls == [["https://x.com/elonmusk"]]
+
+        fake.status = "ready"
+        assert processor.run_once() == 1
+    finally:
+        if previous is not None:
+            _HANDLERS[INVESTMENT_FETCH_JOB_TYPE] = previous
+
+    with session_factory() as s:
+        completed = s.get(TaskJob, "job_bright")
+        assert completed is not None
+        assert completed.status == "succeeded"
+        assert completed.output["items_seen"] == 1
+        item = s.scalar(select(InvestmentItem))
+        assert item is not None
+        assert item.title == "X @elonmusk: Tesla released a new AI update."
+        assert item.source_url == "https://x.com/elonmusk/status/1"
+        assert item.info_layer == "opinion"
+
+
+def test_brightdata_snapshot_network_error_keeps_job_pending(
+    session_factory: sessionmaker[Session],
+):
+    with session_factory() as setup:
+        setup.add(Workspace(id="ws_default", name="Default"))
+        src = _make_brightdata_source(setup)
+        setup.add(
+            TaskJob(
+                id="job_bright_flaky",
+                workspace_id="ws_default",
+                job_type=INVESTMENT_FETCH_JOB_TYPE,
+                target_type="investment_source",
+                target_id=src.id,
+                status="pending",
+                input={"source_id": src.id},
+                output={"stage": "waiting_snapshot", "snapshot_id": "sd_test", "poll_attempts": 2},
+            )
+        )
+        setup.commit()
+
+    handler = InvestmentFetchJobHandler(brightdata_client=FlakyBrightDataClient())
+    processor = TaskJobProcessor(session_factory, llm_client=None)
+    from app.services.task_worker import _HANDLERS
+
+    previous = _HANDLERS.get(INVESTMENT_FETCH_JOB_TYPE)
+    _HANDLERS[INVESTMENT_FETCH_JOB_TYPE] = handler
+    try:
+        assert processor.run_once() == 1
+    finally:
+        if previous is not None:
+            _HANDLERS[INVESTMENT_FETCH_JOB_TYPE] = previous
+
+    with session_factory() as s:
+        job = s.get(TaskJob, "job_bright_flaky")
+        assert job is not None
+        assert job.status == "pending"
+        assert job.output["poll_attempts"] == 3
+        assert "temporary SSL EOF" in job.output["last_transient_error"]
+
+
+def test_brightdata_submit_failure_marks_source_polled(
+    session_factory: sessionmaker[Session],
+):
+    with session_factory() as setup:
+        setup.add(Workspace(id="ws_default", name="Default"))
+        src = _make_brightdata_source(setup)
+        setup.add(
+            TaskJob(
+                id="job_bright_submit_fail",
+                workspace_id="ws_default",
+                job_type=INVESTMENT_FETCH_JOB_TYPE,
+                target_type="investment_source",
+                target_id=src.id,
+                status="pending",
+                input={"source_id": src.id},
+            )
+        )
+        setup.commit()
+
+    handler = InvestmentFetchJobHandler(brightdata_client=SubmitFailingBrightDataClient())
+    processor = TaskJobProcessor(session_factory, llm_client=None)
+    from app.services.task_worker import _HANDLERS
+
+    previous = _HANDLERS.get(INVESTMENT_FETCH_JOB_TYPE)
+    _HANDLERS[INVESTMENT_FETCH_JOB_TYPE] = handler
+    try:
+        assert processor.run_once() == 1
+    finally:
+        if previous is not None:
+            _HANDLERS[INVESTMENT_FETCH_JOB_TYPE] = previous
+
+    with session_factory() as s:
+        job = s.get(TaskJob, "job_bright_submit_fail")
+        src = s.get(InvestmentSource, "src_bright")
+        assert job is not None
+        assert src is not None
+        assert job.status == "failed"
+        assert src.last_polled_at is not None
+        assert src.next_poll_at is not None
+        assert src.last_error == "SourceConfigError: submit timeout"
 
 
 def test_handler_dedupe_is_idempotent(session: Session):

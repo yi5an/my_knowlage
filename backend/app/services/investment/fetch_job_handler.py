@@ -21,7 +21,14 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.infrastructure.models import InvestmentItem, InvestmentSource, TaskJob
+from app.services.investment.brightdata import (
+    BrightDataClient,
+    BrightDataClientProtocol,
+    brightdata_profile_urls,
+    normalize_brightdata_posts,
+)
 from app.services.investment.fetchers import (
     HttpClient,
     HttpxHttpClient,
@@ -32,6 +39,7 @@ from app.services.investment.repositories import (
     InvestmentItemRepository,
     InvestmentSourceRepository,
 )
+from app.services.task_worker import JobDeferred
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +52,14 @@ def _new_job_id() -> str:
     return f"job_{uuid4().hex}"
 
 
+def _build_http_client(source: InvestmentSource) -> HttpClient:
+    cfg = source.config or {}
+    proxy_url = cfg.get("proxy_url")
+    if not proxy_url and source.source_type in {"x_rss", "x_nitter"}:
+        proxy_url = get_settings().x_http_proxy
+    return HttpxHttpClient(proxy_url=str(proxy_url) if proxy_url else None)
+
+
 class InvestmentFetchJobHandler:
     """Fetch one source end-to-end and write stats into ``TaskJob.output``.
 
@@ -53,9 +69,14 @@ class InvestmentFetchJobHandler:
     handler lets propagate so the worker records a failed job.
     """
 
-    def __init__(self, http_client: HttpClient | None = None) -> None:
+    def __init__(
+        self,
+        http_client: HttpClient | None = None,
+        brightdata_client: BrightDataClientProtocol | None = None,
+    ) -> None:
         # If unset, an HttpxHttpClient is built lazily per fetch (see handle()).
         self._http_client = http_client
+        self._brightdata_client = brightdata_client
 
     def handle(
         self,
@@ -68,7 +89,10 @@ class InvestmentFetchJobHandler:
         if source is None:
             raise SourceConfigError(f"investment source {source_id!r} not found")
 
-        http = self._http_client or HttpxHttpClient()
+        if source.source_type == "x_brightdata":
+            return self._handle_brightdata_x(job, session, source)
+
+        http = self._http_client or _build_http_client(source)
         try:
             fetcher = get_fetcher(source.source_type)
             raw_items = fetcher.fetch(source, http)
@@ -115,6 +139,87 @@ class InvestmentFetchJobHandler:
             skipped,
         )
         return {"items_seen": seen, "items_created": created, "items_skipped": skipped}
+
+    def _handle_brightdata_x(
+        self, job: TaskJob, session: Session, source: InvestmentSource
+    ) -> dict[str, Any]:
+        client = self._brightdata_client or BrightDataClient()
+        output = dict(job.output or {})
+        snapshot_id = output.get("snapshot_id")
+        if not snapshot_id:
+            try:
+                urls = brightdata_profile_urls(source)
+                snapshot_id = client.submit_x_posts_by_profiles(urls)
+            except Exception as exc:
+                InvestmentSourceRepository(session).mark_polled(
+                    source,
+                    success=False,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                session.commit()
+                raise
+            raise JobDeferred(
+                {
+                    "stage": "waiting_snapshot",
+                    "snapshot_id": snapshot_id,
+                    "profile_urls": urls,
+                    "poll_attempts": 0,
+                },
+                progress=10,
+            )
+
+        try:
+            status = client.snapshot_status(str(snapshot_id))
+        except SourceConfigError as exc:
+            attempts = int(output.get("poll_attempts", 0)) + 1
+            raise JobDeferred(
+                {
+                    **output,
+                    "stage": "waiting_snapshot",
+                    "snapshot_status": "transient_error",
+                    "last_transient_error": str(exc),
+                    "poll_attempts": attempts,
+                },
+                progress=min(90, 10 + attempts * 5),
+            ) from exc
+        if status != "ready":
+            attempts = int(output.get("poll_attempts", 0)) + 1
+            raise JobDeferred(
+                {
+                    **output,
+                    "stage": "waiting_snapshot",
+                    "snapshot_status": status,
+                    "poll_attempts": attempts,
+                },
+                progress=min(90, 10 + attempts * 5),
+            )
+
+        records = client.download_snapshot(str(snapshot_id))
+        raw_items = normalize_brightdata_posts(records, source)
+        repo = InvestmentItemRepository(session)
+        created = 0
+        for raw in raw_items:
+            if repo.upsert_from_raw(raw, workspace_id=source.workspace_id, source=source):
+                created += 1
+        seen = len(raw_items)
+        skipped = seen - created
+
+        InvestmentSourceRepository(session).mark_polled(source, success=True)
+        session.commit()
+
+        if created > 0 or _has_untranslated_items(session, source):
+            _enqueue_translation(session, source)
+        if created > 0 or _has_unclassified_items(session, source):
+            _enqueue_classification(session, source)
+
+        return {
+            "stage": "completed",
+            "snapshot_id": snapshot_id,
+            "records_seen": len(records),
+            "items_seen": seen,
+            "items_created": created,
+            "items_skipped": skipped,
+        }
 
 
 def _enqueue_translation(session: Session, source: InvestmentSource) -> None:

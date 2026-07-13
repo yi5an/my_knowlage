@@ -22,10 +22,12 @@ from app.infrastructure.models import (
 from app.schemas.youtube import (
     Chapter,
     KeyPoint,
+    MindmapData,
     Quote,
     SummaryResult,
     Transcript,
     TranscriptSegment,
+    VideoFrameAnalysisResult,
     VideoMeta,
 )
 from app.services.structured_output import MockStructuredOutputClient
@@ -240,3 +242,85 @@ def test_opinion_item_not_duplicated_on_resummarize(session: Session) -> None:
     orch.summarize_url("dQw4w9WgXcQ", workspace_id="ws_default")
 
     assert session.query(InvestmentItem).count() == 1
+
+
+class CapturingSummaryService:
+    def __init__(self, summary: SummaryResult) -> None:
+        self.summary = summary
+        self.visual_frames: list[VideoFrameAnalysisResult] | None = None
+
+    def summarize(
+        self,
+        title: str,
+        transcript: Transcript,
+        chapters: list[Chapter] | None = None,
+        visual_frames: list[VideoFrameAnalysisResult] | None = None,
+    ) -> tuple[SummaryResult, MindmapData]:
+        self.visual_frames = visual_frames
+        return self.summary, MindmapData(root_title=title)
+
+
+class FakeVisualAnalysisService:
+    def __init__(
+        self,
+        frames: list[VideoFrameAnalysisResult] | None = None,
+        fail: bool = False,
+    ) -> None:
+        self.frames = frames or []
+        self.fail = fail
+
+    def analyze(self, video: Video, youtube_video_id: str) -> list[VideoFrameAnalysisResult]:
+        if self.fail:
+            raise RuntimeError("ocr unavailable")
+        return self.frames
+
+
+def test_visual_frames_are_passed_to_summary_service(session: Session) -> None:
+    fetcher = FakeYouTubeFetcher().add_video(_meta())
+    extractor = FakeTranscriptExtractor().with_transcript("dQw4w9WgXcQ", _transcript())
+    frame = VideoFrameAnalysisResult(
+        timestamp_sec=15,
+        timestamp_str="00:15",
+        image_path="/storage/frames/frame.jpg",
+        perceptual_hash="abc",
+        frame_type="mindmap",
+        ocr_text="行业轮动思维导图\n美元流动性 -> 风险资产",
+        structured_notes={
+            "title": "行业轮动思维导图",
+            "bullets": ["美元流动性 -> 风险资产"],
+        },
+        confidence=0.96,
+    )
+    summary_service = CapturingSummaryService(_canned_summary())
+    orch = VideoSummaryOrchestrator(
+        session=session,
+        fetcher=fetcher,
+        transcript_extractor=extractor,
+        summary_service=summary_service,  # type: ignore[arg-type]
+        visual_analysis_service=FakeVisualAnalysisService([frame]),  # type: ignore[arg-type]
+    )
+
+    result = orch.summarize_url("dQw4w9WgXcQ", workspace_id="ws_default")
+
+    assert result.succeeded
+    assert summary_service.visual_frames == [frame]
+
+
+def test_visual_analysis_failure_does_not_break_summary(session: Session) -> None:
+    fetcher = FakeYouTubeFetcher().add_video(_meta())
+    extractor = FakeTranscriptExtractor().with_transcript("dQw4w9WgXcQ", _transcript())
+    summary_service = CapturingSummaryService(_canned_summary())
+    orch = VideoSummaryOrchestrator(
+        session=session,
+        fetcher=fetcher,
+        transcript_extractor=extractor,
+        summary_service=summary_service,  # type: ignore[arg-type]
+        visual_analysis_service=FakeVisualAnalysisService(fail=True),  # type: ignore[arg-type]
+    )
+
+    result = orch.summarize_url("dQw4w9WgXcQ", workspace_id="ws_default")
+
+    assert result.succeeded
+    video = session.query(Video).one()
+    assert video.metadata_["visual_analysis_warning"] == "ocr unavailable"
+    assert summary_service.visual_frames == []

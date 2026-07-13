@@ -13,9 +13,11 @@ status endpoint until the card is ready.
 import logging
 import threading
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -27,6 +29,7 @@ from app.infrastructure.models import (
     DocumentVersion,
     Subscription,
     Video,
+    VideoFrameAnalysis,
     Workspace,
 )
 from app.schemas.youtube import (
@@ -36,8 +39,10 @@ from app.schemas.youtube import (
     SubscribeRequest,
     SubscriptionResponse,
     VideoChunk,
+    VideoFrameAnalysisResponse,
     VideoMeta,
     VideoSummaryCard,
+    VisualMindmapUpdateRequest,
     YouTubeAutoRetrySettings,
     YouTubeAutoRetrySettingsUpdate,
 )
@@ -59,6 +64,7 @@ from app.services.youtube.summary import build_summary_service_from_settings
 from app.services.youtube.transcript import TranscriptExtractor
 from app.services.youtube.translation import TranslationService
 from app.services.youtube.urls import UnparseableTargetError, parse_target
+from app.services.youtube.visual_analysis import build_visual_analysis_service_from_settings
 
 router = APIRouter(prefix="/youtube", tags=["youtube"])
 logger = logging.getLogger(__name__)
@@ -115,6 +121,7 @@ def build_orchestrator(session: Session) -> VideoSummaryOrchestrator:
     asr_service = (
         build_asr_service_from_settings() if settings.asr_enabled else None
     )
+    visual_analysis_service = build_visual_analysis_service_from_settings(settings, session)
     # Wire the extraction pipeline so summaries feed entities/relations into
     # the knowledge graph. Without this the graph only shows doc→chunk
     # structure, never real entities. Pass the same LLM client used for
@@ -133,6 +140,7 @@ def build_orchestrator(session: Session) -> VideoSummaryOrchestrator:
         translate_enabled=settings.translate_to_chinese,
         asr_service=asr_service,
         extraction_pipeline=extraction_pipeline,
+        visual_analysis_service=visual_analysis_service,
     )
 
 
@@ -364,6 +372,85 @@ def _summary_card_from_document(session: Session, document: Document) -> VideoSu
         mindmap=mindmap_dict,  # type: ignore[arg-type]
         transcript=transcript,
         knowledge_base_imported=is_imported_to_knowledge_base(document),
+        visual_frames=_visual_frames_for_video(session, video.id if video else None),
+    )
+
+
+def _visual_frames_for_video(
+    session: Session,
+    video_row_id: str | None,
+) -> list[VideoFrameAnalysisResponse]:
+    if not video_row_id:
+        return []
+    rows = session.scalars(
+        select(VideoFrameAnalysis)
+        .where(VideoFrameAnalysis.video_id == video_row_id)
+        .order_by(VideoFrameAnalysis.timestamp_sec)
+    ).all()
+    return [
+        VideoFrameAnalysisResponse(
+            id=row.id,
+            timestamp_sec=row.timestamp_sec,
+            timestamp_str=row.timestamp_str,
+            image_path=row.image_path,
+            image_url=f"/api/v1/youtube/visual-frames/{row.id}/image",
+            frame_type=row.frame_type,  # type: ignore[arg-type]
+            ocr_text=row.ocr_text,
+            ocr_blocks=row.ocr_blocks or [],
+            structured_notes=row.structured_notes or {},
+            confidence=row.confidence,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/visual-frames/{frame_id}/image")
+async def get_visual_frame_image(
+    frame_id: str,
+    session: SessionDep,
+) -> FileResponse:
+    row = session.get(VideoFrameAnalysis, frame_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="visual frame not found")
+    image_path = Path(row.image_path).resolve()
+    storage_root = Path(get_settings().local_storage_dir).resolve()
+    try:
+        image_path.relative_to(storage_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="visual frame path is outside storage") from exc
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail="visual frame image not found")
+    return FileResponse(image_path)
+
+
+@router.put("/visual-frames/{frame_id}/mindmap", response_model=VideoFrameAnalysisResponse)
+async def update_visual_frame_mindmap(
+    frame_id: str,
+    payload: VisualMindmapUpdateRequest,
+    session: SessionDep,
+) -> VideoFrameAnalysisResponse:
+    row = session.get(VideoFrameAnalysis, frame_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="visual frame not found")
+
+    notes = dict(row.structured_notes or {})
+    tree = payload.tree.model_dump(mode="json")
+    notes["tree"] = tree
+    notes["title"] = tree["title"]
+    row.structured_notes = notes
+    session.commit()
+    session.refresh(row)
+    return VideoFrameAnalysisResponse(
+        id=row.id,
+        timestamp_sec=row.timestamp_sec,
+        timestamp_str=row.timestamp_str,
+        image_path=row.image_path,
+        image_url=f"/api/v1/youtube/visual-frames/{row.id}/image",
+        frame_type=row.frame_type,  # type: ignore[arg-type]
+        ocr_text=row.ocr_text,
+        ocr_blocks=row.ocr_blocks or [],
+        structured_notes=row.structured_notes or {},
+        confidence=row.confidence,
     )
 
 
@@ -536,12 +623,19 @@ async def list_summaries(
 
 def _summary_list_item(video: Video, doc: Document | None) -> SummaryListItem:
     summary = (doc.summary_json or {}) if doc is not None else {}
-    status = doc.parse_status if doc is not None else video.fetch_status
+    # Terminal video failures must win over a stale/partial Document row. A
+    # retry can create a processing shell before ASR discovers that the source
+    # video is deleted/private; showing the shell as "processing" leaves a
+    # duplicate-looking row with a retry button forever.
+    terminal_video_status = video.fetch_status in ("failed", "no_transcript", "access_denied")
+    status = video.fetch_status if terminal_video_status else (
+        doc.parse_status if doc is not None else video.fetch_status
+    )
     error = None
-    if doc is not None and doc.parse_status == "failed":
-        error = doc.ai_summary
-    elif doc is None and video.fetch_status in ("failed", "no_transcript", "access_denied"):
+    if terminal_video_status:
         error = video.error_message
+    elif doc is not None and doc.parse_status == "failed":
+        error = doc.ai_summary
     # access_denied is a PERMANENT block — never offer a retry, since the
     # video can't be fetched without channel membership / region change.
     retryable = (
@@ -573,6 +667,19 @@ def _summary_list_item(video: Video, doc: Document | None) -> SummaryListItem:
 
 
 def _failure_stage(video: Video, doc: Document | None) -> str | None:
+    if video.fetch_status in ("access_denied", "no_transcript", "failed"):
+        if video.fetch_status == "no_transcript":
+            return "transcript"
+        if video.fetch_status == "access_denied":
+            # Permanent block — the frontend renders a dedicated "无访问权限" tag
+            # from summary_status, so no failure_stage label is needed here.
+            return None
+        error = (video.error_message or "").casefold()
+        if error.startswith("fetch:") or "rest call" in error:
+            return "capture"
+        if error.startswith("asr:") or "transcript" in error or "caption" in error:
+            return "transcript"
+        return "processing"
     if doc is not None:
         if doc.parse_status == "failed":
             return "summary"
@@ -581,20 +688,7 @@ def _failure_stage(video: Video, doc: Document | None) -> str | None:
         return None
     if video.fetch_status == "pending":
         return "pending"
-    if video.fetch_status == "no_transcript":
-        return "transcript"
-    if video.fetch_status == "access_denied":
-        # Permanent block — the frontend renders a dedicated "无访问权限" tag
-        # from summary_status, so no failure_stage label is needed here.
-        return None
-    if video.fetch_status != "failed":
-        return None
-    error = (video.error_message or "").casefold()
-    if error.startswith("fetch:") or "rest call" in error:
-        return "capture"
-    if error.startswith("asr:") or "transcript" in error or "caption" in error:
-        return "transcript"
-    return "processing"
+    return None
 
 
 def _video_meta_from_row(video: Video) -> VideoMeta:

@@ -565,6 +565,34 @@ class Video(TimestampMixin, Base):
     metadata_: Mapped[JsonObject] = mapped_column("metadata", JsonType, default=dict)
 
 
+class VideoFrameAnalysis(TimestampMixin, Base):
+    """OCR and structure extraction result for one retained YouTube frame."""
+
+    __tablename__ = "video_frame_analysis"
+    __table_args__ = (
+        UniqueConstraint(
+            "video_id",
+            "timestamp_sec",
+            "perceptual_hash",
+            name="uq_video_frame_analysis_frame",
+        ),
+        Index("idx_video_frame_analysis_video", "video_id", "timestamp_sec"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    video_id: Mapped[str] = mapped_column(ForeignKey("video.id"), nullable=False)
+    timestamp_sec: Mapped[float] = mapped_column(Float(), nullable=False)
+    timestamp_str: Mapped[str] = mapped_column(String(32), nullable=False)
+    image_path: Mapped[str] = mapped_column(Text(), nullable=False)
+    perceptual_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    frame_type: Mapped[str] = mapped_column(String(32), default="other", server_default="other")
+    ocr_text: Mapped[str] = mapped_column(Text(), default="", server_default="")
+    ocr_blocks: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    structured_notes: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
+    confidence: Mapped[float] = mapped_column(Float(), default=0.0, server_default="0")
+
+
 # ---------------------------------------------------------------------------
 # Investment information system
 # ---------------------------------------------------------------------------

@@ -416,6 +416,42 @@ class GlmAsrService:
         return text, float(self.segment_sec)
 
 
+class FallbackAsrService:
+    """Try a secondary ASR backend when the primary fails or returns junk."""
+
+    def __init__(
+        self,
+        *,
+        primary: AsrService,
+        fallback: AsrService,
+        min_chars_per_segment: int = 4,
+    ) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self.min_chars_per_segment = max(1, min_chars_per_segment)
+
+    def transcribe(self, video_id: str) -> Transcript:
+        try:
+            transcript = self.primary.transcribe(video_id)
+        except AsrError:
+            logger.warning("asr: primary backend failed for %s; trying fallback", video_id)
+            return self.fallback.transcribe(video_id)
+
+        if not _transcript_is_too_short(transcript, self.min_chars_per_segment):
+            return transcript
+
+        logger.warning(
+            "asr: primary backend returned too little text for %s; trying fallback",
+            video_id,
+        )
+        try:
+            return self.fallback.transcribe(video_id)
+        except AsrError as exc:
+            raise AsrTranscriptionError(
+                f"primary ASR output too short for {video_id}; fallback failed: {exc}"
+            ) from exc
+
+
 # ffmpeg filter chain used to convert any input slice into a 16kHz mono WAV.
 # Defined at module scope so it reads like a constant.
 _FFMPEG_TO_WAV_ARGS = (
@@ -454,6 +490,18 @@ def _remove_partial_audio_files(workdir: str) -> None:
 
 def _is_partial_audio_file(name: str) -> bool:
     return name.endswith((".part", ".ytdl")) or ".part-" in name
+
+
+def _transcript_is_too_short(
+    transcript: Transcript,
+    min_chars_per_segment: int,
+) -> bool:
+    if not transcript.segments:
+        return True
+    texts = [segment.text.strip() for segment in transcript.segments]
+    total_chars = sum(len(text) for text in texts)
+    min_total_chars = max(1, min_chars_per_segment) * len(texts)
+    return total_chars < min_total_chars
 
 
 class FakeAsrService:
@@ -496,7 +544,7 @@ def build_asr_service_from_settings() -> AsrService | None:
     settings = get_settings()
     if not settings.asr_enabled or not settings.asr_api_key:
         return None
-    return GlmAsrService(
+    primary = GlmAsrService(
         api_key=settings.asr_api_key,
         base_url=settings.asr_base_url,
         model=settings.asr_model,
@@ -504,4 +552,20 @@ def build_asr_service_from_settings() -> AsrService | None:
         workspace=settings.asr_audio_workspace,
         language=settings.asr_language,
         proxy_url=settings.youtube_proxy_url,
+    )
+    if not settings.asr_fallback_base_url or not settings.asr_fallback_model:
+        return primary
+    fallback = GlmAsrService(
+        api_key=settings.asr_fallback_api_key or settings.asr_api_key,
+        base_url=settings.asr_fallback_base_url,
+        model=settings.asr_fallback_model,
+        segment_sec=settings.asr_segment_sec,
+        workspace=settings.asr_audio_workspace,
+        language=settings.asr_language,
+        proxy_url=settings.youtube_proxy_url,
+    )
+    return FallbackAsrService(
+        primary=primary,
+        fallback=fallback,
+        min_chars_per_segment=settings.asr_min_chars_per_segment,
     )

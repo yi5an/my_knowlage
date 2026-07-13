@@ -3,8 +3,10 @@ import {
   Button,
   Card,
   Empty,
+  Form,
   Input,
   message,
+  Modal,
   Segmented,
   Space,
   Spin,
@@ -61,6 +63,9 @@ export function InvestmentItemsPage() {
   const [selected, setSelected] = useState<InvestmentItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [translating, setTranslating] = useState(false);
+  const [xImportOpen, setXImportOpen] = useState(false);
+  const [xImporting, setXImporting] = useState(false);
+  const [xImportForm] = Form.useForm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,6 +102,30 @@ export function InvestmentItemsPage() {
     }
   }, [load]);
 
+  const handleImportX = useCallback(async () => {
+    const values = await xImportForm.validateFields();
+    setXImporting(true);
+    try {
+      await investmentApi.createItem({
+        title: values.title,
+        source_url: values.source_url,
+        source_name: "X",
+        summary: values.summary,
+        info_layer: "opinion",
+        source_credibility: "unverified",
+        action_status: "pending_review",
+      });
+      message.success("X 内容已导入");
+      setXImportOpen(false);
+      xImportForm.resetFields();
+      await load();
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setXImporting(false);
+    }
+  }, [load, xImportForm]);
+
   const filtered = useMemo(() => {
     if (!search.trim()) return items;
     const q = search.trim().toLowerCase();
@@ -132,7 +161,13 @@ export function InvestmentItemsPage() {
             </Typography.Text>
           )}
           {r.source_url && (
-            <Typography.Link ellipsis style={{ fontSize: 12, maxWidth: 320 }}>
+            <Typography.Link
+              ellipsis
+              href={r.source_url}
+              target="_blank"
+              rel="noreferrer"
+              style={{ fontSize: 12, maxWidth: 320 }}
+            >
               {r.source_url}
             </Typography.Link>
           )}
@@ -188,7 +223,11 @@ export function InvestmentItemsPage() {
 
   return (
     <main className="page">
-      <PageHeader title="投资信息" description="按层级 / 状态筛选投资信息条目。" />
+      <PageHeader
+        title="投资信息"
+        description="按层级 / 状态筛选投资信息条目。"
+        extra={<Button type="primary" onClick={() => setXImportOpen(true)}>导入 X 内容</Button>}
+      />
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} showIcon />}
       <Card>
         <Space direction="vertical" style={{ width: "100%", marginBottom: 16 }}>
@@ -234,6 +273,28 @@ export function InvestmentItemsPage() {
         onClose={() => setDrawerOpen(false)}
         onUpdated={() => void load()}
       />
+
+      <Modal
+        open={xImportOpen}
+        title="导入 X 内容"
+        onCancel={() => setXImportOpen(false)}
+        onOk={() => void handleImportX()}
+        okText="导入"
+        cancelText="取消"
+        confirmLoading={xImporting}
+      >
+        <Form form={xImportForm} layout="vertical">
+          <Form.Item label="标题" name="title" rules={[{ required: true }]}>
+            <Input placeholder="如：AI capex thread" />
+          </Form.Item>
+          <Form.Item label="X 链接" name="source_url" rules={[{ required: true }]}>
+            <Input placeholder="https://x.com/..." />
+          </Form.Item>
+          <Form.Item label="正文/备注" name="summary" rules={[{ required: true }]}>
+            <Input.TextArea rows={5} placeholder="粘贴推文正文、线程摘要或你的备注" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </main>
   );
 }

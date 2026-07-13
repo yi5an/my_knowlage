@@ -28,11 +28,13 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-http://host.docker.internal:7890}
       HTTPS_PROXY: ${HTTPS_PROXY:-http://host.docker.internal:7890}
       ALL_PROXY: ${ALL_PROXY:-http://host.docker.internal:7890}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,172.16.28.250,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,backend,frontend,postgres,redis,museum_pg,tavily-proxy}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,172.16.28.250,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,backend,frontend,postgres,redis,museum_pg,tavily-proxy,paddleocr}
       http_proxy: ${HTTP_PROXY:-http://host.docker.internal:7890}
       https_proxy: ${HTTPS_PROXY:-http://host.docker.internal:7890}
       all_proxy: ${ALL_PROXY:-http://host.docker.internal:7890}
-      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,172.16.28.250,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,backend,frontend,postgres,redis,museum_pg,tavily-proxy}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,host.docker.internal,172.16.28.250,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,backend,frontend,postgres,redis,museum_pg,tavily-proxy,paddleocr}
+      YOUTUBE_VISUAL_ANALYSIS_ENABLED: ${YOUTUBE_VISUAL_ANALYSIS_ENABLED:-false}
+      OCR_BASE_URL: ${OCR_BASE_URL:-http://paddleocr:8866}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -52,6 +54,18 @@ services:
       - "80:80"
     depends_on:
       - backend
+    restart: unless-stopped
+
+  paddleocr:
+    build:
+      context: ./deploy/paddleocr-service
+    container_name: knowpilot-paddleocr
+    profiles:
+      - ocr
+    expose:
+      - "8866"
+    environment:
+      PADDLEOCR_LANG: ${PADDLEOCR_LANG:-ch}
     restart: unless-stopped
 
 volumes:

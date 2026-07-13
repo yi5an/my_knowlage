@@ -67,6 +67,9 @@ class Importance(StrEnum):
 
 class SourceType(StrEnum):
     RSS = "rss"
+    X_RSS = "x_rss"
+    X_NITTER = "x_nitter"
+    X_BRIGHTDATA = "x_brightdata"
     SEC_EDGAR = "sec_edgar"
     FEDERAL_RESERVE_RSS = "federal_reserve_rss"
     BLS = "bls"

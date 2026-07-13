@@ -22,6 +22,9 @@ import feedparser  # type: ignore[import-untyped]
 from app.core.config import get_settings
 from app.infrastructure.models import InvestmentSource
 
+RSS_DETAIL_TIMEOUT_SECONDS = 8
+GOOGLE_NEWS_DECODE_TIMEOUT_SECONDS = 8
+
 
 class SourceConfigError(Exception):
     """Raised when a real source cannot be reached because config is missing.
@@ -59,6 +62,15 @@ class HttpClient(Protocol):
     def get(self, url: str, headers: dict[str, str] | None = None) -> tuple[bytes, str]:
         ...
 
+    def post(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        data: dict[str, str] | str | None = None,
+    ) -> tuple[bytes, str]:
+        ...
+
     def close(self) -> None:
         ...
 
@@ -70,7 +82,7 @@ class HttpxHttpClient:
     mandatory ``User-Agent`` is added per-request by the SEC fetcher.
     """
 
-    def __init__(self, timeout_seconds: int | None = None) -> None:
+    def __init__(self, timeout_seconds: int | None = None, proxy_url: str | None = None) -> None:
         # Lazy import keeps httpx out of the import graph for environments that
         # only use non-HTTP fetchers, and avoids a hard import at module load.
         import httpx
@@ -79,10 +91,50 @@ class HttpxHttpClient:
         self._client = httpx.Client(
             timeout=timeout_seconds or settings.investment_http_timeout_seconds,
             follow_redirects=True,
+            proxy=proxy_url,
         )
 
     def get(self, url: str, headers: dict[str, str] | None = None) -> tuple[bytes, str]:
         response = self._client.get(url, headers=headers or {})
+        response.raise_for_status()
+        return response.content, str(response.url)
+
+    def get_with_timeout(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        timeout_seconds: int,
+    ) -> tuple[bytes, str]:
+        response = self._client.get(url, headers=headers or {}, timeout=timeout_seconds)
+        response.raise_for_status()
+        return response.content, str(response.url)
+
+    def post(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        data: dict[str, str] | str | None = None,
+    ) -> tuple[bytes, str]:
+        response = self._client.post(url, headers=headers or {}, data=data)
+        response.raise_for_status()
+        return response.content, str(response.url)
+
+    def post_with_timeout(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        data: dict[str, str] | str | None = None,
+        timeout_seconds: int,
+    ) -> tuple[bytes, str]:
+        response = self._client.post(
+            url,
+            headers=headers or {},
+            data=data,
+            timeout=timeout_seconds,
+        )
         response.raise_for_status()
         return response.content, str(response.url)
 
@@ -206,28 +258,51 @@ def _parse_rss_body(
     http: HttpClient | None = None,
     *,
     enrich_detail: bool = False,
+    limit: int | None = None,
 ) -> list[InvestmentRawItem]:
     feed = feedparser.parse(body)
     items: list[InvestmentRawItem] = []
     for entry in feed.entries:
-        external_id = entry.get("id") or entry.get("link") or default_url
-        link = entry.get("link") or default_url
+        if limit is not None and len(items) >= max(1, limit):
+            break
+        feed_link = str(entry.get("link") or default_url)
+        source_url = _google_news_source_url(feed_link, http=http) or feed_link
+        external_id = (
+            source_url
+            if source_url != feed_link
+            else (
+                _google_news_source_url(str(entry.get("id") or ""), http=http)
+                or entry.get("id")
+                or source_url
+            )
+        )
         title = _clean_text(entry.get("title") or "(untitled)")
         feed_summary = _clean_text(_strip_html(entry.get("summary") or ""))
         summary = feed_summary or None
         published = _parse_feed_date(entry)
         raw_payload = {
             "title": title,
-            "link": link,
+            "link": source_url,
             "id": external_id,
             "summary": summary,
             "feed_summary": feed_summary or None,
             "author": entry.get("author"),
             "categories": [t.get("term") for t in entry.get("tags", []) if t.get("term")],
         }
-        if http is not None and (enrich_detail or _summary_needs_detail(title, summary)):
+        if source_url != feed_link:
+            raw_payload["google_news_url"] = feed_link
+        should_enrich = (
+            enrich_detail
+            or _summary_needs_detail(title, summary)
+            or (source_url != feed_link and _is_google_news_url(feed_link))
+        )
+        if http is not None and should_enrich:
             try:
-                detail_body, detail_url = http.get(str(link))
+                detail_body, detail_url = _http_get(
+                    http,
+                    source_url,
+                    timeout_seconds=RSS_DETAIL_TIMEOUT_SECONDS,
+                )
                 detail_summary = _extract_html_summary(detail_body)
                 attachments = _extract_html_attachments(detail_body, detail_url)
                 if attachments:
@@ -247,7 +322,7 @@ def _parse_rss_body(
             InvestmentRawItem(
                 external_id=str(external_id),
                 title=title,
-                url=link,
+                url=source_url,
                 source_name=source_name,
                 published_at=published,
                 summary=summary,
@@ -266,7 +341,8 @@ class RssFetcher:
         if not url:
             raise SourceConfigError("rss source is missing 'url'")
         body, final_url = http.get(url)
-        return _parse_rss_body(body, source.name or "RSS", final_url, http)
+        limit = int(cfg.get("limit", 100))
+        return _parse_rss_body(body, source.name or "RSS", final_url, http, limit=limit)
 
 
 class FederalReserveRssFetcher:
@@ -289,6 +365,102 @@ class FederalReserveRssFetcher:
             http,
             enrich_detail=True,
         )
+
+
+# --- X/Twitter via RSSHub or Nitter mirrors --------------------------------
+
+
+class XRssHubFetcher:
+    """Fetch public X posts through an RSSHub-compatible route.
+
+    Source ``config`` accepts either a ready-made feed URL or a username::
+
+        {"url": "https://rsshub.example/twitter/user/investor"}
+        {"username": "investor", "rsshub_base_url": "https://rsshub.example"}
+
+    The default route template stays configurable because RSSHub deployments
+    and route names can differ.
+    """
+
+    def fetch(self, source: InvestmentSource, http: HttpClient) -> list[InvestmentRawItem]:
+        cfg = source.config or {}
+        url = _x_source_url(source, cfg)
+        username = _normalize_x_username(str(cfg.get("username") or ""))
+        if not url:
+            if not username:
+                raise SourceConfigError("x_rss source is missing 'url' or 'username'")
+            base = str(cfg.get("rsshub_base_url") or "https://rsshub.app").rstrip("/")
+            template = str(cfg.get("route_template") or "/twitter/user/{username}")
+            url = f"{base}{template.format(username=username)}"
+
+        body, final_url = http.get(url)
+        items = _parse_rss_body(body, source.name or _x_source_name(username), final_url, http)
+        return _mark_x_items(items, method="rsshub", username=username)
+
+
+class XNitterFetcher:
+    """Fetch public X posts from a Nitter-compatible RSS endpoint."""
+
+    def fetch(self, source: InvestmentSource, http: HttpClient) -> list[InvestmentRawItem]:
+        cfg = source.config or {}
+        url = _x_source_url(source, cfg)
+        username = _normalize_x_username(str(cfg.get("username") or ""))
+        if not url:
+            if not username:
+                raise SourceConfigError("x_nitter source is missing 'url' or 'username'")
+            base = str(cfg.get("nitter_base_url") or "https://nitter.net").rstrip("/")
+            url = f"{base}/{username}/rss"
+
+        body, final_url = http.get(url)
+        items = _parse_rss_body(body, source.name or _x_source_name(username), final_url, http)
+        return _mark_x_items(items, method="nitter", username=username)
+
+
+def _x_source_url(source: InvestmentSource, cfg: dict[str, Any]) -> str:
+    return str(source.url or cfg.get("url") or "").strip()
+
+
+def _normalize_x_username(value: str) -> str:
+    username = value.strip()
+    if username.startswith("@"):
+        username = username[1:]
+    if username.startswith("https://"):
+        from urllib.parse import urlparse
+
+        parsed = urlparse(username)
+        parts = [p for p in parsed.path.split("/") if p]
+        username = parts[0] if parts else ""
+    return username.strip("/")
+
+
+def _x_source_name(username: str) -> str:
+    return f"X @{username}" if username else "X"
+
+
+def _mark_x_items(
+    items: list[InvestmentRawItem], *, method: str, username: str
+) -> list[InvestmentRawItem]:
+    marked: list[InvestmentRawItem] = []
+    for item in items:
+        raw_payload = {
+            **dict(item.raw_payload),
+            "platform": "x",
+            "collection_method": method,
+        }
+        if username:
+            raw_payload["username"] = username
+        marked.append(
+            InvestmentRawItem(
+                external_id=item.external_id,
+                title=item.title,
+                url=item.url,
+                source_name=item.source_name,
+                published_at=item.published_at,
+                summary=item.summary,
+                raw_payload=raw_payload,
+            )
+        )
+    return marked
 
 
 # --- BLS (macro time series) ----------------------------------------------
@@ -511,6 +683,184 @@ def _summary_needs_detail(title: str, summary: str | None) -> bool:
     if not summary:
         return True
     return _clean_text(summary).casefold() == _clean_text(title).casefold()
+
+
+def _is_google_news_url(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    return parsed.netloc.casefold() == "news.google.com" and parsed.path.startswith("/rss/")
+
+
+def _google_news_source_url(url: str, http: HttpClient | None = None) -> str | None:
+    """Return the publisher URL from Google News RSS links when present.
+
+    Some Google News RSS variants include ``?url=<publisher-url>``. When it is
+    absent, newer opaque article tokens are decoded through Google News'
+    article-signature + batchexecute path. Failures return ``None`` so callers
+    can keep the Google News URL as the fallback.
+    """
+    if not _is_google_news_url(url):
+        return None
+    from urllib.parse import parse_qs, urlparse
+
+    parsed = urlparse(url)
+    values = parse_qs(parsed.query).get("url")
+    if not values:
+        return _decode_google_news_opaque_url(url, http)
+    source_url = values[0].strip()
+    if source_url.startswith(("http://", "https://")):
+        return source_url
+    return _decode_google_news_opaque_url(url, http)
+
+
+def _decode_google_news_opaque_url(url: str, http: HttpClient | None) -> str | None:
+    if http is None:
+        return None
+    token = _google_news_token(url)
+    if not token:
+        return None
+    article_body = None
+    for article_url in (
+        f"https://news.google.com/articles/{token}",
+        f"https://news.google.com/rss/articles/{token}",
+    ):
+        try:
+            article_body, _ = _http_get(
+                http,
+                article_url,
+                headers=_google_news_headers(),
+                timeout_seconds=GOOGLE_NEWS_DECODE_TIMEOUT_SECONDS,
+            )
+            break
+        except Exception:
+            continue
+    if article_body is None:
+        return None
+    signature, timestamp = _extract_google_news_decode_params(article_body)
+    if not signature or not timestamp:
+        return None
+    try:
+        body, _ = _http_post(
+            http,
+            "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+            headers={
+                **_google_news_headers(),
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            },
+            data=_google_news_decode_payload(token, signature, timestamp),
+            timeout_seconds=GOOGLE_NEWS_DECODE_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return None
+    return _extract_google_news_decoded_url(body)
+
+
+def _http_get(
+    http: HttpClient,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout_seconds: int | None = None,
+) -> tuple[bytes, str]:
+    if timeout_seconds is not None and hasattr(http, "get_with_timeout"):
+        return http.get_with_timeout(  # type: ignore[attr-defined]
+            url,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+        )
+    return http.get(url, headers=headers)
+
+
+def _http_post(
+    http: HttpClient,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    data: dict[str, str] | str | None = None,
+    timeout_seconds: int | None = None,
+) -> tuple[bytes, str]:
+    if timeout_seconds is not None and hasattr(http, "post_with_timeout"):
+        return http.post_with_timeout(  # type: ignore[attr-defined]
+            url,
+            headers=headers,
+            data=data,
+            timeout_seconds=timeout_seconds,
+        )
+    return http.post(url, headers=headers, data=data)
+
+
+def _google_news_token(url: str) -> str | None:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    path = [part for part in parsed.path.split("/") if part]
+    if len(path) >= 2 and path[-2] in {"articles", "read"}:
+        return path[-1]
+    return None
+
+
+def _google_news_headers() -> dict[str, str]:
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://news.google.com/",
+    }
+
+
+def _extract_google_news_decode_params(body: bytes) -> tuple[str | None, str | None]:
+    import re
+
+    text = body.decode("utf-8", errors="replace")
+    signature = re.search(r'data-n-a-sg=["\']([^"\']+)["\']', text)
+    timestamp = re.search(r'data-n-a-ts=["\']([^"\']+)["\']', text)
+    return (
+        signature.group(1) if signature else None,
+        timestamp.group(1) if timestamp else None,
+    )
+
+
+def _google_news_decode_payload(token: str, signature: str, timestamp: str) -> str:
+    import json
+    from urllib.parse import quote
+
+    payload = [
+        "Fbv4je",
+        (
+            '["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,'
+            'null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,'
+            f'null,0],"{token}",{timestamp},"{signature}"]'
+        ),
+    ]
+    return f"f.req={quote(json.dumps([[payload]]))}"
+
+
+def _extract_google_news_decoded_url(body: bytes) -> str | None:
+    import json
+
+    text = body.decode("utf-8", errors="replace")
+    try:
+        parsed_data = json.loads(text.split("\n\n", 1)[1])
+    except (IndexError, json.JSONDecodeError):
+        return None
+    for row in parsed_data:
+        if not isinstance(row, list) or len(row) < 3 or row[1] != "Fbv4je":
+            continue
+        try:
+            payload = json.loads(row[2])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if (
+            isinstance(payload, list)
+            and len(payload) >= 2
+            and payload[0] == "garturlres"
+            and isinstance(payload[1], str)
+            and payload[1].startswith(("http://", "https://"))
+        ):
+            return payload[1]
+    return None
 
 
 def _extract_html_summary(body: bytes, limit: int = 2000) -> str | None:
@@ -778,6 +1128,8 @@ def _clean_text(value: str) -> str:
 
 _FETCHERS: dict[str, InvestmentFetcher] = {
     "rss": RssFetcher(),
+    "x_rss": XRssHubFetcher(),
+    "x_nitter": XNitterFetcher(),
     "federal_reserve_rss": FederalReserveRssFetcher(),
     "sec_edgar": SecEdgarFetcher(),
     "bls": BlsFetcher(),

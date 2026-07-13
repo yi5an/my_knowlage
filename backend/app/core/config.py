@@ -40,6 +40,17 @@ class Settings(BaseSettings):
     youtube_preferred_language: str | None = Field(default=None, alias="YOUTUBE_PREFERRED_LANGUAGE")
     youtube_default_poll_interval: int = Field(default=3600, alias="YOUTUBE_DEFAULT_POLL_INTERVAL")
     youtube_proxy_url: str | None = Field(default=None, alias="YOUTUBE_PROXY_URL")
+    youtube_visual_analysis_enabled: bool = Field(
+        default=False, alias="YOUTUBE_VISUAL_ANALYSIS_ENABLED"
+    )
+    youtube_frame_interval_sec: int = Field(default=45, alias="YOUTUBE_FRAME_INTERVAL_SEC")
+    youtube_frame_max_count: int = Field(default=24, alias="YOUTUBE_FRAME_MAX_COUNT")
+    youtube_frame_min_text_chars: int = Field(default=12, alias="YOUTUBE_FRAME_MIN_TEXT_CHARS")
+    youtube_frame_similarity_threshold: int = Field(
+        default=6, alias="YOUTUBE_FRAME_SIMILARITY_THRESHOLD"
+    )
+    ocr_base_url: str | None = Field(default=None, alias="OCR_BASE_URL")
+    ocr_timeout_seconds: float = Field(default=60.0, alias="OCR_TIMEOUT_SECONDS")
 
     # Translation: translate non-Chinese transcripts to Chinese before summarizing.
     translate_to_chinese: bool = Field(default=True, alias="TRANSLATE_TO_CHINESE")
@@ -78,6 +89,14 @@ class Settings(BaseSettings):
         default="https://open.bigmodel.cn/api/paas/v4", alias="GLM_ASR_BASE_URL"
     )
     asr_model: str = Field(default="glm-asr-2512", alias="GLM_ASR_MODEL")
+    asr_fallback_api_key: str | None = Field(default=None, alias="ASR_FALLBACK_API_KEY")
+    asr_fallback_base_url: str | None = Field(
+        default=None, alias="ASR_FALLBACK_BASE_URL"
+    )
+    asr_fallback_model: str | None = Field(default=None, alias="ASR_FALLBACK_MODEL")
+    asr_min_chars_per_segment: int = Field(
+        default=4, alias="ASR_MIN_CHARS_PER_SEGMENT"
+    )
     asr_language: str | None = Field(default=None, alias="ASR_LANGUAGE")
     # Per-request limits for GLM-ASR-2512. The API caps each transcription
     # call at ~30s of audio, so long videos must be split into these windows.
@@ -98,6 +117,9 @@ class Settings(BaseSettings):
     investment_http_timeout_seconds: int = Field(
         default=30, alias="INVESTMENT_HTTP_TIMEOUT_SECONDS"
     )
+    x_http_proxy: str | None = Field(default=None, alias="X_HTTP_PROXY")
+    brightdata_api_key: str | None = Field(default=None, alias="BRIGHTDATA_API_KEY")
+    brightdata_timeout_seconds: int = Field(default=120, alias="BRIGHTDATA_TIMEOUT_SECONDS")
     sec_user_agent: str | None = Field(default=None, alias="SEC_USER_AGENT")
     sec_max_requests_per_second: int = Field(default=5, alias="SEC_MAX_REQUESTS_PER_SECOND")
     fred_api_key: str | None = Field(default=None, alias="FRED_API_KEY")

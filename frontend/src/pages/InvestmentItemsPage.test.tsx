@@ -66,6 +66,70 @@ describe("InvestmentItemsPage", () => {
     });
   });
 
+  it("imports pasted X content as an opinion item", async () => {
+    let createdBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/investment/items") && init?.method === "POST") {
+        createdBody = JSON.parse(String(init.body));
+        return new Response(
+          JSON.stringify({
+            id: "inv_x_manual",
+            workspace_id: "ws_default",
+            dedupe_key: "dk_x_manual",
+            title: createdBody?.title,
+            source_url: createdBody?.source_url,
+            source_name: "X",
+            info_layer: "opinion",
+            source_credibility: "unverified",
+            summary: createdBody?.summary,
+            importance: "medium",
+            impact_direction: "neutral",
+            impact_horizon: "unknown",
+            thesis_impact: "unknown",
+            action_status: "pending_review",
+          }),
+          { status: 201 },
+        );
+      }
+      if (u.includes("/investment/items")) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "导入 X 内容" }));
+    fireEvent.change(screen.getByLabelText("标题"), {
+      target: { value: "AI capex thread" },
+    });
+    fireEvent.change(screen.getByLabelText("X 链接"), {
+      target: { value: "https://x.com/investor/status/123" },
+    });
+    fireEvent.change(screen.getByLabelText("正文/备注"), {
+      target: { value: "Hyperscaler capex remains strong." },
+    });
+    const dialog = screen.getByRole("dialog", { name: "导入 X 内容" });
+    fireEvent.click(within(dialog).getByRole("button", { name: /导\s*入/ }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/investment/items"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    expect(createdBody).toMatchObject({
+      title: "AI capex thread",
+      source_url: "https://x.com/investor/status/123",
+      source_name: "X",
+      info_layer: "opinion",
+      source_credibility: "unverified",
+      summary: "Hyperscaler capex remains strong.",
+    });
+  });
+
   it("renders the collected summary under the title", async () => {
     vi.stubGlobal(
       "fetch",
@@ -109,6 +173,50 @@ describe("InvestmentItemsPage", () => {
         ),
       ).toBeInTheDocument();
     });
+  });
+
+  it("renders source urls as clickable external links", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/investment/items")) {
+          return new Response(
+            JSON.stringify([
+              {
+                id: "inv_link",
+                workspace_id: "ws_default",
+                dedupe_key: "dk_link",
+                title: "Fed policymakers' inflation concerns grew - Reuters",
+                source_url: "https://www.reuters.com/markets/us/fed-minutes-2026-07-13/",
+                source_name: "Google News - Fed",
+                info_layer: "macro_calendar",
+                source_credibility: "unverified",
+                summary: "Federal Reserve officials were worried about inflation risks.",
+                importance: "medium",
+                impact_direction: "neutral",
+                impact_horizon: "unknown",
+                thesis_impact: "unknown",
+                action_status: "pending_review",
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    renderPage();
+
+    const sourceLink = await screen.findByRole("link", {
+      name: "https://www.reuters.com/markets/us/fed-minutes-2026-07-13/",
+    });
+    expect(sourceLink).toHaveAttribute(
+      "href",
+      "https://www.reuters.com/markets/us/fed-minutes-2026-07-13/",
+    );
+    expect(sourceLink).toHaveAttribute("target", "_blank");
   });
 
   it("filters by translated title and summary", async () => {
