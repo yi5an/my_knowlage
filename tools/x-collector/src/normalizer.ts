@@ -35,36 +35,37 @@ export function normalizeTimeline(payload: unknown): XPost[] {
 
 function normalizeTweetResult(result: JsonObject): XPost | null {
   const legacy = asObject(result.legacy);
+  const details = asObject(result.details);
+  const counts = asObject(result.counts);
   const user = asObject(asObject(asObject(result.core)?.user_results)?.result);
-  const userLegacy = asObject(user?.legacy);
+  const userLegacy = asObject(user?.legacy) ?? asObject(user?.core);
   const tweetId = stringValue(result.rest_id);
   const username = stringValue(userLegacy?.screen_name);
-  const createdAt = stringValue(legacy?.created_at);
+  const createdAt = dateValue(legacy?.created_at ?? details?.created_at_ms);
   if (!tweetId || !username || !createdAt) return null;
 
   const publishedAt = new Date(createdAt);
-  if (Number.isNaN(publishedAt.getTime())) return null;
 
   return {
     tweet_id: tweetId,
     author_id: stringValue(user?.rest_id),
     author_username: username,
     author_name: stringValue(userLegacy?.name),
-    text: stringValue(legacy?.full_text) ?? "",
+    text: stringValue(legacy?.full_text ?? details?.full_text) ?? "",
     published_at: publishedAt.toISOString(),
     url: `https://x.com/${username}/status/${tweetId}`,
-    conversation_id: stringValue(legacy?.conversation_id_str),
+    conversation_id: stringValue(legacy?.conversation_id_str) ?? tweetId,
     lang: stringValue(legacy?.lang),
-    media: normalizeMedia(legacy),
+    media: normalizeMedia(result, legacy),
     quoted_tweet: normalizeReference(asObject(asObject(result.quoted_status_result)?.result)),
     reposted_tweet: normalizeReference(asObject(asObject(result.retweeted_status_result)?.result)),
     reply_to_tweet_id: stringValue(legacy?.in_reply_to_status_id_str),
     metrics: {
-      like_count: numberValue(legacy?.favorite_count),
-      repost_count: numberValue(legacy?.retweet_count),
-      reply_count: numberValue(legacy?.reply_count),
-      quote_count: numberValue(legacy?.quote_count),
-      bookmark_count: numberValue(legacy?.bookmark_count),
+      like_count: numberValue(legacy?.favorite_count ?? counts?.favorite_count),
+      repost_count: numberValue(legacy?.retweet_count ?? counts?.retweet_count),
+      reply_count: numberValue(legacy?.reply_count ?? counts?.reply_count),
+      quote_count: numberValue(legacy?.quote_count ?? counts?.quote_count),
+      bookmark_count: numberValue(legacy?.bookmark_count ?? counts?.bookmark_count),
       view_count: numberValue(asObject(result.views)?.count),
     },
     raw_payload: {
@@ -90,9 +91,13 @@ function normalizeReference(value: JsonObject | undefined): XPostReference | nul
   };
 }
 
-function normalizeMedia(legacy: JsonObject | undefined): XMedia[] {
+function normalizeMedia(result: JsonObject, legacy: JsonObject | undefined): XMedia[] {
   const extended = asObject(legacy?.extended_entities);
-  const entries = Array.isArray(extended?.media) ? extended.media : [];
+  const entries = Array.isArray(extended?.media)
+    ? extended.media
+    : Array.isArray(result.media_entities2)
+      ? result.media_entities2
+      : [];
   const media: XMedia[] = [];
   for (const entry of entries) {
     const item = asObject(entry);
@@ -145,4 +150,9 @@ function numberValue(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+function dateValue(value: unknown): string | number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return stringValue(value);
 }

@@ -56,4 +56,26 @@ describe("normalizeTimeline", () => {
     const posts = normalizeTimeline(await fixture("search-timeline.json"));
     expect(posts).toHaveLength(1);
   });
+
+  it("normalizes the modular Relay tweet shape", async () => {
+    const posts = normalizeTimeline(await fixture("relay-account-timeline.json"));
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({
+      tweet_id: "1519480761749016577",
+      author_id: "44196397",
+      author_username: "elonmusk",
+      author_name: "Elon Musk",
+      text: "Next I’m buying Coca-Cola",
+      published_at: "2022-04-28T00:56:58.000Z",
+      metrics: {
+        like_count: 100,
+        repost_count: 20,
+        reply_count: 5,
+        quote_count: 2,
+        bookmark_count: 3,
+        view_count: 1000,
+      },
+    });
+  });
 });

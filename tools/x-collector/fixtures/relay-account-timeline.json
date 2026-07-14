@@ -1,0 +1,58 @@
+{
+  "data": {
+    "user_result_by_screen_name": {
+      "result": {
+        "profile_timeline_v2": {
+          "timeline": {
+            "instructions": [
+              {
+                "type": "TimelineAddEntries",
+                "entries": [
+                  {
+                    "entryId": "tweet-1519480761749016577",
+                    "content": {
+                      "content": {
+                        "tweet_results": {
+                          "rest_id": "1519480761749016577",
+                          "result": {
+                            "__isTweetResult": true,
+                            "__typename": "Tweet",
+                            "rest_id": "1519480761749016577",
+                            "core": {
+                              "user_results": {
+                                "result": {
+                                  "rest_id": "44196397",
+                                  "core": {
+                                    "screen_name": "elonmusk",
+                                    "name": "Elon Musk"
+                                  }
+                                }
+                              }
+                            },
+                            "details": {
+                              "created_at_ms": 1651107418000,
+                              "full_text": "Next I’m buying Coca-Cola"
+                            },
+                            "counts": {
+                              "bookmark_count": 3,
+                              "favorite_count": 100,
+                              "quote_count": 2,
+                              "reply_count": 5,
+                              "retweet_count": 20
+                            },
+                            "views": {"count": "1000"},
+                            "media_entities2": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
