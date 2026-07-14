@@ -1,0 +1,111 @@
+{
+  "data": {
+    "user": {
+      "result": {
+        "timeline_v2": {
+          "timeline": {
+            "instructions": [
+              {
+                "type": "TimelineAddEntries",
+                "entries": [
+                  {
+                    "entryId": "tweet-2075367885438890134",
+                    "content": {
+                      "itemContent": {
+                        "tweet_results": {
+                          "result": {
+                            "__typename": "Tweet",
+                            "rest_id": "2075367885438890134",
+                            "core": {
+                              "user_results": {
+                                "result": {
+                                  "rest_id": "44196397",
+                                  "legacy": {
+                                    "screen_name": "elonmusk",
+                                    "name": "Elon Musk"
+                                  }
+                                }
+                              }
+                            },
+                            "legacy": {
+                              "full_text": "Starmind\n\nhttps://t.co/example",
+                              "created_at": "Thu Jul 09 23:53:57 +0000 2026",
+                              "conversation_id_str": "2075367885438890134",
+                              "lang": "en",
+                              "favorite_count": 100,
+                              "retweet_count": 20,
+                              "reply_count": 5,
+                              "quote_count": 2,
+                              "bookmark_count": 3,
+                              "extended_entities": {
+                                "media": [
+                                  {
+                                    "type": "photo",
+                                    "media_url_https": "https://pbs.twimg.com/media/example.jpg",
+                                    "url": "https://t.co/example"
+                                  }
+                                ]
+                              }
+                            },
+                            "views": {"count": "1000"},
+                            "quoted_status_result": {
+                              "result": {
+                                "__typename": "Tweet",
+                                "rest_id": "2075000000000000000",
+                                "core": {
+                                  "user_results": {
+                                    "result": {
+                                      "rest_id": "1",
+                                      "legacy": {"screen_name": "x", "name": "X"}
+                                    }
+                                  }
+                                },
+                                "legacy": {
+                                  "full_text": "Quoted post",
+                                  "created_at": "Thu Jul 09 20:00:00 +0000 2026",
+                                  "conversation_id_str": "2075000000000000000",
+                                  "lang": "en"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "entryId": "tweet-1519480761749016577",
+                    "content": {
+                      "itemContent": {
+                        "tweet_results": {
+                          "result": {
+                            "__typename": "Tweet",
+                            "rest_id": "1519480761749016577",
+                            "core": {
+                              "user_results": {
+                                "result": {
+                                  "rest_id": "44196397",
+                                  "legacy": {"screen_name": "elonmusk", "name": "Elon Musk"}
+                                }
+                              }
+                            },
+                            "legacy": {
+                              "full_text": "Older post",
+                              "created_at": "Thu Apr 28 00:56:58 +0000 2022",
+                              "conversation_id_str": "1519480761749016577",
+                              "lang": "en"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

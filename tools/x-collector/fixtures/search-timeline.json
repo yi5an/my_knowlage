@@ -1,0 +1,71 @@
+{
+  "data": {
+    "search_by_raw_query": {
+      "search_timeline": {
+        "timeline": {
+          "instructions": [
+            {
+              "type": "TimelineAddEntries",
+              "entries": [
+                {
+                  "entryId": "tweet-2075367885438890134-duplicate",
+                  "content": {
+                    "itemContent": {
+                      "tweet_results": {
+                        "result": {
+                          "__typename": "Tweet",
+                          "rest_id": "2075367885438890134",
+                          "core": {
+                            "user_results": {
+                              "result": {
+                                "rest_id": "44196397",
+                                "legacy": {"screen_name": "elonmusk", "name": "Elon Musk"}
+                              }
+                            }
+                          },
+                          "legacy": {
+                            "full_text": "Starmind",
+                            "created_at": "Thu Jul 09 23:53:57 +0000 2026",
+                            "conversation_id_str": "2075367885438890134",
+                            "lang": "en"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "entryId": "tweet-2075367885438890134-duplicate-2",
+                  "content": {
+                    "itemContent": {
+                      "tweet_results": {
+                        "result": {
+                          "__typename": "Tweet",
+                          "rest_id": "2075367885438890134",
+                          "core": {
+                            "user_results": {
+                              "result": {
+                                "rest_id": "44196397",
+                                "legacy": {"screen_name": "elonmusk", "name": "Elon Musk"}
+                              }
+                            }
+                          },
+                          "legacy": {
+                            "full_text": "Starmind",
+                            "created_at": "Thu Jul 09 23:53:57 +0000 2026",
+                            "conversation_id_str": "2075367885438890134",
+                            "lang": "en"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}
