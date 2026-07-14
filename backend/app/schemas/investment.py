@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 # --- enums -----------------------------------------------------------------
 
@@ -70,6 +71,7 @@ class SourceType(StrEnum):
     X_RSS = "x_rss"
     X_NITTER = "x_nitter"
     X_BRIGHTDATA = "x_brightdata"
+    X_WEB = "x_web"
     SEC_EDGAR = "sec_edgar"
     FEDERAL_RESERVE_RSS = "federal_reserve_rss"
     BLS = "bls"
@@ -135,6 +137,45 @@ class InvestmentWatchlistResponse(BaseModel):
 # --- source ----------------------------------------------------------------
 
 
+class XWebAccountConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["account"]
+    username: str = Field(min_length=1, max_length=64)
+    max_items_per_poll: int = Field(default=50, ge=1, le=200)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        normalized = value.strip().removeprefix("@")
+        if not normalized or not normalized.replace("_", "").isalnum():
+            raise ValueError("invalid X username")
+        return normalized
+
+
+class XWebKeywordConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["keyword"]
+    query: str = Field(min_length=1, max_length=512)
+    max_items_per_poll: int = Field(default=50, ge=1, le=200)
+
+    @field_validator("query")
+    @classmethod
+    def normalize_query(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("X keyword query cannot be empty")
+        return normalized
+
+
+XWebSourceConfig = Annotated[
+    XWebAccountConfig | XWebKeywordConfig,
+    Field(discriminator="mode"),
+]
+_X_WEB_CONFIG_ADAPTER = TypeAdapter(XWebSourceConfig)
+
+
 class InvestmentSourceCreate(BaseModel):
     workspace_id: str = Field(default="ws_default")
     source_type: SourceType
@@ -145,6 +186,17 @@ class InvestmentSourceCreate(BaseModel):
     default_watchlist_ids: list[str] = Field(default_factory=list)
     poll_interval_seconds: int = Field(default=3600)
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_x_web_source(self) -> InvestmentSourceCreate:
+        if self.source_type != SourceType.X_WEB:
+            return self
+        if self.poll_interval_seconds < 300:
+            raise ValueError("X web poll interval must be at least 300 seconds")
+        validated = _X_WEB_CONFIG_ADAPTER.validate_python(self.config)
+        self.config = validated.model_dump()
+        self.default_info_layer = InfoLayer.OPINION
+        return self
 
 
 class InvestmentSourceUpdate(BaseModel):
