@@ -1,0 +1,1 @@
+This file is a reference template. The installed plist is rendered by src/config.ts so paths are escaped and secrets remain in the local env file.
