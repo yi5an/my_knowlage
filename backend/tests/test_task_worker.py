@@ -221,6 +221,28 @@ def test_entity_job_only_handles_known_job_types(session_factory) -> None:
     assert "no handler" in (job.error_message or "")
 
 
+def test_x_web_collect_job_is_left_for_mac_collector(session_factory) -> None:
+    session = session_factory()
+    job = TaskJob(
+        id="job_x_web_collect",
+        workspace_id="ws_test",
+        job_type="x_web_collect",
+        target_type="investment_source",
+        target_id="source_x",
+        status="pending",
+        input={"source_id": "source_x"},
+    )
+    session.add(job)
+    session.commit()
+    processor = TaskJobProcessor(session_factory=session_factory, llm_client=None)
+
+    assert processor.run_once(batch_size=5) == 1
+
+    session.refresh(job)
+    assert job.status == "pending"
+    assert job.error_message is None
+
+
 # --- relation extraction job -----------------------------------------------
 
 

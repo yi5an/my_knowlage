@@ -187,6 +187,7 @@ _HANDLERS: dict[str, JobHandler] = {
     ENTITY_EXTRACTION_JOB: EntityExtractionJobHandler(),
     RELATION_EXTRACTION_JOB: RelationExtractionJobHandler(),
 }
+_EXTERNAL_JOB_TYPES = {"x_web_collect"}
 
 # job_type -> Document status field to update on completion.
 _DOC_STATUS_FIELD: dict[str, str] = {
@@ -237,6 +238,8 @@ class TaskJobProcessor:
     def _process_job(self, session: Session, job: TaskJob) -> None:
         handler = _HANDLERS.get(job.job_type)
         if handler is None:
+            if job.job_type in _EXTERNAL_JOB_TYPES:
+                return
             self._mark_failed(session, job, f"no handler for job_type {job.job_type!r}")
             return
 
