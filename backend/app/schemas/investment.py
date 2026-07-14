@@ -229,6 +229,52 @@ class InvestmentSourceResponse(BaseModel):
     updated_at: datetime | None = None
 
 
+# --- X web collector import ------------------------------------------------
+
+
+class XPostImportItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tweet_id: str = Field(pattern=r"^\d+$", max_length=32)
+    author_id: str | None = Field(default=None, max_length=64)
+    author_username: str = Field(min_length=1, max_length=64)
+    author_name: str | None = Field(default=None, max_length=255)
+    text: str = Field(default="", max_length=100_000)
+    published_at: datetime
+    url: str = Field(min_length=1, max_length=2048)
+    conversation_id: str | None = Field(default=None, max_length=32)
+    lang: str | None = Field(default=None, max_length=16)
+    media: list[dict[str, object]] = Field(default_factory=list, max_length=16)
+    quoted_tweet: dict[str, object] | None = None
+    reposted_tweet: dict[str, object] | None = None
+    reply_to_tweet_id: str | None = Field(default=None, max_length=32)
+    metrics: dict[str, int | None] = Field(default_factory=dict)
+    raw_payload: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("author_username")
+    @classmethod
+    def normalize_author_username(cls, value: str) -> str:
+        normalized = value.strip().removeprefix("@")
+        if not normalized or not normalized.replace("_", "").isalnum():
+            raise ValueError("invalid X author username")
+        return normalized
+
+
+class XPostBatchImportRequest(BaseModel):
+    workspace_id: str = Field(default="ws_default")
+    source_id: str
+    collector_id: str = Field(min_length=1, max_length=128)
+    items: list[dict[str, object]] = Field(min_length=1, max_length=200)
+
+
+class XPostBatchImportResponse(BaseModel):
+    items_seen: int
+    items_created: int
+    items_updated: int
+    items_skipped: int
+    errors: list[dict[str, object]] = Field(default_factory=list)
+
+
 # --- item ------------------------------------------------------------------
 
 

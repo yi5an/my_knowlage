@@ -151,6 +151,8 @@ class InvestmentItemRepository:
 
 def _credibility_for(source_type: str) -> str:
     """Default source credibility by source type (doc 01 §2.3, §3.2)."""
+    if source_type == "x_web":
+        return "personal_opinion"
     if source_type in ("sec_edgar", "federal_reserve_rss", "bls", "fred"):
         return "official"
     if source_type in ("hkex", "cninfo"):

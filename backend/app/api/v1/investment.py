@@ -27,9 +27,12 @@ from app.schemas.investment import (
     InvestmentWatchlistResponse,
     InvestmentWatchlistUpdate,
     PollSourceResponse,
+    XPostBatchImportRequest,
+    XPostBatchImportResponse,
 )
 from app.services.investment.investment_dependencies import get_investment_service
 from app.services.investment.service import InvestmentService
+from app.services.investment.x_web import XWebInvestmentService
 
 router = APIRouter(prefix="/investment", tags=["investment"])
 SERVICE_DEPENDENCY = Depends(get_investment_service)
@@ -152,6 +155,14 @@ async def poll_source(
 
 
 # --- item ------------------------------------------------------------------
+
+
+@router.post("/import/x-posts", response_model=XPostBatchImportResponse)
+async def import_x_posts(
+    payload: XPostBatchImportRequest,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> XPostBatchImportResponse:
+    return XWebInvestmentService(service.session).import_posts(payload)
 
 
 @router.get("/items", response_model=list[InvestmentItemResponse])
