@@ -41,6 +41,7 @@ from app.schemas.investment import (
     InvestmentWatchlistUpdate,
 )
 from app.services.investment.repositories import InvestmentSourceRepository
+from app.services.investment.x_web import X_WEB_COLLECT_JOB_TYPE
 
 INVESTMENT_FETCH_JOB_TYPE = "investment_fetch"
 
@@ -480,10 +481,15 @@ class InvestmentService:
         src = self.session.get(InvestmentSource, source_id)
         if src is None:
             raise AppError("not_found", "source not found", 404)
+        job_type = (
+            X_WEB_COLLECT_JOB_TYPE
+            if src.source_type == "x_web"
+            else INVESTMENT_FETCH_JOB_TYPE
+        )
 
         existing = self.session.scalar(
             select(TaskJob).where(
-                TaskJob.job_type == INVESTMENT_FETCH_JOB_TYPE,
+                TaskJob.job_type == job_type,
                 TaskJob.target_id == source_id,
                 TaskJob.status.in_(("pending", "running")),
             )
@@ -494,7 +500,7 @@ class InvestmentService:
         job = TaskJob(
             id=_new_id("job"),
             workspace_id=src.workspace_id,
-            job_type=INVESTMENT_FETCH_JOB_TYPE,
+            job_type=job_type,
             target_type="investment_source",
             target_id=source_id,
             status="pending",
@@ -508,7 +514,10 @@ class InvestmentService:
     def get_job(self, job_id: str) -> InvestmentFetchJobResponse | None:
         """Project a ``TaskJob`` into an ``InvestmentFetchJobResponse``."""
         job = self.session.get(TaskJob, job_id)
-        if job is None or job.job_type != INVESTMENT_FETCH_JOB_TYPE:
+        if job is None or job.job_type not in (
+            INVESTMENT_FETCH_JOB_TYPE,
+            X_WEB_COLLECT_JOB_TYPE,
+        ):
             return None
         out = job.output or {}
         return InvestmentFetchJobResponse(

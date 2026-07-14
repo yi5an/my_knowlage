@@ -275,6 +275,48 @@ class XPostBatchImportResponse(BaseModel):
     errors: list[dict[str, object]] = Field(default_factory=list)
 
 
+class XCollectorHeartbeat(BaseModel):
+    collector_id: str = Field(min_length=1, max_length=128)
+    version: str = Field(min_length=1, max_length=32)
+    login_status: Literal["uninitialized", "ready", "auth_required", "challenge_required"]
+    queue_size: int = Field(default=0, ge=0)
+    last_success_at: datetime | None = None
+    last_error: str | None = Field(default=None, max_length=2000)
+
+
+class XCollectorStateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    collector_id: str
+    version: str
+    login_status: str
+    queue_size: int
+    last_success_at: datetime | None = None
+    last_error: str | None = None
+    heartbeat_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class XCollectorCommandResponse(BaseModel):
+    job_id: str
+    source_id: str
+    workspace_id: str
+    name: str
+    mode: Literal["account", "keyword"]
+    config: dict[str, object]
+    poll_interval_seconds: int
+
+
+class XCollectorCommandComplete(BaseModel):
+    status: Literal["succeeded", "failed"]
+    items_seen: int = Field(default=0, ge=0)
+    items_created: int = Field(default=0, ge=0)
+    items_updated: int = Field(default=0, ge=0)
+    items_skipped: int = Field(default=0, ge=0)
+    error: str | None = Field(default=None, max_length=2000)
+
+
 # --- item ------------------------------------------------------------------
 
 

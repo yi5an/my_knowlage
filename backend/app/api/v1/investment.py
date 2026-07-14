@@ -27,6 +27,10 @@ from app.schemas.investment import (
     InvestmentWatchlistResponse,
     InvestmentWatchlistUpdate,
     PollSourceResponse,
+    XCollectorCommandComplete,
+    XCollectorCommandResponse,
+    XCollectorHeartbeat,
+    XCollectorStateResponse,
     XPostBatchImportRequest,
     XPostBatchImportResponse,
 )
@@ -152,6 +156,42 @@ async def poll_source(
 ) -> PollSourceResponse:
     job = service.poll_source(source_id)
     return PollSourceResponse(job_id=job.id, status=job.status)
+
+
+@router.post("/x-collector/heartbeat", response_model=XCollectorStateResponse)
+async def heartbeat_x_collector(
+    payload: XCollectorHeartbeat,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> XCollectorStateResponse:
+    return XWebInvestmentService(service.session).heartbeat(payload)
+
+
+@router.get("/x-collector/state", response_model=XCollectorStateResponse | None)
+async def get_x_collector_state(
+    collector_id: str,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> XCollectorStateResponse | None:
+    return XWebInvestmentService(service.session).get_state(collector_id)
+
+
+@router.get("/x-collector/commands", response_model=list[XCollectorCommandResponse])
+async def claim_x_collector_commands(
+    collector_id: str,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[XCollectorCommandResponse]:
+    return XWebInvestmentService(service.session).claim_commands(collector_id)
+
+
+@router.post(
+    "/x-collector/commands/{job_id}/complete",
+    response_model=InvestmentFetchJobResponse,
+)
+async def complete_x_collector_command(
+    job_id: str,
+    payload: XCollectorCommandComplete,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentFetchJobResponse:
+    return XWebInvestmentService(service.session).complete_command(job_id, payload)
 
 
 # --- item ------------------------------------------------------------------

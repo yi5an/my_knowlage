@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.infrastructure.database import Base, get_db_session
-from app.infrastructure.models import InvestmentItem, Workspace
+from app.infrastructure.models import InvestmentItem, TaskJob, Workspace
 from app.main import app
 from app.schemas.investment import InvestmentSourceCreate
 from app.services.investment.investment_dependencies import get_investment_service
@@ -218,3 +218,91 @@ def test_x_post_import_rejects_non_x_source(client: TestClient) -> None:
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "x_source_not_found"
+
+
+def test_x_collector_heartbeat_is_persisted_and_updated(client: TestClient) -> None:
+    first = client.post(
+        "/api/v1/investment/x-collector/heartbeat",
+        json={
+            "collector_id": "collector_test",
+            "version": "0.1.0",
+            "login_status": "ready",
+            "queue_size": 2,
+        },
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["queue_size"] == 2
+
+    second = client.post(
+        "/api/v1/investment/x-collector/heartbeat",
+        json={
+            "collector_id": "collector_test",
+            "version": "0.1.1",
+            "login_status": "auth_required",
+            "queue_size": 3,
+            "last_error": "X login expired",
+        },
+    )
+    assert second.status_code == 200, second.text
+
+    state = client.get(
+        "/api/v1/investment/x-collector/state",
+        params={"collector_id": "collector_test"},
+    )
+    assert state.status_code == 200
+    assert state.json()["version"] == "0.1.1"
+    assert state.json()["login_status"] == "auth_required"
+    assert state.json()["last_error"] == "X login expired"
+
+
+def test_x_web_poll_is_claimed_once_and_completed(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    source = _create_x_source(client)
+    poll = client.post(f"/api/v1/investment/sources/{source['id']}/poll")
+    assert poll.status_code == 200, poll.text
+    job_id = poll.json()["job_id"]
+
+    job = db_session.get(TaskJob, job_id)
+    assert job is not None
+    assert job.job_type == "x_web_collect"
+    assert job.status == "pending"
+
+    claimed = client.get(
+        "/api/v1/investment/x-collector/commands",
+        params={"collector_id": "collector_test"},
+    )
+    assert claimed.status_code == 200, claimed.text
+    assert claimed.json()[0]["job_id"] == job_id
+    assert claimed.json()[0]["source_id"] == source["id"]
+    assert claimed.json()[0]["config"]["username"] == "elonmusk"
+
+    claimed_again = client.get(
+        "/api/v1/investment/x-collector/commands",
+        params={"collector_id": "collector_test"},
+    )
+    assert claimed_again.json() == []
+
+    completed = client.post(
+        f"/api/v1/investment/x-collector/commands/{job_id}/complete",
+        json={
+            "status": "succeeded",
+            "items_seen": 5,
+            "items_created": 3,
+            "items_updated": 1,
+            "items_skipped": 1,
+        },
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["status"] == "succeeded"
+    assert completed.json()["items_created"] == 3
+
+    projected = client.get(f"/api/v1/investment/jobs/{job_id}")
+    assert projected.status_code == 200, projected.text
+    assert projected.json()["items_seen"] == 5
+
+    sources = client.get("/api/v1/investment/sources").json()
+    refreshed = next(item for item in sources if item["id"] == source["id"])
+    assert refreshed["last_polled_at"] is not None
+    assert refreshed["last_error"] is None

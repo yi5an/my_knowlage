@@ -639,6 +639,21 @@ class InvestmentSource(UpdatedTimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean(), default=True, server_default="true")
 
 
+class XCollectorState(UpdatedTimestampMixin, Base):
+    """Latest heartbeat for a Mac-resident X Web collector."""
+
+    __tablename__ = "x_collector_state"
+    __table_args__ = (Index("idx_x_collector_heartbeat", "heartbeat_at"),)
+
+    collector_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    login_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    queue_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text())
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class InvestmentItem(UpdatedTimestampMixin, Base):
     """A single investment information entry — the main feed table.
 
