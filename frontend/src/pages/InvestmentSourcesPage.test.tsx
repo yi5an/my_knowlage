@@ -21,6 +21,9 @@ describe("InvestmentSourcesPage", () => {
         if (u.includes("/investment/sources")) {
           return new Response(JSON.stringify([]), { status: 200 });
         }
+        if (u.includes("/investment/x-collector/states")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
         return new Response("not found", { status: 404 });
       }),
     );
@@ -61,5 +64,51 @@ describe("InvestmentSourcesPage", () => {
 
     expect(screen.getByLabelText("X 账号 URL（每行一个）")).toBeInTheDocument();
     expect(screen.getByLabelText("抓取频率(秒)")).toHaveValue("21600");
+  });
+
+  it("offers X Web account and keyword modes with different defaults", async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "新增数据源" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "类型" }));
+    fireEvent.click(await screen.findByText("X / 网页采集"));
+
+    expect(screen.getByRole("combobox", { name: "采集模式" })).toBeInTheDocument();
+    expect(screen.getByLabelText("X 用户名")).toBeInTheDocument();
+    expect(screen.getByLabelText("抓取频率(秒)")).toHaveValue("900");
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "采集模式" }));
+    fireEvent.click(await screen.findByText("关键词主题"));
+
+    expect(screen.getByLabelText("关键词")).toBeInTheDocument();
+    expect(screen.queryByLabelText("X 用户名")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("抓取频率(秒)")).toHaveValue("1800");
+  });
+
+  it("shows the X collector login status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/investment/sources")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        return new Response(
+          JSON.stringify([
+            {
+              collector_id: "macbook",
+              version: "0.1.0",
+              login_status: "auth_required",
+              queue_size: 0,
+              heartbeat_at: "2026-07-14T00:00:00Z",
+            },
+          ]),
+          { status: 200 },
+        );
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("X 网页采集器：需要重新登录")).toBeInTheDocument();
   });
 });

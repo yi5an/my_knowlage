@@ -82,3 +82,31 @@ This repository intentionally does not yet implement document import, AI provide
 - [Testing guide](docs/development/testing-guide.md)
 - [API conventions](docs/development/api-conventions.md)
 - [Error codes](docs/development/error-codes.md)
+
+## X 网页采集器（Mac）
+
+X 网页采集器运行在一台长期在线的 Mac 上，通过持久化 Playwright 浏览器会话访问 X 的网页内部接口，不使用官方开发者 API 配额。账号采集可使用访客链路；关键词采集需要先在 Mac 上登录 X。
+
+```bash
+cd tools/x-collector
+npm install
+npx playwright install chromium
+npm run build
+node dist/cli.js login
+```
+
+登录完成后，在 `~/Library/Application Support/KnowPilot/x-collector/.env` 写入配置（`install` 会生成 `.env.example`）：
+
+```dotenv
+KNOWPILOT_URL=http://127.0.0.1:8010
+X_COLLECTOR_ID=my-mac
+X_COLLECTOR_TOKEN=
+```
+
+确认 `KNOWPILOT_URL` 指向实际 KnowPilot 后端，再执行：
+
+```bash
+node dist/cli.js install
+```
+
+这只会安装并启动 `com.knowpilot.x-collector` 自己的 LaunchAgent。日志在 `~/Library/Logs/KnowPilot/`，状态可用 `node dist/cli.js status` 查看；停止并移除它使用 `node dist/cli.js uninstall`。前端“数据源”页会显示采集器在线、需要重新登录或验证的状态。

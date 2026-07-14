@@ -28,6 +28,7 @@ export type SourceType =
   | "x_rss"
   | "x_nitter"
   | "x_brightdata"
+  | "x_web"
   | "sec_edgar"
   | "federal_reserve_rss"
   | "bls"
@@ -107,6 +108,16 @@ export interface InvestmentSource {
   next_poll_at?: string | null;
   last_error?: string | null;
   enabled: boolean;
+}
+
+export interface XCollectorState {
+  collector_id: string;
+  version: string;
+  login_status: "uninitialized" | "ready" | "auth_required" | "challenge_required";
+  queue_size: number;
+  last_success_at?: string | null;
+  last_error?: string | null;
+  heartbeat_at: string;
 }
 
 export interface InvestmentThesis {
@@ -347,6 +358,14 @@ export const investmentApi = {
   },
   getFetchJob(id: string): Promise<InvestmentFetchJob> {
     return apiRequest(`/investment/jobs/${id}`);
+  },
+  getXCollectorState(collectorId: string): Promise<XCollectorState | null> {
+    return apiRequest(
+      `/investment/x-collector/state?collector_id=${encodeURIComponent(collectorId)}`,
+    );
+  },
+  listXCollectorStates(): Promise<XCollectorState[]> {
+    return apiRequest("/investment/x-collector/states");
   },
 
   // theses

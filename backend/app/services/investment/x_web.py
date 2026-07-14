@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -122,6 +122,12 @@ class XWebInvestmentService:
             return None
         return XCollectorStateResponse.model_validate(state)
 
+    def list_states(self) -> list[XCollectorStateResponse]:
+        states = self.session.scalars(
+            select(XCollectorState).order_by(XCollectorState.heartbeat_at.desc())
+        )
+        return [XCollectorStateResponse.model_validate(state) for state in states]
+
     def claim_commands(self, collector_id: str) -> list[XCollectorCommandResponse]:
         jobs = list(
             self.session.scalars(
@@ -152,7 +158,7 @@ class XWebInvestmentService:
                     source_id=source.id,
                     workspace_id=source.workspace_id,
                     name=source.name,
-                    mode=str(source.config["mode"]),
+                    mode=cast(Literal["account", "keyword"], source.config["mode"]),
                     config=dict(source.config),
                     poll_interval_seconds=source.poll_interval_seconds,
                 )

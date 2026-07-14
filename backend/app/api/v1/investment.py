@@ -174,6 +174,13 @@ async def get_x_collector_state(
     return XWebInvestmentService(service.session).get_state(collector_id)
 
 
+@router.get("/x-collector/states", response_model=list[XCollectorStateResponse])
+async def list_x_collector_states(
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[XCollectorStateResponse]:
+    return XWebInvestmentService(service.session).list_states()
+
+
 @router.get("/x-collector/commands", response_model=list[XCollectorCommandResponse])
 async def claim_x_collector_commands(
     collector_id: str,

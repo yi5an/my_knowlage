@@ -254,6 +254,10 @@ def test_x_collector_heartbeat_is_persisted_and_updated(client: TestClient) -> N
     assert state.json()["login_status"] == "auth_required"
     assert state.json()["last_error"] == "X login expired"
 
+    listed = client.get("/api/v1/investment/x-collector/states")
+    assert listed.status_code == 200
+    assert listed.json()[0]["collector_id"] == "collector_test"
+
 
 def test_x_web_poll_is_claimed_once_and_completed(
     client: TestClient,

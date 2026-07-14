@@ -1,6 +1,8 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { createInterface } from "node:readline/promises";
 
 import { BackendClient } from "./backend-client.js";
@@ -8,6 +10,10 @@ import { loadConfig, renderLaunchAgent } from "./config.js";
 import { PlaywrightKeywordSearchSession } from "./session.js";
 
 const ALLOWED_COMMANDS = new Set(["run", "once", "login", "status", "install", "uninstall"]);
+const execFileAsync = promisify(execFile);
+const LAUNCH_AGENT_LABEL = "com.knowpilot.x-collector";
+const LAUNCH_AGENT_PATH = () =>
+  join(homedir(), "Library/LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
 
 export function parseCommand(argv: string[]): {command: string} {
   const command = argv[2] || "status";
@@ -73,13 +79,28 @@ async function install(config: ReturnType<typeof loadConfig>): Promise<void> {
     logDir,
   });
   await writeFile(join(launchAgentsDir, "com.knowpilot.x-collector.plist"), plist, {mode: 0o600});
-  console.log(`LaunchAgent 已写入 ${launchAgentsDir}`);
+  await unloadLaunchAgent();
+  await loadLaunchAgent(join(launchAgentsDir, "com.knowpilot.x-collector.plist"));
+  console.log(`LaunchAgent 已安装并启动：${join(launchAgentsDir, "com.knowpilot.x-collector.plist")}`);
 }
 
 async function uninstall(): Promise<void> {
-  const path = join(homedir(), "Library/LaunchAgents/com.knowpilot.x-collector.plist");
-  await readFile(path).then(() => writeFile(path, "", {mode: 0o600})).catch(() => undefined);
-  console.log(`LaunchAgent 已停用：${path}`);
+  const path = LAUNCH_AGENT_PATH();
+  await unloadLaunchAgent();
+  await rm(path, {force: true});
+  console.log(`LaunchAgent 已移除：${path}`);
+}
+
+async function loadLaunchAgent(path: string): Promise<void> {
+  const uid = process.getuid?.();
+  if (!uid) return;
+  await execFileAsync("launchctl", ["bootstrap", `gui/${uid}`, path]);
+}
+
+async function unloadLaunchAgent(): Promise<void> {
+  const uid = process.getuid?.();
+  if (!uid) return;
+  await execFileAsync("launchctl", ["bootout", `gui/${uid}/${LAUNCH_AGENT_LABEL}`]).catch(() => undefined);
 }
 
 async function loadEnvFile(path: string | undefined): Promise<Record<string, string | undefined>> {

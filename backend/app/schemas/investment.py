@@ -173,7 +173,7 @@ XWebSourceConfig = Annotated[
     XWebAccountConfig | XWebKeywordConfig,
     Field(discriminator="mode"),
 ]
-_X_WEB_CONFIG_ADAPTER = TypeAdapter(XWebSourceConfig)
+_X_WEB_CONFIG_ADAPTER: TypeAdapter[XWebSourceConfig] = TypeAdapter(XWebSourceConfig)
 
 
 class InvestmentSourceCreate(BaseModel):

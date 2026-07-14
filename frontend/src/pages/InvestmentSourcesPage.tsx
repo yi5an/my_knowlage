@@ -8,6 +8,7 @@ import {
   InputNumber,
   Modal,
   Select,
+  Space,
   Spin,
   Table,
   Tag,
@@ -21,6 +22,7 @@ import { ApiError } from "../services/client";
 import {
   investmentApi,
   type InvestmentSource,
+  type XCollectorState,
   type SourceType,
 } from "../services/investmentApi";
 
@@ -29,6 +31,7 @@ const TYPE_LABEL: Record<SourceType, string> = {
   x_rss: "X / RSSHub",
   x_nitter: "X / Nitter",
   x_brightdata: "X / Bright Data",
+  x_web: "X / 网页采集",
   sec_edgar: "SEC EDGAR",
   federal_reserve_rss: "美联储 RSS",
   bls: "BLS",
@@ -57,8 +60,20 @@ function fmtDate(s?: string | null): string {
   }
 }
 
+function collectorStatus(state: XCollectorState | undefined): {
+  color: string;
+  label: string;
+} {
+  if (!state) return { color: "default", label: "未连接" };
+  if (state.login_status === "ready") return { color: "success", label: "在线" };
+  if (state.login_status === "auth_required") return { color: "warning", label: "需要重新登录" };
+  if (state.login_status === "challenge_required") return { color: "error", label: "需要处理验证" };
+  return { color: "default", label: "未初始化" };
+}
+
 export function InvestmentSourcesPage() {
   const [sources, setSources] = useState<InvestmentSource[]>([]);
+  const [collectorStates, setCollectorStates] = useState<XCollectorState[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -70,13 +85,20 @@ export function InvestmentSourcesPage() {
     setLoading(true);
     setError(null);
     try {
-      setSources(await investmentApi.listSources());
+      const [nextSources, nextCollectorStates] = await Promise.all([
+        investmentApi.listSources(),
+        investmentApi.listXCollectorStates(),
+      ]);
+      setSources(nextSources);
+      setCollectorStates(nextCollectorStates);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const xCollector = collectorStatus(collectorStates[0]);
 
   useEffect(() => {
     void load();
@@ -90,11 +112,14 @@ export function InvestmentSourcesPage() {
     const values = await form.validateFields();
     const sourceType = values.source_type as SourceType;
     const isXSource = sourceType === "x_rss" || sourceType === "x_nitter" || sourceType === "x_brightdata";
+    const isXWeb = sourceType === "x_web";
     const payload: Parameters<typeof investmentApi.createSource>[0] = {
       source_type: sourceType,
       name: values.name,
-      default_info_layer: values.default_info_layer ?? (isXSource ? "opinion" : "news"),
-      poll_interval_seconds: values.poll_interval_seconds ?? (sourceType === "x_brightdata" ? 21600 : 3600),
+      default_info_layer: values.default_info_layer ?? (isXSource || isXWeb ? "opinion" : "news"),
+      poll_interval_seconds:
+        values.poll_interval_seconds ??
+        (sourceType === "x_brightdata" ? 21600 : isXWeb ? 900 : 3600),
     };
     // SEC needs a CIK in config; BLS/FRED need series IDs in config;
     // rss/federal_reserve_rss/hkex/cninfo use url.
@@ -116,6 +141,16 @@ export function InvestmentSourcesPage() {
           v.startsWith("http") ? v : `https://x.com/${v.replace(/^@/, "")}`,
         ),
       };
+    } else if (isXWeb) {
+      const mode = values.x_web_mode === "keyword" ? "keyword" : "account";
+      payload.config =
+        mode === "keyword"
+          ? { mode, query: String(values.x_keyword || "").trim(), max_items_per_poll: 50 }
+          : {
+              mode,
+              username: String(values.x_username || "").trim().replace(/^@/, ""),
+              max_items_per_poll: 50,
+            };
     } else if (isXSource) {
       const target = String(values.x_target || "").trim();
       if (/^https?:\/\//i.test(target)) {
@@ -239,7 +274,12 @@ export function InvestmentSourcesPage() {
       <PageHeader
         title="数据源"
         description="配置真实数据源（SEC / 美联储 / RSS / X 镜像源）。无配置时不显示任何示例数据。"
-        extra={<Button type="primary" onClick={() => setOpen(true)}>新增数据源</Button>}
+        extra={
+          <Space>
+            <Tag color={xCollector.color}>X 网页采集器：{xCollector.label}</Tag>
+            <Button type="primary" onClick={() => setOpen(true)}>新增数据源</Button>
+          </Space>
+        }
       />
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} showIcon />}
       <Card>
@@ -283,6 +323,7 @@ export function InvestmentSourcesPage() {
             <Select
               options={[
                 { value: "rss", label: "RSS / Atom" },
+                { value: "x_web", label: "X / 网页采集" },
                 { value: "x_brightdata", label: "X / Bright Data（账号高频采集）" },
                 { value: "x_rss", label: "X / RSSHub（公开推文）" },
                 { value: "x_nitter", label: "X / Nitter 镜像（公开推文）" },
@@ -300,12 +341,47 @@ export function InvestmentSourcesPage() {
                     poll_interval_seconds: value === "x_brightdata" ? 21600 : 3600,
                   });
                 }
+                if (value === "x_web") {
+                  form.setFieldsValue({ default_info_layer: "opinion", poll_interval_seconds: 900 });
+                }
               }}
             />
           </Form.Item>
           <Form.Item shouldUpdate={(prev, cur) => prev.source_type !== cur.source_type} noStyle>
             {({ getFieldValue }) => {
               const st = getFieldValue("source_type") as SourceType;
+              if (st === "x_web") {
+                return (
+                  <>
+                    <Form.Item label="采集模式" name="x_web_mode" initialValue="account">
+                      <Select
+                        options={[
+                          { value: "account", label: "指定账号" },
+                          { value: "keyword", label: "关键词主题" },
+                        ]}
+                        onChange={(value) =>
+                          form.setFieldsValue({
+                            poll_interval_seconds: value === "keyword" ? 1800 : 900,
+                          })
+                        }
+                      />
+                    </Form.Item>
+                    <Form.Item shouldUpdate={(prev, cur) => prev.x_web_mode !== cur.x_web_mode} noStyle>
+                      {({ getFieldValue: getMode }) =>
+                        getMode("x_web_mode") === "keyword" ? (
+                          <Form.Item label="关键词" name="x_keyword" rules={[{ required: true }]}>
+                            <Input placeholder="Federal Reserve OR 美联储" />
+                          </Form.Item>
+                        ) : (
+                          <Form.Item label="X 用户名" name="x_username" rules={[{ required: true }]}>
+                            <Input placeholder="elonmusk 或 @elonmusk" />
+                          </Form.Item>
+                        )
+                      }
+                    </Form.Item>
+                  </>
+                );
+              }
               if (st === "sec_edgar") {
                 return (
                   <Form.Item label="CIK" name="cik" rules={[{ required: true }]}>
@@ -400,6 +476,9 @@ export function InvestmentSourcesPage() {
             {({ getFieldValue }) => {
               const st = getFieldValue("source_type") as SourceType;
               const hints: string[] = [];
+              if (st === "x_web") {
+                hints.push("账号采集使用 X 网页内部接口；关键词主题需要先在 Mac 专用浏览器中登录 X");
+              }
               if (st === "sec_edgar") hints.push("SEC 抓取需在服务端配置 SEC_USER_AGENT");
               if (st === "fred") hints.push("FRED 抓取需在服务端配置 FRED_API_KEY");
               if (st === "x_rss" || st === "x_nitter") {
