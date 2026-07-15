@@ -30,6 +30,46 @@ class SourceCredibility(StrEnum):
     UNVERIFIED = "unverified"
 
 
+class SourceLayer(StrEnum):
+    PRIMARY_SOURCE = "primary_source"
+    HUMAN_SOURCE = "human_source"
+    EXPERT_OPINION = "expert_opinion"
+    NEWS_CONFIRMATION = "news_confirmation"
+    MARKET_FEEDBACK = "market_feedback"
+
+
+class ThemeType(StrEnum):
+    COMPANY_CLUSTER = "company_cluster"
+    MACRO = "macro"
+    SECTOR = "sector"
+    ASSET = "asset"
+    GEOPOLITICS = "geopolitics"
+    CUSTOM = "custom"
+
+
+class SignalStage(StrEnum):
+    NEW = "new"
+    REPEATING = "repeating"
+    VALIDATED = "validated"
+    REFUTED = "refuted"
+    STALE = "stale"
+    NOISE = "noise"
+
+
+class TraceType(StrEnum):
+    CONFIRMED_CITATION = "confirmed_citation"
+    LIKELY_SOURCE = "likely_source"
+    SAME_TOPIC = "same_topic"
+    UNMATCHED = "unmatched"
+
+
+class Actionability(StrEnum):
+    IMMEDIATE_ATTENTION = "immediate_attention"
+    WATCH = "watch"
+    WEAK_SIGNAL = "weak_signal"
+    NOISE = "noise"
+
+
 class ImpactDirection(StrEnum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
@@ -87,6 +127,7 @@ class VerificationStatus(StrEnum):
     VERIFIED = "verified"
     REFUTED = "refuted"
     LOCAL_ONLY = "local_only"
+    IGNORED = "ignored"
 
 
 # --- watchlist -------------------------------------------------------------
@@ -129,6 +170,120 @@ class InvestmentWatchlistResponse(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     importance: str
     notes: str | None = None
+    enabled: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# --- theme -----------------------------------------------------------------
+
+
+class InvestmentThemeCreate(BaseModel):
+    workspace_id: str = Field(default="ws_default")
+    name: str
+    description: str | None = None
+    theme_type: ThemeType = Field(default=ThemeType.CUSTOM)
+    keywords: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
+    tickers: list[str] = Field(default_factory=list)
+    enabled: bool = True
+    priority: str = Field(default="medium")
+
+
+class InvestmentThemeUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    theme_type: ThemeType | None = None
+    keywords: list[str] | None = None
+    entities: list[str] | None = None
+    tickers: list[str] | None = None
+    enabled: bool | None = None
+    priority: str | None = None
+
+
+class InvestmentThemeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    name: str
+    description: str | None = None
+    theme_type: str
+    keywords: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
+    tickers: list[str] = Field(default_factory=list)
+    enabled: bool
+    priority: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ThemeSourceBindRequest(BaseModel):
+    source_id: str
+    source_layer: SourceLayer
+    priority: int = Field(default=50, ge=0, le=100)
+    collector_type: str | None = None
+    coverage_notes: str | None = None
+    enabled: bool = True
+
+
+class ThemeSourceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    theme_id: str
+    source_id: str
+    source_layer: str
+    priority: int
+    collector_type: str | None = None
+    coverage_notes: str | None = None
+    enabled: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class PersonSourceCreate(BaseModel):
+    workspace_id: str = Field(default="ws_default")
+    theme_ids: list[str] = Field(default_factory=list)
+    platform: str
+    handle: str
+    display_name: str | None = None
+    role_type: str = Field(default="other")
+    credibility: float = Field(default=0.5, ge=0.0, le=1.0)
+    noise_level: float = Field(default=0.5, ge=0.0, le=1.0)
+    known_bias: str | None = None
+    enabled: bool = True
+
+    @field_validator("handle")
+    @classmethod
+    def normalize_handle(cls, value: str) -> str:
+        return value.strip().removeprefix("@")
+
+
+class PersonSourceUpdate(BaseModel):
+    theme_ids: list[str] | None = None
+    display_name: str | None = None
+    role_type: str | None = None
+    credibility: float | None = Field(default=None, ge=0.0, le=1.0)
+    noise_level: float | None = Field(default=None, ge=0.0, le=1.0)
+    known_bias: str | None = None
+    enabled: bool | None = None
+
+
+class PersonSourceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    theme_ids: list[str] = Field(default_factory=list)
+    platform: str
+    handle: str
+    display_name: str | None = None
+    role_type: str
+    credibility: float
+    noise_level: float
+    known_bias: str | None = None
     enabled: bool
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -448,6 +603,12 @@ class InvestmentClaimUpdate(BaseModel):
     evidence_doc_ids: list[str] | None = None
 
 
+class InvestmentClaimStatusAction(BaseModel):
+    verification_status: VerificationStatus
+    verification_summary: str | None = None
+    thesis_id: str | None = None
+
+
 class InvestmentClaimResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -461,6 +622,52 @@ class InvestmentClaimResponse(BaseModel):
     verification_status: str
     verification_summary: str | None = None
     evidence_doc_ids: list[str] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# --- fact ------------------------------------------------------------------
+
+
+class InvestmentFactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    source_item_id: str
+    watchlist_id: str | None = None
+    fact_text: str
+    fact_text_zh: str | None = None
+    fact_type: str
+    entities: list[str] = Field(default_factory=list)
+    evidence_url: str | None = None
+    evidence_excerpt: str
+    evidence_timestamp: int | None = None
+    confidence: float
+    verification_status: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# --- signal ----------------------------------------------------------------
+
+
+class InvestmentSignalResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    watchlist_id: str | None = None
+    title: str
+    summary: str
+    signal_type: str
+    first_seen_at: datetime
+    last_seen_at: datetime
+    source_count: int
+    fact_ids: list[str] = Field(default_factory=list)
+    item_ids: list[str] = Field(default_factory=list)
+    confidence: float
+    status: str
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -493,6 +700,10 @@ class InvestmentDashboardResponse(BaseModel):
     theses_challenged_count: int
     today_primary_count: int
     today_macro_count: int
+    untranslated_count: int
+    unextracted_count: int
+    unsignaled_count: int
+    failed_job_count: int
 
 
 class InvestmentDigestResponse(BaseModel):
@@ -502,6 +713,21 @@ class InvestmentDigestResponse(BaseModel):
     today_highlights: list[InvestmentItemResponse] = Field(default_factory=list)
     pending_claims: list[InvestmentClaimResponse] = Field(default_factory=list)
     challenged_items: list[InvestmentItemResponse] = Field(default_factory=list)
+    early_signals: list[InvestmentSignalResponse] = Field(default_factory=list)
+    pending_facts: list[InvestmentFactResponse] = Field(default_factory=list)
+
+
+class InvestmentDigestSnapshotResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    watchlist_id: str | None = None
+    digest_date: datetime
+    title: str
+    digest: dict[str, object] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 # --- LLM translation contract --------------------------------------------
