@@ -11,10 +11,12 @@ import {
   Space,
   Spin,
   Table,
+  Tag,
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { InvestmentItemDrawer } from "../components/investment/InvestmentItemDrawer";
 import { ImpactTag } from "../components/investment/ImpactTag";
@@ -55,6 +57,8 @@ function fmtDate(s?: string | null): string {
 }
 
 export function InvestmentItemsPage() {
+  const [searchParams] = useSearchParams();
+  const themeId = searchParams.get("theme_id") ?? undefined;
   const [items, setItems] = useState<InvestmentItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +79,7 @@ export function InvestmentItemsPage() {
       const data = await investmentApi.listItems({
         infoLayer: (layer || undefined) as InfoLayer | undefined,
         actionStatus: (status || undefined) as ActionStatus | undefined,
+        themeId,
         limit: 200,
       });
       setItems(data);
@@ -83,7 +88,7 @@ export function InvestmentItemsPage() {
     } finally {
       setLoading(false);
     }
-  }, [layer, status]);
+  }, [layer, status, themeId]);
 
   useEffect(() => {
     void load();
@@ -237,6 +242,7 @@ export function InvestmentItemsPage() {
         <Space direction="vertical" style={{ width: "100%", marginBottom: 16 }}>
           <Segmented options={LAYER_FILTERS} value={layer} onChange={(v) => setLayer(String(v))} />
           <Space wrap>
+            {themeId && <Tag color="blue">主题过滤：{themeId}</Tag>}
             <Segmented
               options={STATUS_FILTERS}
               value={status}

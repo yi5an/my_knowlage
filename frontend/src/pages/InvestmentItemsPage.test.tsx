@@ -175,6 +175,31 @@ describe("InvestmentItemsPage", () => {
     });
   });
 
+  it("uses theme_id from the URL to scope the item list", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/investment/items")) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={["/investment/items?theme_id=theme_ai"]}>
+        <InvestmentItemsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("主题过滤：theme_ai")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("theme_id=theme_ai"),
+        expect.anything(),
+      );
+    });
+  });
+
   it("marks English items without Chinese fields as pending translation", async () => {
     vi.stubGlobal(
       "fetch",

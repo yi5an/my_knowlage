@@ -520,6 +520,7 @@ class InvestmentItemResponse(BaseModel):
 
     id: str
     workspace_id: str
+    theme_id: str | None = None
     document_id: str | None = None
     source_id: str | None = None
     dedupe_key: str

@@ -1,5 +1,6 @@
 import { Alert, Card, Empty, List, Skeleton, Space, Statistic, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { InformationEdgeCard } from "../components/investment/InformationEdgeCard";
 import { PageHeader } from "../components/PageHeader";
@@ -15,6 +16,8 @@ const EMPTY_DIGEST: InformationEdgeDigest = {
 };
 
 export function InformationEdgePage() {
+  const [searchParams] = useSearchParams();
+  const themeId = searchParams.get("theme_id") ?? undefined;
   const [digest, setDigest] = useState<InformationEdgeDigest>(EMPTY_DIGEST);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,13 +26,13 @@ export function InformationEdgePage() {
     setLoading(true);
     setError(null);
     try {
-      setDigest(await investmentApi.getInformationEdge({ limit: 20 }));
+      setDigest(await investmentApi.getInformationEdge({ themeId, limit: 20 }));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [themeId]);
 
   useEffect(() => {
     void load();
@@ -45,6 +48,12 @@ export function InformationEdgePage() {
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
 
       <Skeleton loading={loading} active>
+        {themeId && (
+          <Space style={{ marginBottom: 16 }}>
+            <Tag color="blue">主题过滤：{themeId}</Tag>
+          </Space>
+        )}
+
         <Space size={16} wrap style={{ marginBottom: 16 }}>
           <Card>
             <Statistic title="高分信号" value={digest.top_signals.length} />

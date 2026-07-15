@@ -423,6 +423,7 @@ async def list_items(
     info_layer: str | None = Query(default=None),
     action_status: str | None = Query(default=None),
     watchlist_id: str | None = Query(default=None),
+    theme_id: str | None = Query(default=None),
     source_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     service: InvestmentService = SERVICE_DEPENDENCY,
@@ -432,6 +433,7 @@ async def list_items(
         info_layer=info_layer,
         action_status=action_status,
         watchlist_id=watchlist_id,
+        theme_id=theme_id,
         source_id=source_id,
         limit=limit,
     )
@@ -496,6 +498,7 @@ async def list_facts(
 async def list_signals(
     workspace_id: str = "ws_default",
     watchlist_id: str | None = Query(default=None),
+    theme_id: str | None = Query(default=None),
     status: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=200),
     service: InvestmentService = SERVICE_DEPENDENCY,
@@ -505,6 +508,7 @@ async def list_signals(
         for signal in service.list_signals(
             workspace_id=workspace_id,
             watchlist_id=watchlist_id,
+            theme_id=theme_id,
             status=status,
             limit=limit,
         )

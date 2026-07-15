@@ -596,6 +596,7 @@ class InvestmentService:
         info_layer: str | None = None,
         action_status: str | None = None,
         watchlist_id: str | None = None,
+        theme_id: str | None = None,
         source_id: str | None = None,
         limit: int = 100,
     ) -> list[InvestmentItem]:
@@ -606,6 +607,8 @@ class InvestmentService:
             stmt = stmt.where(InvestmentItem.action_status == action_status)
         if source_id:
             stmt = stmt.where(InvestmentItem.source_id == source_id)
+        if theme_id:
+            stmt = stmt.where(InvestmentItem.theme_id == theme_id)
         if watchlist_id:
             sources = self.list_watchlist_sources(watchlist_id)
             source_ids = [source.id for source in sources]
@@ -708,6 +711,7 @@ class InvestmentService:
         self,
         workspace_id: str = "ws_default",
         watchlist_id: str | None = None,
+        theme_id: str | None = None,
         status: str | None = None,
         limit: int = 20,
     ) -> list[InvestmentSignal]:
@@ -716,6 +720,7 @@ class InvestmentService:
         return InvestmentSignalService(self.session).list_signals(
             workspace_id=workspace_id,
             watchlist_id=watchlist_id,
+            theme_id=theme_id,
             status=status,
             limit=limit,
         )

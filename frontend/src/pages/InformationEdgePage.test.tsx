@@ -77,4 +77,37 @@ describe("InformationEdgePage", () => {
     expect(screen.getByText("领先 18 小时")).toBeInTheDocument();
     expect(screen.getByText("likely_source")).toBeInTheDocument();
   });
+
+  it("uses theme_id from the URL as the signal scope", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/investment/information-edge")) {
+        return new Response(
+          JSON.stringify({
+            generated_at: "2026-07-15T00:00:00Z",
+            top_signals: [],
+            source_traces: [],
+            unvalidated_signals: [],
+            stale_or_noise: [],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={["/investment/edge?theme_id=theme_ai"]}>
+        <InformationEdgePage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("主题过滤：theme_ai")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("theme_id=theme_ai"),
+        expect.anything(),
+      );
+    });
+  });
 });

@@ -53,6 +53,7 @@ export type VerificationStatus =
 export interface InvestmentItem {
   id: string;
   workspace_id: string;
+  theme_id?: string | null;
   document_id?: string | null;
   source_id?: string | null;
   dedupe_key: string;
@@ -199,6 +200,7 @@ export interface InvestmentFact {
 export interface InvestmentSignal {
   id: string;
   workspace_id: string;
+  theme_id?: string | null;
   watchlist_id?: string | null;
   title: string;
   summary: string;
@@ -300,6 +302,7 @@ export interface ListItemsParams {
   infoLayer?: InfoLayer;
   actionStatus?: ActionStatus;
   watchlistId?: string;
+  themeId?: string;
   sourceId?: string;
   limit?: number;
 }
@@ -521,6 +524,7 @@ export const investmentApi = {
       info_layer: params.infoLayer,
       action_status: params.actionStatus,
       watchlist_id: params.watchlistId,
+      theme_id: params.themeId,
       source_id: params.sourceId,
       limit: params.limit,
     });
@@ -549,12 +553,14 @@ export const investmentApi = {
   listSignals(params: {
     workspaceId?: string;
     watchlistId?: string;
+    themeId?: string;
     status?: string;
     limit?: number;
   } = {}): Promise<InvestmentSignal[]> {
     const q = buildQuery({
       workspace_id: params.workspaceId ?? WS,
       watchlist_id: params.watchlistId,
+      theme_id: params.themeId,
       status: params.status,
       limit: params.limit ?? 20,
     });

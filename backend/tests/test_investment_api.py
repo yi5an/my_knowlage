@@ -20,6 +20,7 @@ from app.infrastructure.models import (
     InvestmentFact,
     InvestmentItem,
     InvestmentSignal,
+    InvestmentTheme,
     TaskJob,
     Workspace,
 )
@@ -239,6 +240,43 @@ def test_list_item_facts(client: TestClient, db_session: Session):
             "updated_at": response.json()[0]["updated_at"],
         }
     ]
+
+
+def test_list_items_can_filter_by_theme(client: TestClient, db_session: Session):
+    theme = InvestmentTheme(
+        id="theme_ai",
+        workspace_id="ws_default",
+        name="AI 算力",
+        theme_type="sector",
+        keywords=["NVIDIA"],
+        entities=["NVIDIA"],
+        tickers=["NVDA"],
+    )
+    matching = InvestmentItem(
+        id="inv_theme_match",
+        workspace_id="ws_default",
+        theme_id=theme.id,
+        dedupe_key="theme_match",
+        title="NVIDIA AI factories need more power",
+        info_layer="opinion",
+        source_credibility="personal_opinion",
+    )
+    other = InvestmentItem(
+        id="inv_theme_other",
+        workspace_id="ws_default",
+        dedupe_key="theme_other",
+        title="Unrelated macro note",
+        info_layer="macro_calendar",
+        source_credibility="official",
+    )
+    db_session.add_all([theme, matching, other])
+    db_session.commit()
+
+    response = client.get("/api/v1/investment/items?theme_id=theme_ai")
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == ["inv_theme_match"]
+    assert response.json()[0]["theme_id"] == "theme_ai"
 
 
 def test_list_facts_can_filter_by_source_watchlist_and_status(
@@ -500,6 +538,58 @@ def test_x_import_fact_extraction_flow_can_be_processed_and_read(
     assert len(claims.json()) == 1
     assert claims.json()[0]["thesis_id"] == thesis["id"]
     assert claims.json()[0]["claim_text"] == "总统宣布了一项新政策。"
+
+
+def test_list_signals_can_filter_by_theme(client: TestClient, db_session: Session):
+    db_session.add_all(
+        [
+            InvestmentTheme(
+                id="theme_ai",
+                workspace_id="ws_default",
+                name="AI 算力",
+                theme_type="sector",
+                keywords=["NVIDIA"],
+                entities=["NVIDIA"],
+                tickers=["NVDA"],
+            ),
+            InvestmentSignal(
+                id="sig_ai",
+                workspace_id="ws_default",
+                theme_id="theme_ai",
+                title="NVIDIA / capex_signal",
+                summary="AI capex signal",
+                signal_type="capex_signal",
+                first_seen_at=datetime.now(UTC),
+                last_seen_at=datetime.now(UTC),
+                source_count=2,
+                fact_ids=[],
+                item_ids=[],
+                confidence=0.8,
+                information_edge_score=0.7,
+            ),
+            InvestmentSignal(
+                id="sig_global",
+                workspace_id="ws_default",
+                title="Global / opinion",
+                summary="Unscoped chatter",
+                signal_type="opinion",
+                first_seen_at=datetime.now(UTC),
+                last_seen_at=datetime.now(UTC),
+                source_count=1,
+                fact_ids=[],
+                item_ids=[],
+                confidence=0.4,
+                information_edge_score=0.2,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/investment/signals?theme_id=theme_ai")
+
+    assert response.status_code == 200
+    assert [signal["id"] for signal in response.json()] == ["sig_ai"]
+    assert response.json()[0]["theme_id"] == "theme_ai"
 
 
 def test_item_response_includes_attachments_from_raw_payload(client: TestClient):

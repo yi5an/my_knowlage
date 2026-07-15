@@ -60,12 +60,15 @@ class InvestmentSignalService:
         self,
         workspace_id: str = "ws_default",
         watchlist_id: str | None = None,
+        theme_id: str | None = None,
         status: str | None = None,
         limit: int = 20,
     ) -> list[InvestmentSignal]:
         stmt = select(InvestmentSignal).where(InvestmentSignal.workspace_id == workspace_id)
         if watchlist_id is not None:
             stmt = stmt.where(InvestmentSignal.watchlist_id == watchlist_id)
+        if theme_id is not None:
+            stmt = stmt.where(InvestmentSignal.theme_id == theme_id)
         if status is not None:
             stmt = stmt.where(InvestmentSignal.status == status)
         stmt = stmt.order_by(
