@@ -186,6 +186,37 @@ a {
   font-weight: 700;
 }
 
+.investment-theme-context-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.investment-theme-context-card .ant-card-body,
+.investment-theme-context-card .ant-list,
+.investment-theme-context-card .ant-list-item,
+.investment-theme-context-card .ant-list-item-meta,
+.investment-theme-context-card .ant-list-item-meta-content {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.investment-theme-text-stack {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.investment-theme-text {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 0 !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+
 .drop-zone {
   display: grid;
   place-items: center;

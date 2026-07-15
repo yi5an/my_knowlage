@@ -211,7 +211,7 @@ export function InvestmentThemesPage() {
 
             <Row gutter={[16, 16]}>
               <Col xs={24} lg={8}>
-                <Card size="small" title="关联数据源">
+                <Card className="investment-theme-context-card" size="small" title="关联数据源">
                   {relatedSources.length === 0 && themeSources.length === 0 ? (
                     <Empty description="还没有绑定或产出数据源" />
                   ) : (
@@ -235,7 +235,11 @@ export function InvestmentThemesPage() {
                       renderItem={(source) => (
                         <List.Item>
                           <List.Item.Meta
-                            title={source.name}
+                            title={
+                              <Typography.Text className="investment-theme-text" strong>
+                                {source.name}
+                              </Typography.Text>
+                            }
                             description={
                               <Space wrap>
                                 <Tag>{source.source_type}</Tag>
@@ -253,7 +257,7 @@ export function InvestmentThemesPage() {
               </Col>
 
               <Col xs={24} lg={8}>
-                <Card size="small" title="最近主题信息">
+                <Card className="investment-theme-context-card" size="small" title="最近主题信息">
                   {themeItems.length === 0 ? (
                     <Empty description="还没有归入这个主题的信息" />
                   ) : (
@@ -263,9 +267,17 @@ export function InvestmentThemesPage() {
                       renderItem={(item) => (
                         <List.Item>
                           <List.Item.Meta
-                            title={item.title_zh ?? item.title}
+                            title={
+                              <Typography.Text className="investment-theme-text" strong>
+                                {item.title_zh ?? item.title}
+                              </Typography.Text>
+                            }
                             description={
-                              <Space direction="vertical" size={2}>
+                              <Space
+                                className="investment-theme-text-stack"
+                                direction="vertical"
+                                size={2}
+                              >
                                 <Space wrap>
                                   <InfoLayerTag layer={item.info_layer} />
                                   <Typography.Text type="secondary">
@@ -273,9 +285,13 @@ export function InvestmentThemesPage() {
                                   </Typography.Text>
                                 </Space>
                                 {(item.summary_zh ?? item.summary) && (
-                                  <Typography.Text type="secondary" ellipsis>
+                                  <Typography.Paragraph
+                                    className="investment-theme-text"
+                                    type="secondary"
+                                    ellipsis={{ rows: 2 }}
+                                  >
                                     {item.summary_zh ?? item.summary}
-                                  </Typography.Text>
+                                  </Typography.Paragraph>
                                 )}
                               </Space>
                             }
@@ -288,7 +304,7 @@ export function InvestmentThemesPage() {
               </Col>
 
               <Col xs={24} lg={8}>
-                <Card size="small" title="主题早期信号">
+                <Card className="investment-theme-context-card" size="small" title="主题早期信号">
                   {themeEdge.top_signals.length === 0 ? (
                     <Empty description="还没有聚合出主题信号" />
                   ) : (
@@ -298,10 +314,23 @@ export function InvestmentThemesPage() {
                       renderItem={(signal) => (
                         <List.Item>
                           <List.Item.Meta
-                            title={signal.title}
+                            title={
+                              <Typography.Text className="investment-theme-text" strong>
+                                {signal.title}
+                              </Typography.Text>
+                            }
                             description={
-                              <Space direction="vertical" size={2}>
-                                <Typography.Text>{signal.summary}</Typography.Text>
+                              <Space
+                                className="investment-theme-text-stack"
+                                direction="vertical"
+                                size={2}
+                              >
+                                <Typography.Paragraph
+                                  className="investment-theme-text"
+                                  ellipsis={{ rows: 3 }}
+                                >
+                                  {signal.summary}
+                                </Typography.Paragraph>
                                 <Space wrap>
                                   <Tag>{signal.signal_type}</Tag>
                                   <Tag color="blue">来源 {signal.source_count}</Tag>
