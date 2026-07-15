@@ -657,6 +657,7 @@ class InvestmentSignalResponse(BaseModel):
 
     id: str
     workspace_id: str
+    theme_id: str | None = None
     watchlist_id: str | None = None
     title: str
     summary: str

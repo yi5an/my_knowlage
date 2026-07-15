@@ -869,6 +869,7 @@ class InvestmentSignal(UpdatedTimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    theme_id: Mapped[str | None] = mapped_column(ForeignKey("investment_theme.id"))
     watchlist_id: Mapped[str | None] = mapped_column(ForeignKey("investment_watchlist.id"))
     title: Mapped[str] = mapped_column(Text(), nullable=False)
     summary: Mapped[str] = mapped_column(Text(), nullable=False)

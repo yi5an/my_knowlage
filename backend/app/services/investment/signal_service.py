@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -115,6 +115,7 @@ class InvestmentSignalService:
                 select(InvestmentItem).where(InvestmentItem.id.in_(item_ids))
             )
         )
+        theme_id = _dominant_theme_id(items)
         source_count = len(
             {
                 item.source_id or item.source_url or item.source_name or item.id
@@ -132,7 +133,7 @@ class InvestmentSignalService:
             latest_time = max((_item_seen_time(item) for item in items), default=None)
             if latest_time is not None and first_time is not None:
                 lead_time_hours = round(
-                    max(0.0, (latest_time - first_time).total_seconds() / 3600),
+                    min(72.0, max(0.0, (latest_time - first_time).total_seconds() / 3600)),
                     2,
                 )
         score = score_information_edge(
@@ -141,7 +142,7 @@ class InvestmentSignalService:
                 first_source_layer=first_source_layer,
                 source_layers=source_layers,
                 source_count=max(1, source_count),
-                theme_relevance=1.0 if group.watchlist_id else 0.6,
+                theme_relevance=1.0 if theme_id else 0.2,
                 validation_state="pending",
                 market_has_reacted=False,
             )
@@ -155,6 +156,7 @@ class InvestmentSignalService:
         return InvestmentSignal(
             id=_new_id("sig"),
             workspace_id=workspace_id,
+            theme_id=theme_id,
             watchlist_id=group.watchlist_id,
             title=title,
             summary=summary,
@@ -244,6 +246,13 @@ def _last_seen(facts: list[InvestmentFact]) -> datetime:
 
 def _item_seen_time(item: InvestmentItem) -> datetime:
     return item.published_at or item.created_at or datetime.now(UTC)
+
+
+def _dominant_theme_id(items: list[InvestmentItem]) -> str | None:
+    theme_ids = [item.theme_id for item in items if item.theme_id]
+    if not theme_ids:
+        return None
+    return Counter(theme_ids).most_common(1)[0][0]
 
 
 def _unique(values: list[str]) -> list[str]:

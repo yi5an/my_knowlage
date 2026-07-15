@@ -760,13 +760,14 @@ class InvestmentService:
         limit: int = 20,
     ) -> dict[str, Any]:
         signal_stmt = select(InvestmentSignal).where(
-            InvestmentSignal.workspace_id == workspace_id
+            InvestmentSignal.workspace_id == workspace_id,
+            InvestmentSignal.theme_id.is_not(None),
         )
         trace_stmt = select(InvestmentSourceTrace).where(
             InvestmentSourceTrace.workspace_id == workspace_id
         )
         if theme_id is not None:
-            signal_stmt = signal_stmt.where(InvestmentSignal.watchlist_id == theme_id)
+            signal_stmt = signal_stmt.where(InvestmentSignal.theme_id == theme_id)
             trace_stmt = trace_stmt.where(InvestmentSourceTrace.theme_id == theme_id)
         top_signals = list(
             self.session.scalars(
