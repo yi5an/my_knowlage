@@ -44,7 +44,12 @@ def upgrade() -> None:
         sa.Column("id", sa.String(64), primary_key=True),
         sa.Column("workspace_id", sa.String(64), sa.ForeignKey("workspace.id"), nullable=False),
         sa.Column("theme_id", sa.String(64), sa.ForeignKey("investment_theme.id"), nullable=False),
-        sa.Column("source_id", sa.String(64), sa.ForeignKey("investment_source.id"), nullable=False),
+        sa.Column(
+            "source_id",
+            sa.String(64),
+            sa.ForeignKey("investment_source.id"),
+            nullable=False,
+        ),
         sa.Column("source_layer", sa.String(32), nullable=False),
         sa.Column("priority", sa.Integer(), server_default="50", nullable=False),
         sa.Column("collector_type", sa.String(64)),
