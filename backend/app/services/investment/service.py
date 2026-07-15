@@ -12,38 +12,114 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
 
 from app.core.errors import AppError
 from app.infrastructure.models import (
     InvestmentClaim,
+    InvestmentDigestSnapshot,
+    InvestmentFact,
     InvestmentItem,
+    InvestmentPersonSource,
+    InvestmentSignal,
     InvestmentSource,
+    InvestmentSourceTrace,
+    InvestmentTheme,
+    InvestmentThemeSource,
     InvestmentThesis,
     InvestmentWatchlist,
     TaskJob,
 )
 from app.schemas.investment import (
     InvestmentClaimCreate,
+    InvestmentClaimResponse,
+    InvestmentClaimStatusAction,
     InvestmentClaimUpdate,
+    InvestmentDashboardResponse,
+    InvestmentDigestResponse,
+    InvestmentFactResponse,
     InvestmentFetchJobResponse,
     InvestmentItemCreate,
+    InvestmentItemResponse,
     InvestmentItemUpdate,
+    InvestmentSignalResponse,
     InvestmentSourceCreate,
     InvestmentSourceUpdate,
+    InvestmentThemeCreate,
+    InvestmentThemeUpdate,
     InvestmentThesisCreate,
     InvestmentThesisUpdate,
     InvestmentWatchlistCreate,
     InvestmentWatchlistUpdate,
+    PersonSourceCreate,
+    PersonSourceUpdate,
+    ThemeSourceBindRequest,
 )
+from app.services.investment.post_processing import enqueue_investment_post_processing
 from app.services.investment.repositories import InvestmentSourceRepository
 from app.services.investment.x_web import X_WEB_COLLECT_JOB_TYPE
 
 INVESTMENT_FETCH_JOB_TYPE = "investment_fetch"
+CHALLENGING_THESIS_IMPACTS = ("weakens", "contradicts")
+GOOGLE_NEWS_FALLBACK_DISABLED_MESSAGE = (
+    "Google News fallback disabled: X-first collection is enabled; "
+    "use X Web or official primary sources instead."
+)
+DEFAULT_X_SOURCES: tuple[dict[str, Any], ...] = (
+    {
+        "name": "POTUS 官方",
+        "config": {"mode": "account", "username": "POTUS", "max_items_per_poll": 50},
+    },
+    {
+        "name": "特朗普个人",
+        "config": {
+            "mode": "account",
+            "username": "realDonaldTrump",
+            "max_items_per_poll": 50,
+        },
+    },
+    {
+        "name": "NVIDIA 官方",
+        "config": {"mode": "account", "username": "nvidia", "max_items_per_poll": 50},
+    },
+    {
+        "name": "马斯克",
+        "config": {"mode": "account", "username": "elonmusk", "max_items_per_poll": 50},
+    },
+    {
+        "name": "美联储主题",
+        "config": {
+            "mode": "keyword",
+            "query": "Federal Reserve OR Fed OR FOMC",
+            "max_items_per_poll": 50,
+        },
+    },
+)
+
+
+def _challenged_item_filter():
+    return or_(
+        InvestmentItem.thesis_impact.in_(CHALLENGING_THESIS_IMPACTS),
+        InvestmentItem.suggested_thesis_impact.in_(CHALLENGING_THESIS_IMPACTS),
+    )
+
+
+def _is_google_news_rss_source(source_type: str, url: str | None) -> bool:
+    if source_type != "rss" or not url:
+        return False
+    parsed = urlparse(url)
+    return parsed.netloc.casefold() == "news.google.com" and parsed.path.startswith("/rss")
+
+
+def _apply_source_guardrails(source: InvestmentSource) -> None:
+    if _is_google_news_rss_source(source.source_type, source.url):
+        source.enabled = False
+        source.last_error = GOOGLE_NEWS_FALLBACK_DISABLED_MESSAGE
 
 
 def _new_id(prefix: str) -> str:
@@ -108,6 +184,215 @@ class InvestmentService:
         self.session.refresh(wl)
         return wl
 
+    def list_watchlist_sources(self, watchlist_id: str) -> list[InvestmentSource]:
+        wl = self.session.get(InvestmentWatchlist, watchlist_id)
+        if wl is None:
+            raise AppError("not_found", "watchlist not found", 404)
+        sources = self.list_sources(wl.workspace_id)
+        return [
+            source
+            for source in sources
+            if watchlist_id in [str(v) for v in (source.default_watchlist_ids or [])]
+        ]
+
+    def bind_source_to_watchlist(
+        self, watchlist_id: str, source_id: str
+    ) -> InvestmentSource:
+        wl = self.session.get(InvestmentWatchlist, watchlist_id)
+        if wl is None:
+            raise AppError("not_found", "watchlist not found", 404)
+        src = self.session.get(InvestmentSource, source_id)
+        if src is None or src.workspace_id != wl.workspace_id:
+            raise AppError("not_found", "source not found", 404)
+        ids = [str(v) for v in (src.default_watchlist_ids or [])]
+        if watchlist_id not in ids:
+            ids.append(watchlist_id)
+            src.default_watchlist_ids = ids
+            self.session.commit()
+            self.session.refresh(src)
+        return src
+
+    def unbind_source_from_watchlist(
+        self, watchlist_id: str, source_id: str
+    ) -> InvestmentSource:
+        wl = self.session.get(InvestmentWatchlist, watchlist_id)
+        if wl is None:
+            raise AppError("not_found", "watchlist not found", 404)
+        src = self.session.get(InvestmentSource, source_id)
+        if src is None or src.workspace_id != wl.workspace_id:
+            raise AppError("not_found", "source not found", 404)
+        ids = [str(v) for v in (src.default_watchlist_ids or [])]
+        next_ids = [v for v in ids if v != watchlist_id]
+        if next_ids != ids:
+            src.default_watchlist_ids = next_ids
+            self.session.commit()
+            self.session.refresh(src)
+        return src
+
+    # --- theme -------------------------------------------------------------
+
+    def create_theme(self, payload: InvestmentThemeCreate) -> InvestmentTheme:
+        theme = InvestmentTheme(
+            id=_new_id("theme"),
+            workspace_id=payload.workspace_id,
+            name=payload.name,
+            description=payload.description,
+            theme_type=str(payload.theme_type),
+            keywords=list(payload.keywords),
+            entities=list(payload.entities),
+            tickers=list(payload.tickers),
+            enabled=payload.enabled,
+            priority=payload.priority,
+        )
+        self.session.add(theme)
+        self.session.commit()
+        self.session.refresh(theme)
+        return theme
+
+    def list_themes(self, workspace_id: str = "ws_default") -> list[InvestmentTheme]:
+        return list(
+            self.session.scalars(
+                select(InvestmentTheme)
+                .where(InvestmentTheme.workspace_id == workspace_id)
+                .order_by(InvestmentTheme.priority.desc(), InvestmentTheme.name)
+            )
+        )
+
+    def update_theme(
+        self, theme_id: str, payload: InvestmentThemeUpdate
+    ) -> InvestmentTheme:
+        theme = self.session.get(InvestmentTheme, theme_id)
+        if theme is None:
+            raise AppError("not_found", "theme not found", 404)
+        for field in ("name", "description", "enabled", "priority"):
+            value = getattr(payload, field)
+            if value is not None:
+                setattr(theme, field, value)
+        if payload.theme_type is not None:
+            theme.theme_type = str(payload.theme_type)
+        for field in ("keywords", "entities", "tickers"):
+            value = getattr(payload, field)
+            if value is not None:
+                setattr(theme, field, list(value))
+        self.session.commit()
+        self.session.refresh(theme)
+        return theme
+
+    def bind_theme_source(
+        self,
+        theme_id: str,
+        payload: ThemeSourceBindRequest,
+        *,
+        workspace_id: str = "ws_default",
+    ) -> InvestmentThemeSource:
+        theme = self.session.get(InvestmentTheme, theme_id)
+        if theme is None or theme.workspace_id != workspace_id:
+            raise AppError("not_found", "theme not found", 404)
+        source = self.session.get(InvestmentSource, payload.source_id)
+        if source is None or source.workspace_id != workspace_id:
+            raise AppError("not_found", "source not found", 404)
+        existing = self.session.scalar(
+            select(InvestmentThemeSource).where(
+                InvestmentThemeSource.workspace_id == workspace_id,
+                InvestmentThemeSource.theme_id == theme_id,
+                InvestmentThemeSource.source_id == payload.source_id,
+            )
+        )
+        if existing is not None:
+            existing.source_layer = str(payload.source_layer)
+            existing.priority = payload.priority
+            existing.collector_type = payload.collector_type
+            existing.coverage_notes = payload.coverage_notes
+            existing.enabled = payload.enabled
+            self.session.commit()
+            self.session.refresh(existing)
+            return existing
+        binding = InvestmentThemeSource(
+            id=_new_id("themesrc"),
+            workspace_id=workspace_id,
+            theme_id=theme_id,
+            source_id=payload.source_id,
+            source_layer=str(payload.source_layer),
+            priority=payload.priority,
+            collector_type=payload.collector_type,
+            coverage_notes=payload.coverage_notes,
+            enabled=payload.enabled,
+        )
+        self.session.add(binding)
+        self.session.commit()
+        self.session.refresh(binding)
+        return binding
+
+    def list_theme_sources(
+        self, theme_id: str, workspace_id: str = "ws_default"
+    ) -> list[InvestmentThemeSource]:
+        return list(
+            self.session.scalars(
+                select(InvestmentThemeSource)
+                .where(
+                    InvestmentThemeSource.workspace_id == workspace_id,
+                    InvestmentThemeSource.theme_id == theme_id,
+                )
+                .order_by(InvestmentThemeSource.priority.desc())
+            )
+        )
+
+    def create_person_source(self, payload: PersonSourceCreate) -> InvestmentPersonSource:
+        person = InvestmentPersonSource(
+            id=_new_id("person"),
+            workspace_id=payload.workspace_id,
+            theme_ids=list(payload.theme_ids),
+            platform=payload.platform,
+            handle=payload.handle,
+            display_name=payload.display_name,
+            role_type=payload.role_type,
+            credibility=payload.credibility,
+            noise_level=payload.noise_level,
+            known_bias=payload.known_bias,
+            enabled=payload.enabled,
+        )
+        self.session.add(person)
+        self.session.commit()
+        self.session.refresh(person)
+        return person
+
+    def list_person_sources(
+        self, workspace_id: str = "ws_default", theme_id: str | None = None
+    ) -> list[InvestmentPersonSource]:
+        people = list(
+            self.session.scalars(
+                select(InvestmentPersonSource)
+                .where(InvestmentPersonSource.workspace_id == workspace_id)
+                .order_by(InvestmentPersonSource.credibility.desc())
+            )
+        )
+        if theme_id is None:
+            return people
+        return [person for person in people if theme_id in [str(v) for v in person.theme_ids]]
+
+    def update_person_source(
+        self, person_id: str, payload: PersonSourceUpdate
+    ) -> InvestmentPersonSource:
+        person = self.session.get(InvestmentPersonSource, person_id)
+        if person is None:
+            raise AppError("not_found", "person source not found", 404)
+        for field in (
+            "display_name",
+            "role_type",
+            "credibility",
+            "noise_level",
+            "known_bias",
+            "enabled",
+        ):
+            value = getattr(payload, field)
+            if value is not None:
+                setattr(person, field, value)
+        if payload.theme_ids is not None:
+            person.theme_ids = list(payload.theme_ids)
+        self.session.commit()
+        self.session.refresh(person)
+        return person
+
     # --- source ------------------------------------------------------------
 
     def create_source(self, payload: InvestmentSourceCreate) -> InvestmentSource:
@@ -123,6 +408,7 @@ class InvestmentService:
             poll_interval_seconds=payload.poll_interval_seconds,
             enabled=payload.enabled,
         )
+        _apply_source_guardrails(src)
         self.session.add(src)
         self.session.commit()
         self.session.refresh(src)
@@ -140,6 +426,40 @@ class InvestmentService:
     def get_source(self, source_id: str) -> InvestmentSource | None:
         return self.session.get(InvestmentSource, source_id)
 
+    def ensure_default_x_sources(
+        self,
+        workspace_id: str = "ws_default",
+    ) -> list[InvestmentSource]:
+        existing = [
+            source
+            for source in self.list_sources(workspace_id)
+            if source.source_type == "x_web"
+        ]
+        result: list[InvestmentSource] = []
+        for definition in DEFAULT_X_SOURCES:
+            config = dict(definition["config"])
+            source = next(
+                (
+                    candidate
+                    for candidate in existing
+                    if dict(candidate.config or {}) == config
+                ),
+                None,
+            )
+            if source is None:
+                source = self.create_source(
+                    InvestmentSourceCreate(
+                        workspace_id=workspace_id,
+                        source_type="x_web",
+                        name=str(definition["name"]),
+                        config=config,
+                        poll_interval_seconds=900,
+                    )
+                )
+                existing.append(source)
+            result.append(source)
+        return result
+
     def update_source(
         self, source_id: str, payload: InvestmentSourceUpdate
     ) -> InvestmentSource:
@@ -156,6 +476,7 @@ class InvestmentService:
             src.default_info_layer = str(payload.default_info_layer)
         if payload.default_watchlist_ids is not None:
             src.default_watchlist_ids = list(payload.default_watchlist_ids)
+        _apply_source_guardrails(src)
         self.session.commit()
         self.session.refresh(src)
         return src
@@ -196,6 +517,13 @@ class InvestmentService:
             )
         )
         if existing is not None:
+            enqueue_investment_post_processing(
+                self.session,
+                workspace_id=str(workspace_id),
+                target_type="investment_item",
+                target_id=existing.id,
+            )
+            self.session.commit()
             return existing
         item = InvestmentItem(
             id=_new_id("inv"),
@@ -211,6 +539,12 @@ class InvestmentService:
             raw_payload={"document_id": str(doc_id)},
         )
         self.session.add(item)
+        enqueue_investment_post_processing(
+            self.session,
+            workspace_id=str(workspace_id),
+            target_type="investment_item",
+            target_id=item.id,
+        )
         self.session.commit()
         self.session.refresh(item)
         return item
@@ -242,6 +576,12 @@ class InvestmentService:
             raw_payload=dict(payload.raw_payload),
         )
         self.session.add(item)
+        enqueue_investment_post_processing(
+            self.session,
+            workspace_id=payload.workspace_id,
+            target_type="investment_item",
+            target_id=item.id,
+        )
         try:
             self.session.commit()
         except Exception:
@@ -266,6 +606,12 @@ class InvestmentService:
             stmt = stmt.where(InvestmentItem.action_status == action_status)
         if source_id:
             stmt = stmt.where(InvestmentItem.source_id == source_id)
+        if watchlist_id:
+            sources = self.list_watchlist_sources(watchlist_id)
+            source_ids = [source.id for source in sources]
+            if not source_ids:
+                return []
+            stmt = stmt.where(InvestmentItem.source_id.in_(source_ids))
         stmt = stmt.order_by(InvestmentItem.published_at.desc().nullslast()).limit(limit)
         return list(self.session.scalars(stmt))
 
@@ -316,6 +662,142 @@ class InvestmentService:
         self.session.commit()
         self.session.refresh(item)
         return item
+
+    def list_item_facts(self, item_id: str) -> list[InvestmentFact]:
+        item = self.session.get(InvestmentItem, item_id)
+        if item is None:
+            raise AppError("not_found", "item not found", 404)
+        return list(
+            self.session.scalars(
+                select(InvestmentFact)
+                .where(
+                    InvestmentFact.workspace_id == item.workspace_id,
+                    InvestmentFact.source_item_id == item_id,
+                )
+                .order_by(InvestmentFact.confidence.desc(), InvestmentFact.created_at.desc())
+            )
+        )
+
+    def list_facts(
+        self,
+        workspace_id: str = "ws_default",
+        item_id: str | None = None,
+        source_id: str | None = None,
+        watchlist_id: str | None = None,
+        verification_status: str | None = None,
+        limit: int = 100,
+    ) -> list[InvestmentFact]:
+        stmt: Select[tuple[InvestmentFact]] = select(InvestmentFact)
+        if source_id is not None:
+            stmt = stmt.join(
+                InvestmentItem, InvestmentItem.id == InvestmentFact.source_item_id
+            ).where(InvestmentItem.source_id == source_id)
+        stmt = stmt.where(InvestmentFact.workspace_id == workspace_id)
+        if item_id is not None:
+            stmt = stmt.where(InvestmentFact.source_item_id == item_id)
+        if watchlist_id is not None:
+            stmt = stmt.where(InvestmentFact.watchlist_id == watchlist_id)
+        if verification_status is not None:
+            stmt = stmt.where(InvestmentFact.verification_status == verification_status)
+        stmt = stmt.order_by(
+            InvestmentFact.confidence.desc(), InvestmentFact.created_at.desc()
+        ).limit(limit)
+        return list(self.session.scalars(stmt))
+
+    def list_signals(
+        self,
+        workspace_id: str = "ws_default",
+        watchlist_id: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[InvestmentSignal]:
+        from app.services.investment.signal_service import InvestmentSignalService
+
+        return InvestmentSignalService(self.session).list_signals(
+            workspace_id=workspace_id,
+            watchlist_id=watchlist_id,
+            status=status,
+            limit=limit,
+        )
+
+    def refresh_signals(
+        self,
+        workspace_id: str = "ws_default",
+        watchlist_id: str | None = None,
+    ) -> list[InvestmentSignal]:
+        from app.services.investment.signal_service import InvestmentSignalService
+
+        return InvestmentSignalService(self.session).refresh_signals(
+            workspace_id=workspace_id,
+            watchlist_id=watchlist_id,
+        )
+
+    def list_source_traces(
+        self,
+        *,
+        workspace_id: str = "ws_default",
+        theme_id: str | None = None,
+        target_item_id: str | None = None,
+        limit: int = 50,
+    ) -> list[InvestmentSourceTrace]:
+        stmt = select(InvestmentSourceTrace).where(
+            InvestmentSourceTrace.workspace_id == workspace_id
+        )
+        if theme_id is not None:
+            stmt = stmt.where(InvestmentSourceTrace.theme_id == theme_id)
+        if target_item_id is not None:
+            stmt = stmt.where(InvestmentSourceTrace.target_item_id == target_item_id)
+        return list(
+            self.session.scalars(
+                stmt.order_by(InvestmentSourceTrace.confidence.desc()).limit(limit)
+            )
+        )
+
+    def information_edge_digest(
+        self,
+        workspace_id: str = "ws_default",
+        theme_id: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        signal_stmt = select(InvestmentSignal).where(
+            InvestmentSignal.workspace_id == workspace_id
+        )
+        trace_stmt = select(InvestmentSourceTrace).where(
+            InvestmentSourceTrace.workspace_id == workspace_id
+        )
+        if theme_id is not None:
+            signal_stmt = signal_stmt.where(InvestmentSignal.watchlist_id == theme_id)
+            trace_stmt = trace_stmt.where(InvestmentSourceTrace.theme_id == theme_id)
+        top_signals = list(
+            self.session.scalars(
+                signal_stmt.order_by(
+                    InvestmentSignal.information_edge_score.desc(),
+                    InvestmentSignal.last_seen_at.desc(),
+                ).limit(limit)
+            )
+        )
+        traces = list(
+            self.session.scalars(
+                trace_stmt.order_by(
+                    InvestmentSourceTrace.confidence.desc(),
+                    InvestmentSourceTrace.lead_time_hours.desc().nullslast(),
+                ).limit(limit)
+            )
+        )
+        return {
+            "generated_at": datetime.now(UTC),
+            "top_signals": top_signals,
+            "source_traces": traces,
+            "unvalidated_signals": [
+                signal for signal in top_signals if signal.validation_state == "pending"
+            ],
+            "stale_or_noise": [
+                signal
+                for signal in top_signals
+                if signal.signal_stage in {"stale", "noise"}
+                or signal.actionability == "noise"
+            ],
+        }
 
     # --- thesis ------------------------------------------------------------
 
@@ -406,6 +888,26 @@ class InvestmentService:
             cl.verification_summary = payload.verification_summary
         if payload.evidence_doc_ids is not None:
             cl.evidence_doc_ids = list(payload.evidence_doc_ids)
+        self.session.commit()
+        self.session.refresh(cl)
+        return cl
+
+    def set_claim_status(
+        self, claim_id: str, payload: InvestmentClaimStatusAction
+    ) -> InvestmentClaim:
+        cl = self.session.get(InvestmentClaim, claim_id)
+        if cl is None:
+            raise AppError("not_found", "claim not found", 404)
+        if payload.thesis_id is not None:
+            thesis = self.session.get(InvestmentThesis, payload.thesis_id)
+            if thesis is None:
+                raise AppError("not_found", "thesis not found", 404)
+            cl.thesis_id = thesis.id
+            if cl.watchlist_id is None:
+                cl.watchlist_id = thesis.watchlist_id
+        cl.verification_status = str(payload.verification_status)
+        if payload.verification_summary is not None:
+            cl.verification_summary = payload.verification_summary
         self.session.commit()
         self.session.refresh(cl)
         return cl
@@ -559,7 +1061,7 @@ class InvestmentService:
         theses_challenged = _count(
             select(func.count(InvestmentItem.id)).where(
                 InvestmentItem.workspace_id == workspace_id,
-                InvestmentItem.thesis_impact.in_(("weakens", "contradicts")),
+                _challenged_item_filter(),
             )
         )
         today_primary = _count(
@@ -578,57 +1080,146 @@ class InvestmentService:
                 InvestmentItem.published_at < tomorrow_start,
             )
         )
+        untranslated = _count(
+            select(func.count(InvestmentItem.id)).where(
+                InvestmentItem.workspace_id == workspace_id,
+                (InvestmentItem.title_zh.is_(None))
+                | (
+                    InvestmentItem.summary.is_not(None)
+                    & InvestmentItem.summary_zh.is_(None)
+                ),
+            )
+        )
+        unextracted = _count(
+            select(func.count(InvestmentItem.id)).where(
+                InvestmentItem.workspace_id == workspace_id,
+                ~exists().where(InvestmentFact.source_item_id == InvestmentItem.id),
+            )
+        )
+        pending_fact_ids = set(
+            self.session.scalars(
+                select(InvestmentFact.id).where(
+                    InvestmentFact.workspace_id == workspace_id,
+                    InvestmentFact.verification_status == "pending",
+                )
+            ).all()
+        )
+        signaled_fact_ids: set[str] = set()
+        for fact_ids in self.session.scalars(
+            select(InvestmentSignal.fact_ids).where(InvestmentSignal.workspace_id == workspace_id)
+        ):
+            signaled_fact_ids.update(str(fact_id) for fact_id in fact_ids or [])
+        unsignaled = len(pending_fact_ids - signaled_fact_ids)
+        failed_jobs = _count(
+            select(func.count(TaskJob.id)).where(
+                TaskJob.workspace_id == workspace_id,
+                TaskJob.status.in_(("failed", "retrying")),
+                TaskJob.job_type.in_(
+                    (
+                        INVESTMENT_FETCH_JOB_TYPE,
+                        X_WEB_COLLECT_JOB_TYPE,
+                        "investment_translation",
+                        "investment_classification",
+                        "investment_fact_extract",
+                        "youtube_summary",
+                    )
+                ),
+            )
+        )
         return {
             "pending_review_count": pending_review,
             "pending_claims_count": pending_claims,
             "theses_challenged_count": theses_challenged,
             "today_primary_count": today_primary,
             "today_macro_count": today_macro,
+            "untranslated_count": untranslated,
+            "unextracted_count": unextracted,
+            "unsignaled_count": unsignaled,
+            "failed_job_count": failed_jobs,
         }
 
-    def digest(self, workspace_id: str = "ws_default") -> dict[str, Any]:
+    def digest(
+        self,
+        workspace_id: str = "ws_default",
+        watchlist_id: str | None = None,
+    ) -> dict[str, Any]:
         """Aggregate daily digest: counts + today's highlights + pending claims
         + challenged items. Pure aggregation over existing rows — no LLM, no
         separate digest table (spec decision: aggregate view).
         """
         counts = self.dashboard(workspace_id)
         today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        source_ids: list[str] | None = None
+        if watchlist_id is not None:
+            source_ids = [source.id for source in self.list_watchlist_sources(watchlist_id)]
 
+        highlights_stmt = select(InvestmentItem).where(
+            InvestmentItem.workspace_id == workspace_id,
+            InvestmentItem.published_at >= today_start,
+        )
+        if source_ids is not None:
+            if not source_ids:
+                highlights_stmt = highlights_stmt.where(False)
+            else:
+                highlights_stmt = highlights_stmt.where(InvestmentItem.source_id.in_(source_ids))
         today_highlights = list(
             self.session.scalars(
-                select(InvestmentItem)
-                .where(
-                    InvestmentItem.workspace_id == workspace_id,
-                    InvestmentItem.published_at >= today_start,
-                )
-                .order_by(
-                    # high importance first, then most recent
+                highlights_stmt.order_by(
                     InvestmentItem.importance.desc(),
                     InvestmentItem.published_at.desc().nullslast(),
-                )
-                .limit(10)
+                ).limit(10)
             )
         )
+        claims_stmt = select(InvestmentClaim).where(
+            InvestmentClaim.workspace_id == workspace_id,
+            InvestmentClaim.verification_status == "pending",
+        )
+        if watchlist_id is not None:
+            claims_stmt = claims_stmt.where(InvestmentClaim.watchlist_id == watchlist_id)
         pending_claims = list(
             self.session.scalars(
-                select(InvestmentClaim)
-                .where(
-                    InvestmentClaim.workspace_id == workspace_id,
-                    InvestmentClaim.verification_status == "pending",
-                )
-                .order_by(InvestmentClaim.created_at.desc())
-                .limit(5)
+                claims_stmt.order_by(InvestmentClaim.created_at.desc()).limit(5)
             )
         )
+        challenged_stmt = select(InvestmentItem).where(
+            InvestmentItem.workspace_id == workspace_id,
+            _challenged_item_filter(),
+        )
+        if source_ids is not None:
+            if not source_ids:
+                challenged_stmt = challenged_stmt.where(False)
+            else:
+                challenged_stmt = challenged_stmt.where(InvestmentItem.source_id.in_(source_ids))
         challenged_items = list(
             self.session.scalars(
-                select(InvestmentItem)
-                .where(
-                    InvestmentItem.workspace_id == workspace_id,
-                    InvestmentItem.thesis_impact.in_(("weakens", "contradicts")),
-                )
-                .order_by(InvestmentItem.published_at.desc().nullslast())
-                .limit(5)
+                challenged_stmt.order_by(InvestmentItem.published_at.desc().nullslast()).limit(5)
+            )
+        )
+        signals_stmt = select(InvestmentSignal).where(
+            InvestmentSignal.workspace_id == workspace_id,
+            InvestmentSignal.status == "tracking",
+        )
+        if watchlist_id is not None:
+            signals_stmt = signals_stmt.where(InvestmentSignal.watchlist_id == watchlist_id)
+        early_signals = list(
+            self.session.scalars(
+                signals_stmt.order_by(
+                    InvestmentSignal.last_seen_at.desc(),
+                    InvestmentSignal.confidence.desc(),
+                ).limit(5)
+            )
+        )
+        facts_stmt = select(InvestmentFact).where(
+            InvestmentFact.workspace_id == workspace_id,
+            InvestmentFact.verification_status == "pending",
+        )
+        if watchlist_id is not None:
+            facts_stmt = facts_stmt.where(InvestmentFact.watchlist_id == watchlist_id)
+        pending_facts = list(
+            self.session.scalars(
+                facts_stmt.order_by(
+                    InvestmentFact.confidence.desc(), InvestmentFact.created_at.desc()
+                ).limit(10)
             )
         )
         return {
@@ -636,4 +1227,71 @@ class InvestmentService:
             "today_highlights": today_highlights,
             "pending_claims": pending_claims,
             "challenged_items": challenged_items,
+            "early_signals": early_signals,
+            "pending_facts": pending_facts,
         }
+
+    def create_digest_snapshot(
+        self,
+        workspace_id: str = "ws_default",
+        watchlist_id: str | None = None,
+    ) -> InvestmentDigestSnapshot:
+        digest_data = self.digest(workspace_id, watchlist_id=watchlist_id)
+        digest = _digest_response_from_data(digest_data).model_dump(mode="json")
+        now = datetime.now(UTC)
+        title = "每日简报"
+        if watchlist_id is not None:
+            watchlist = self.session.get(InvestmentWatchlist, watchlist_id)
+            if watchlist is not None:
+                title = f"{watchlist.name} 每日简报"
+        snapshot = InvestmentDigestSnapshot(
+            id=_new_id("dig"),
+            workspace_id=workspace_id,
+            watchlist_id=watchlist_id,
+            digest_date=now,
+            title=title,
+            digest=digest,
+        )
+        self.session.add(snapshot)
+        self.session.commit()
+        self.session.refresh(snapshot)
+        return snapshot
+
+    def list_digest_snapshots(
+        self,
+        workspace_id: str = "ws_default",
+        watchlist_id: str | None = None,
+        limit: int = 20,
+    ) -> list[InvestmentDigestSnapshot]:
+        stmt = select(InvestmentDigestSnapshot).where(
+            InvestmentDigestSnapshot.workspace_id == workspace_id
+        )
+        if watchlist_id is not None:
+            stmt = stmt.where(InvestmentDigestSnapshot.watchlist_id == watchlist_id)
+        return list(
+            self.session.scalars(
+                stmt.order_by(InvestmentDigestSnapshot.digest_date.desc()).limit(limit)
+            )
+        )
+
+
+def _digest_response_from_data(data: dict[str, Any]) -> InvestmentDigestResponse:
+    return InvestmentDigestResponse(
+        counts=InvestmentDashboardResponse(**data["counts"]),
+        today_highlights=[
+            InvestmentItemResponse.model_validate(i) for i in data["today_highlights"]
+        ],
+        pending_claims=[
+            InvestmentClaimResponse.model_validate(c) for c in data["pending_claims"]
+        ],
+        challenged_items=[
+            InvestmentItemResponse.model_validate(i) for i in data["challenged_items"]
+        ],
+        early_signals=[
+            InvestmentSignalResponse.model_validate(signal)
+            for signal in data["early_signals"]
+        ],
+        pending_facts=[
+            InvestmentFactResponse.model_validate(fact) for fact in data["pending_facts"]
+        ],
+    )

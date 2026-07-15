@@ -13,6 +13,7 @@ from app.infrastructure.database import Base, get_db_session
 from app.infrastructure.models import InvestmentItem, TaskJob, Workspace
 from app.main import app
 from app.schemas.investment import InvestmentSourceCreate
+from app.services.investment.fetch_job_handler import INVESTMENT_TRANSLATION_JOB_TYPE
 from app.services.investment.investment_dependencies import get_investment_service
 from app.services.investment.service import InvestmentService
 
@@ -170,6 +171,37 @@ def test_x_post_import_is_idempotent_and_refreshes_metrics(
     assert items[0].raw_payload["metrics"]["like_count"] == 2
     assert items[0].summary == "Test post"
     assert items[0].source_credibility == "personal_opinion"
+
+
+def test_x_post_import_enqueues_translation_job(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    source = _create_x_source(client)
+
+    response = client.post(
+        "/api/v1/investment/import/x-posts",
+        json={
+            "source_id": source["id"],
+            "collector_id": "collector_test",
+            "items": [_post("2075367885438890135")],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    translation_jobs = list(
+        db_session.scalars(
+            select(TaskJob).where(TaskJob.job_type == INVESTMENT_TRANSLATION_JOB_TYPE)
+        )
+    )
+    assert len(translation_jobs) == 1
+    assert translation_jobs[0].status == "pending"
+    assert translation_jobs[0].workspace_id == "ws_default"
+    assert translation_jobs[0].target_id == source["id"]
+    assert translation_jobs[0].input == {
+        "source_id": source["id"],
+        "workspace_id": "ws_default",
+    }
 
 
 def test_x_post_import_keeps_valid_rows_when_one_row_is_invalid(client: TestClient) -> None:

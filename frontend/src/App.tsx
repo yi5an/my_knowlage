@@ -24,12 +24,14 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { EntityPage } from "./pages/EntityPage";
 import { GraphPage } from "./pages/GraphPage";
 import { ImportPage } from "./pages/ImportPage";
+import { InformationEdgePage } from "./pages/InformationEdgePage";
 import { InvestmentCalendarPage } from "./pages/InvestmentCalendarPage";
 import { InvestmentClaimsPage } from "./pages/InvestmentClaimsPage";
 import { InvestmentDashboardPage } from "./pages/InvestmentDashboardPage";
 import { InvestmentDigestPage } from "./pages/InvestmentDigestPage";
 import { InvestmentItemsPage } from "./pages/InvestmentItemsPage";
 import { InvestmentSourcesPage } from "./pages/InvestmentSourcesPage";
+import { InvestmentThemesPage } from "./pages/InvestmentThemesPage";
 import { InvestmentThesesPage } from "./pages/InvestmentThesesPage";
 import { InvestmentWatchlistPage } from "./pages/InvestmentWatchlistPage";
 import { LibraryPage } from "./pages/LibraryPage";
@@ -56,6 +58,8 @@ const navItems: MenuProps["items"] = [
   { key: "/research", icon: <FileSearchOutlined />, label: <Link to="/research">研究</Link> },
   { key: "/entity", icon: <StockOutlined />, label: <Link to="/entity">实体</Link> },
   { key: "/investment", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment">投资工作台</Link> },
+  { key: "/investment/edge", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/edge">信息差系统</Link> },
+  { key: "/investment/themes", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/themes">主题中心</Link> },
   { key: "/investment/watchlist", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/watchlist">观察对象</Link> },
   { key: "/investment/items", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/items">投资信息</Link> },
   { key: "/investment/sources", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/sources">投资数据源</Link> },
@@ -137,6 +141,8 @@ export function App() {
             <Route path="/entity" element={<EntityPage />} />
             <Route path="/entity/:entityId" element={<EntityPage />} />
             <Route path="/investment" element={<InvestmentDashboardPage />} />
+            <Route path="/investment/edge" element={<InformationEdgePage />} />
+            <Route path="/investment/themes" element={<InvestmentThemesPage />} />
             <Route path="/investment/watchlist" element={<InvestmentWatchlistPage />} />
             <Route path="/investment/items" element={<InvestmentItemsPage />} />
             <Route path="/investment/sources" element={<InvestmentSourcesPage />} />

@@ -16,12 +16,18 @@ from app.schemas.youtube import (
     SummaryResult,
     Transcript,
     TranscriptSegment,
+    VideoChunk,
 )
 from app.services.structured_output import (
     MockStructuredOutputClient,
     StructuredOutputError,
 )
-from app.services.youtube.summary import SummaryService
+from app.services.youtube.summary import (
+    SummaryService,
+    build_chunk_summary_prompt,
+    build_merge_prompt,
+    build_summary_prompt,
+)
 
 
 def _transcript(segments: list[tuple[str, float, float]]) -> Transcript:
@@ -51,6 +57,33 @@ def _long_transcript() -> Transcript:
     )
 
 
+def test_single_summary_prompt_requires_simplified_chinese() -> None:
+    transcript = _transcript([("hello world", 0, 5)])
+    prompt = build_summary_prompt("English title", transcript, chapters=[])
+    assert "最终输出必须使用简体中文" in prompt
+    assert "不要跟随字幕语言输出英文" in prompt
+
+
+def test_chunk_and_merge_prompts_require_simplified_chinese() -> None:
+    transcript = _transcript([("hello world", 0, 5), ("more content", 10, 5)])
+    chunk = VideoChunk(index=0, start_sec=0, end_sec=30, content="hello world")
+    chunk_prompt = build_chunk_summary_prompt("English title", chunk, transcript)
+    assert "最终输出必须使用简体中文" in chunk_prompt
+
+    chunk_summary = ChunkSummary(
+        section_summary="English section",
+        key_points=[KeyPoint(point="English point", timestamp=0, timestamp_str="00:00")],
+    )
+    merge_prompt = build_merge_prompt(
+        "English title",
+        [chunk_summary],
+        chapters=[],
+        transcript_source="manual",
+        visual_frames=None,
+    )
+    assert "最终输出必须使用简体中文" in merge_prompt
+
+
 class CallCountingClient(MockStructuredOutputClient):
     """Tracks how many times generate() was called per schema type."""
 
@@ -78,6 +111,56 @@ def test_short_transcript_uses_single_call() -> None:
     # which fails on this mock and falls back to the deterministic builder).
     assert client.calls == [SummaryResult, MindmapData]
     assert summary.tldr == "ok"
+
+
+def test_english_summary_is_localized_after_generation() -> None:
+    transcript = _transcript(
+        [
+            ("AI infrastructure demand remains strong.", 0, 5),
+            ("Investors should avoid leverage during volatility.", 10, 5),
+        ]
+    )
+
+    class LocalizingClient(MockStructuredOutputClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.summary_calls = 0
+
+        def generate(self, prompt, schema):  # type: ignore[no-untyped-def]
+            if schema is SummaryResult:
+                self.summary_calls += 1
+                if self.summary_calls == 1:
+                    return SummaryResult(
+                        tldr=(
+                            "The video explains why AI infrastructure demand remains "
+                            "strong despite recent market volatility."
+                        ),
+                        key_points=[
+                            KeyPoint(
+                                point="Investors should avoid leverage during volatility.",
+                                timestamp=10,
+                                timestamp_str="00:10",
+                            )
+                        ],
+                    )
+                assert "翻译成简体中文" in prompt
+                return SummaryResult(
+                    tldr="视频解释了近期市场波动下 AI 基础设施需求仍然强劲。",
+                    key_points=[
+                        KeyPoint(
+                            point="投资者应在波动期间避免使用杠杆。",
+                            timestamp=10,
+                            timestamp_str="00:10",
+                        )
+                    ],
+                )
+            return super().generate(prompt, schema)
+
+    client = LocalizingClient()
+    summary, _ = SummaryService(client).summarize("AI market update", transcript)
+
+    assert client.summary_calls == 2
+    assert summary.tldr == "视频解释了近期市场波动下 AI 基础设施需求仍然强劲。"
 
 
 def test_long_transcript_triggers_map_reduce() -> None:

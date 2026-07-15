@@ -193,10 +193,12 @@ class VideoSummaryOrchestrator:
         # Translate non-Chinese transcripts to Chinese before chunking, so the
         # summary is produced from Chinese (best model understanding). Skipped
         # for Chinese sources; failures fall back to the source transcript.
+        translation_warning: str | None = None
         if self.translation_service is not None:
             transcript = self.translation_service.translate(
                 transcript, enabled=self.translate_enabled
             )
+            translation_warning = getattr(self.translation_service, "last_warning", None)
 
         chunks = chunk_transcript(transcript, chapters=meta.chapters)
         document = self._persist_document(
@@ -206,6 +208,8 @@ class VideoSummaryOrchestrator:
             transcript=transcript,
             chunks=chunks,
         )
+        if translation_warning:
+            self._record_translation_warning(video, document, translation_warning)
         try:
             summary, mindmap = self.summary_service.summarize(
                 title=meta.title,
@@ -300,6 +304,22 @@ class VideoSummaryOrchestrator:
             video.metadata_ = metadata
             self.session.commit()
             return []
+
+    def _record_translation_warning(
+        self,
+        video: Video,
+        document: Document,
+        warning: str,
+    ) -> None:
+        video_metadata = dict(video.metadata_ or {})
+        video_metadata["translation_warning"] = warning
+        video.metadata_ = video_metadata
+
+        document_metadata = dict(document.metadata_ or {})
+        document_metadata["translation_warning"] = warning
+        document_metadata["summary_language"] = "zh"
+        document.metadata_ = document_metadata
+        self.session.commit()
 
     def _extract_transcript(
         self,

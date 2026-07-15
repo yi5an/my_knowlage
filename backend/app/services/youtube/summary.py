@@ -30,12 +30,15 @@ from app.services.structured_output import (
     StructuredOutputClient,
 )
 from app.services.youtube.chapters import seconds_to_str
+from app.services.youtube.localization import needs_chinese_localization
 
 logger = logging.getLogger(__name__)
 
 _SUMMARY_SYSTEM_HINT = (
-    "Summarize the video transcript following the rules in the system schema. "
-    "Use the same language as the transcript for all generated text."
+    "你是一个面向中文投资研究工作流的视频总结助手。"
+    "无论字幕、标题、视觉资料或章节是什么语言，最终输出必须使用简体中文。"
+    "不要跟随字幕语言输出英文；保留必要的公司名、产品名、股票代码和专有名词原文。"
+    "所有 SummaryResult、ChunkSummary、MindmapData 字段中的自然语言内容都要中文化。"
 )
 
 
@@ -96,7 +99,20 @@ def build_summary_prompt(
         f"Transcript:\n{_format_transcript(transcript)}\n\n"
         "Produce the summary JSON now. Use visual evidence when it adds facts "
         "that are missing from the transcript, but keep timestamps grounded in "
-        "the transcript or visual frame timestamps."
+        "the transcript or visual frame timestamps. "
+        "最终输出必须使用简体中文。不要输出英文总结。"
+    )
+
+
+def build_summary_localization_prompt(summary: SummaryResult) -> str:
+    return (
+        f"{_SUMMARY_SYSTEM_HINT}\n\n"
+        "下面是一次已经生成好的 SummaryResult JSON，但自然语言内容仍然不是简体中文。"
+        "请把 tldr、key_points.point、quotes.text、chapters.title、tags 中的自然语言"
+        "翻译成简体中文。\n"
+        "要求：保留 timestamp、timestamp_str、transcript_source、股票代码、公司名、产品名、URL "
+        "和必要英文专有名词；不要新增事实；不要改动字段结构；输出合法 SummaryResult JSON。\n\n"
+        f"待中文化 SummaryResult:\n{summary.model_dump_json()}"
     )
 
 
@@ -244,9 +260,26 @@ class SummaryService:
         else:
             prompt = build_summary_prompt(title, transcript, chapters, visual_frames)
             summary = self.llm_client.generate(prompt, SummaryResult)
+        summary = self._ensure_chinese_summary(summary)
         summary = _sanitize_timestamps(summary, int(transcript.total_duration_sec))
         mindmap = self._build_mindmap(title, summary, chapters)
         return summary, mindmap
+
+    def _ensure_chinese_summary(self, summary: SummaryResult) -> SummaryResult:
+        if not needs_chinese_localization(summary):
+            return summary
+        try:
+            localized = self.llm_client.generate(
+                build_summary_localization_prompt(summary),
+                SummaryResult,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("summary localization failed, keeping original: %s", exc)
+            return summary
+        if needs_chinese_localization(localized):
+            logger.warning("summary localization still looks non-Chinese, keeping original")
+            return summary
+        return localized
 
     def _build_mindmap(
         self, title: str, summary: SummaryResult, chapters: list[Chapter]
@@ -367,7 +400,8 @@ def build_chunk_summary_prompt(
         "Extract the 1-5 most important key points and up to 3 notable quotes "
         "from THIS section. Timestamps MUST be absolute (seconds from video "
         "start) and drawn from the transcript. Provide a one-sentence "
-        "section_summary. Output the ChunkSummary JSON now."
+        "section_summary. Output the ChunkSummary JSON now. "
+        "最终输出必须使用简体中文。不要输出英文总结。"
     )
 
 
@@ -401,7 +435,8 @@ def build_merge_prompt(
         f"Per-section notes:\n{merged_text}\n\n"
         "Synthesize these into the final SummaryResult: a single TL;DR, 3-6 "
         "deduplicated key points (keep original timestamps), 1-3 best quotes, "
-        "and 2-6 tags. Do not invent new timestamps. Output the SummaryResult JSON now."
+        "and 2-6 tags. Do not invent new timestamps. Output the SummaryResult JSON now. "
+        "最终输出必须使用简体中文。不要输出英文总结。"
     )
 
 

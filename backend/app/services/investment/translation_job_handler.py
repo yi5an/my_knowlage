@@ -20,8 +20,6 @@ from app.services.structured_output import StructuredOutputClient
 
 logger = logging.getLogger(__name__)
 
-INVESTMENT_TRANSLATION_JOB_TYPE = "investment_translation"
-
 
 class InvestmentTranslationJobHandler:
     """Translate all untranslated items in the job's workspace."""
@@ -34,6 +32,7 @@ class InvestmentTranslationJobHandler:
     ) -> dict[str, Any]:
         workspace_id = (job.input or {}).get("workspace_id") or job.workspace_id
         source_id = (job.input or {}).get("source_id")
+        item_id = (job.input or {}).get("item_id")
 
         # Limit per job to keep each call bounded; the fetch scheduler will
         # enqueue more translation jobs if many items are pending.
@@ -42,16 +41,24 @@ class InvestmentTranslationJobHandler:
         ).translate_untranslated(
             workspace_id=workspace_id,
             limit=20,
+            source_id=source_id,
+            item_id=item_id,
             raise_on_failure=True,
         )
 
         logger.info(
-            "investment translation job %s (source=%s): %s",
+            "investment translation job %s (source=%s item=%s): %s",
             job.id,
             source_id,
+            item_id,
             result,
         )
-        return {"source_id": source_id, "workspace_id": workspace_id, **result}
+        return {
+            "source_id": source_id,
+            "item_id": item_id,
+            "workspace_id": workspace_id,
+            **result,
+        }
 
 
 _HANDLER = InvestmentTranslationJobHandler()

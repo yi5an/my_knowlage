@@ -18,6 +18,9 @@ describe("InvestmentSourcesPage", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const u = String(url);
+        if (u.includes("/investment/watchlist")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
         if (u.includes("/investment/sources")) {
           return new Response(JSON.stringify([]), { status: 200 });
         }
@@ -89,7 +92,11 @@ describe("InvestmentSourcesPage", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (String(url).includes("/investment/sources")) {
+        const u = String(url);
+        if (u.includes("/investment/watchlist")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (u.includes("/investment/sources")) {
           return new Response(JSON.stringify([]), { status: 200 });
         }
         return new Response(
@@ -110,5 +117,125 @@ describe("InvestmentSourcesPage", () => {
     renderPage();
 
     expect(await screen.findByText("X 网页采集器：需要重新登录")).toBeInTheDocument();
+  });
+
+  it("shows source watchlist binding labels", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/investment/watchlist")) {
+          return new Response(
+            JSON.stringify([
+              {
+                id: "wl_nvda",
+                workspace_id: "ws_default",
+                name: "NVIDIA",
+                watch_type: "company",
+                keywords: [],
+                importance: "high",
+                enabled: true,
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/sources")) {
+          return new Response(
+            JSON.stringify([
+              {
+                id: "src_nvda",
+                workspace_id: "ws_default",
+                source_type: "x_web",
+                name: "NVIDIA X",
+                config: { mode: "account", username: "nvidia" },
+                default_info_layer: "opinion",
+                default_watchlist_ids: ["wl_nvda"],
+                poll_interval_seconds: 900,
+                enabled: true,
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/x-collector/states")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("NVIDIA X")).toBeInTheDocument();
+    expect(screen.getByText("NVIDIA")).toBeInTheDocument();
+  });
+
+  it("creates default X sources from the sources page", async () => {
+    let defaultsCreated = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/investment/sources/defaults") && init?.method === "POST") {
+        defaultsCreated = true;
+        return new Response(
+          JSON.stringify([
+            {
+              id: "src_potus",
+              workspace_id: "ws_default",
+              source_type: "x_web",
+              name: "POTUS 官方",
+              config: { mode: "account", username: "POTUS" },
+              default_info_layer: "opinion",
+              default_watchlist_ids: [],
+              poll_interval_seconds: 900,
+              enabled: true,
+            },
+          ]),
+          { status: 201 },
+        );
+      }
+      if (u.includes("/investment/watchlist")) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (u.includes("/investment/sources")) {
+        return new Response(
+          JSON.stringify(
+            defaultsCreated
+              ? [
+                  {
+                    id: "src_potus",
+                    workspace_id: "ws_default",
+                    source_type: "x_web",
+                    name: "POTUS 官方",
+                    config: { mode: "account", username: "POTUS" },
+                    default_info_layer: "opinion",
+                    default_watchlist_ids: [],
+                    poll_interval_seconds: 900,
+                    enabled: true,
+                  },
+                ]
+              : [],
+          ),
+          { status: 200 },
+        );
+      }
+      if (u.includes("/investment/x-collector/states")) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "创建默认 X 源" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/investment/sources/defaults"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    expect(await screen.findByText("POTUS 官方")).toBeInTheDocument();
   });
 });

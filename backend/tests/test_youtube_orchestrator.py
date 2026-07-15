@@ -16,6 +16,7 @@ from app.infrastructure.models import (
     DocumentChunk,
     DocumentVersion,
     InvestmentItem,
+    TaskJob,
     Video,
     Workspace,
 )
@@ -207,6 +208,12 @@ def test_summary_creates_opinion_investment_item(session: Session) -> None:
     assert item.source_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     assert item.document_id == result.document_id
 
+    jobs = session.query(TaskJob).filter(TaskJob.job_type == "investment_translation").all()
+    assert len(jobs) == 1
+    assert jobs[0].target_type == "investment_item"
+    assert jobs[0].target_id == item.id
+    assert jobs[0].input == {"workspace_id": "ws_default", "item_id": item.id}
+
 
 def test_opinion_item_creation_failure_does_not_break_summary(session: Session) -> None:
     """If the investment item write raises, the YouTube summary still succeeds."""
@@ -273,6 +280,40 @@ class FakeVisualAnalysisService:
         if self.fail:
             raise RuntimeError("ocr unavailable")
         return self.frames
+
+
+class WarningTranslationService:
+    last_warning = "translation batch failed; keeping source text"
+
+    def translate(self, transcript: Transcript, *, enabled: bool = True) -> Transcript:
+        return transcript
+
+
+def test_translation_warning_is_recorded(session: Session) -> None:
+    fetcher = FakeYouTubeFetcher().add_video(_meta())
+    extractor = FakeTranscriptExtractor().with_transcript("dQw4w9WgXcQ", _transcript())
+    summary_service = CapturingSummaryService(_canned_summary())
+    orch = VideoSummaryOrchestrator(
+        session=session,
+        fetcher=fetcher,
+        transcript_extractor=extractor,
+        summary_service=summary_service,  # type: ignore[arg-type]
+        translation_service=WarningTranslationService(),  # type: ignore[arg-type]
+        translate_enabled=True,
+    )
+
+    result = orch.summarize_url("dQw4w9WgXcQ", workspace_id="ws_default")
+
+    assert result.succeeded
+    document = session.get(Document, result.document_id)
+    video = session.query(Video).one()
+    assert document is not None
+    assert document.metadata_["translation_warning"] == (
+        "translation batch failed; keeping source text"
+    )
+    assert video.metadata_["translation_warning"] == (
+        "translation batch failed; keeping source text"
+    )
 
 
 def test_visual_frames_are_passed_to_summary_service(session: Session) -> None:

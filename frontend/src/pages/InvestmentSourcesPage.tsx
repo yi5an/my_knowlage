@@ -21,6 +21,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ApiError } from "../services/client";
 import {
   investmentApi,
+  type InvestmentWatchlist,
   type InvestmentSource,
   type XCollectorState,
   type SourceType,
@@ -73,10 +74,12 @@ function collectorStatus(state: XCollectorState | undefined): {
 
 export function InvestmentSourcesPage() {
   const [sources, setSources] = useState<InvestmentSource[]>([]);
+  const [watchlist, setWatchlist] = useState<InvestmentWatchlist[]>([]);
   const [collectorStates, setCollectorStates] = useState<XCollectorState[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [creatingDefaults, setCreatingDefaults] = useState(false);
   const [polling, setPolling] = useState<Record<string, boolean>>({});
   const [form] = Form.useForm();
   const timers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
@@ -91,6 +94,7 @@ export function InvestmentSourcesPage() {
       ]);
       setSources(nextSources);
       setCollectorStates(nextCollectorStates);
+      setWatchlist(await investmentApi.listWatchlist());
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -117,6 +121,7 @@ export function InvestmentSourcesPage() {
       source_type: sourceType,
       name: values.name,
       default_info_layer: values.default_info_layer ?? (isXSource || isXWeb ? "opinion" : "news"),
+      default_watchlist_ids: values.watchlist_ids ?? [],
       poll_interval_seconds:
         values.poll_interval_seconds ??
         (sourceType === "x_brightdata" ? 21600 : isXWeb ? 900 : 3600),
@@ -177,6 +182,19 @@ export function InvestmentSourcesPage() {
     }
   };
 
+  const handleCreateDefaults = async () => {
+    setCreatingDefaults(true);
+    try {
+      const created = await investmentApi.createDefaultSources();
+      message.success(`默认 X 源已就绪：${created.length} 个`);
+      void load();
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setCreatingDefaults(false);
+    }
+  };
+
   /** Enqueue a fetch and poll the job until it settles, then refresh. */
   const handlePoll = async (source: InvestmentSource) => {
     setPolling((p) => ({ ...p, [source.id]: true }));
@@ -221,6 +239,26 @@ export function InvestmentSourcesPage() {
       render: (t: SourceType) => <Tag>{TYPE_LABEL[t] ?? t}</Tag>,
     },
     { title: "默认层级", dataIndex: "default_info_layer", key: "default_info_layer", width: 110 },
+    {
+      title: "观察对象",
+      dataIndex: "default_watchlist_ids",
+      key: "watchlist",
+      width: 180,
+      render: (ids: string[]) => {
+        const names = (ids || [])
+          .map((id) => watchlist.find((w) => w.id === id)?.name)
+          .filter(Boolean);
+        return names.length > 0 ? (
+          <Space size={[0, 4]} wrap>
+            {names.map((name) => (
+              <Tag key={name}>{name}</Tag>
+            ))}
+          </Space>
+        ) : (
+          <Typography.Text type="secondary">未绑定</Typography.Text>
+        );
+      },
+    },
     {
       title: "抓取频率(秒)",
       dataIndex: "poll_interval_seconds",
@@ -277,6 +315,9 @@ export function InvestmentSourcesPage() {
         extra={
           <Space>
             <Tag color={xCollector.color}>X 网页采集器：{xCollector.label}</Tag>
+            <Button loading={creatingDefaults} onClick={() => void handleCreateDefaults()}>
+              创建默认 X 源
+            </Button>
             <Button type="primary" onClick={() => setOpen(true)}>新增数据源</Button>
           </Space>
         }
@@ -467,6 +508,13 @@ export function InvestmentSourcesPage() {
                 { value: "news", label: "新闻" },
                 { value: "opinion", label: "观点" },
               ]}
+            />
+          </Form.Item>
+          <Form.Item label="绑定观察对象" name="watchlist_ids">
+            <Select
+              mode="multiple"
+              placeholder="选择这个数据源归属的观察对象"
+              options={watchlist.map((w) => ({ value: w.id, label: w.name }))}
             />
           </Form.Item>
           <Form.Item label="抓取频率(秒)" name="poll_interval_seconds">

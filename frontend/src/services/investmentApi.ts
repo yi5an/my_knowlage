@@ -8,6 +8,12 @@ export type SourceCredibility =
   | "reliable_media"
   | "personal_opinion"
   | "unverified";
+export type SourceLayer =
+  | "primary_source"
+  | "human_source"
+  | "expert_opinion"
+  | "news_confirmation"
+  | "market_feedback";
 export type ImpactDirection = "positive" | "negative" | "neutral" | "uncertain";
 export type ImpactHorizon = "short" | "mid" | "long" | "unknown";
 export type ThesisImpact =
@@ -41,7 +47,8 @@ export type VerificationStatus =
   | "verifying"
   | "verified"
   | "refuted"
-  | "local_only";
+  | "local_only"
+  | "ignored";
 
 export interface InvestmentItem {
   id: string;
@@ -71,6 +78,33 @@ export interface InvestmentItem {
   suggested_thesis_impact?: string | null;
   classification_reason?: string | null;
   attachments?: InvestmentAttachment[];
+}
+
+export interface InvestmentTheme {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  theme_type: string;
+  keywords: string[];
+  entities: string[];
+  tickers: string[];
+  enabled: boolean;
+  priority: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ThemeSourceBinding {
+  id: string;
+  workspace_id: string;
+  theme_id: string;
+  source_id: string;
+  source_layer: SourceLayer;
+  priority: number;
+  collector_type?: string | null;
+  coverage_notes?: string | null;
+  enabled: boolean;
 }
 
 export interface InvestmentAttachment {
@@ -144,12 +178,78 @@ export interface InvestmentClaim {
   evidence_doc_ids: string[];
 }
 
+export interface InvestmentFact {
+  id: string;
+  workspace_id: string;
+  source_item_id: string;
+  watchlist_id?: string | null;
+  fact_text: string;
+  fact_text_zh?: string | null;
+  fact_type: string;
+  entities: string[];
+  evidence_url?: string | null;
+  evidence_excerpt: string;
+  evidence_timestamp?: number | null;
+  confidence: number;
+  verification_status: VerificationStatus;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface InvestmentSignal {
+  id: string;
+  workspace_id: string;
+  watchlist_id?: string | null;
+  title: string;
+  summary: string;
+  signal_type: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  source_count: number;
+  fact_ids: string[];
+  item_ids: string[];
+  confidence: number;
+  status: string;
+  signal_stage?: string;
+  source_layers?: SourceLayer[];
+  first_source_layer?: SourceLayer | null;
+  first_source_id?: string | null;
+  validation_state?: string;
+  validation_sources?: string[];
+  market_feedback?: Record<string, unknown>;
+  lead_time_hours?: number | null;
+  information_edge_score?: number;
+  actionability?: string;
+  score_breakdown?: Record<string, number>;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface SourceTrace {
+  id: string;
+  workspace_id: string;
+  theme_id?: string | null;
+  target_item_id: string;
+  source_item_id?: string | null;
+  trace_type: string;
+  match_reason: string;
+  matched_fact?: string | null;
+  lead_time_hours?: number | null;
+  confidence: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface InvestmentDashboard {
   pending_review_count: number;
   pending_claims_count: number;
   theses_challenged_count: number;
   today_primary_count: number;
   today_macro_count: number;
+  untranslated_count: number;
+  unextracted_count: number;
+  unsignaled_count: number;
+  failed_job_count: number;
 }
 
 export interface InvestmentDigest {
@@ -157,6 +257,27 @@ export interface InvestmentDigest {
   today_highlights: InvestmentItem[];
   pending_claims: InvestmentClaim[];
   challenged_items: InvestmentItem[];
+  early_signals: InvestmentSignal[];
+  pending_facts: InvestmentFact[];
+}
+
+export interface InformationEdgeDigest {
+  generated_at: string;
+  top_signals: InvestmentSignal[];
+  source_traces: SourceTrace[];
+  unvalidated_signals: InvestmentSignal[];
+  stale_or_noise: InvestmentSignal[];
+}
+
+export interface InvestmentDigestSnapshot {
+  id: string;
+  workspace_id: string;
+  watchlist_id?: string | null;
+  digest_date: string;
+  title: string;
+  digest: InvestmentDigest;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface InvestmentFetchJob {
@@ -180,6 +301,15 @@ export interface ListItemsParams {
   actionStatus?: ActionStatus;
   watchlistId?: string;
   sourceId?: string;
+  limit?: number;
+}
+
+export interface ListFactsParams {
+  workspaceId?: string;
+  itemId?: string;
+  sourceId?: string;
+  watchlistId?: string;
+  verificationStatus?: VerificationStatus;
   limit?: number;
 }
 
@@ -237,6 +367,7 @@ export interface CreateSourcePayload {
   url?: string;
   config?: Record<string, unknown>;
   default_info_layer?: InfoLayer;
+  default_watchlist_ids?: string[];
   poll_interval_seconds?: number;
   enabled?: boolean;
 }
@@ -246,6 +377,7 @@ export interface UpdateSourcePayload {
   url?: string;
   config?: Record<string, unknown>;
   default_info_layer?: InfoLayer;
+  default_watchlist_ids?: string[];
   poll_interval_seconds?: number;
   enabled?: boolean;
 }
@@ -266,6 +398,18 @@ export interface CreateClaimPayload {
   thesis_id?: string;
   claim_text: string;
   required_evidence?: string[];
+}
+
+export interface CreateThemePayload {
+  workspace_id?: string;
+  name: string;
+  description?: string;
+  theme_type?: string;
+  keywords?: string[];
+  entities?: string[];
+  tickers?: string[];
+  enabled?: boolean;
+  priority?: string;
 }
 
 // --- API ------------------------------------------------------------------
@@ -302,8 +446,72 @@ export const investmentApi = {
   },
 
   // daily digest (aggregate view)
-  getDigest(workspaceId = WS): Promise<InvestmentDigest> {
-    return apiRequest(`/investment/digest?workspace_id=${workspaceId}`);
+  getDigest(params: { workspaceId?: string; watchlistId?: string } = {}): Promise<InvestmentDigest> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      watchlist_id: params.watchlistId,
+    });
+    return apiRequest(`/investment/digest${q}`);
+  },
+  listDigestSnapshots(params: {
+    workspaceId?: string;
+    watchlistId?: string;
+    limit?: number;
+  } = {}): Promise<InvestmentDigestSnapshot[]> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      watchlist_id: params.watchlistId,
+      limit: params.limit ?? 20,
+    });
+    return apiRequest(`/investment/digest/snapshots${q}`);
+  },
+  createDigestSnapshot(params: {
+    workspaceId?: string;
+    watchlistId?: string;
+  } = {}): Promise<InvestmentDigestSnapshot> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      watchlist_id: params.watchlistId,
+    });
+    return apiRequest(`/investment/digest/snapshots${q}`, { method: "POST" });
+  },
+
+  // information edge
+  getInformationEdge(params: {
+    workspaceId?: string;
+    themeId?: string;
+    limit?: number;
+  } = {}): Promise<InformationEdgeDigest> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      theme_id: params.themeId,
+      limit: params.limit ?? 20,
+    });
+    return apiRequest(`/investment/information-edge${q}`);
+  },
+  listThemes(workspaceId = WS): Promise<InvestmentTheme[]> {
+    return apiRequest(`/investment/themes?workspace_id=${workspaceId}`);
+  },
+  createTheme(payload: CreateThemePayload): Promise<InvestmentTheme> {
+    return apiRequest("/investment/themes", { method: "POST", body: payload });
+  },
+  listThemeSources(themeId: string, workspaceId = WS): Promise<ThemeSourceBinding[]> {
+    const q = buildQuery({ workspace_id: workspaceId });
+    return apiRequest(`/investment/themes/${themeId}/sources${q}`);
+  },
+  listSourceTraces(params: {
+    workspaceId?: string;
+    themeId?: string;
+    targetItemId?: string;
+    limit?: number;
+  } = {}): Promise<SourceTrace[]> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      theme_id: params.themeId,
+      target_item_id: params.targetItemId,
+      limit: params.limit ?? 50,
+    });
+    return apiRequest(`/investment/source-traces${q}`);
   },
 
   // items
@@ -324,6 +532,41 @@ export const investmentApi = {
   updateItem(id: string, payload: UpdateItemPayload): Promise<InvestmentItem> {
     return apiRequest(`/investment/items/${id}`, { method: "PATCH", body: payload });
   },
+  listItemFacts(id: string): Promise<InvestmentFact[]> {
+    return apiRequest(`/investment/items/${id}/facts`);
+  },
+  listFacts(params: ListFactsParams = {}): Promise<InvestmentFact[]> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      item_id: params.itemId,
+      source_id: params.sourceId,
+      watchlist_id: params.watchlistId,
+      verification_status: params.verificationStatus,
+      limit: params.limit ?? 100,
+    });
+    return apiRequest(`/investment/facts${q}`);
+  },
+  listSignals(params: {
+    workspaceId?: string;
+    watchlistId?: string;
+    status?: string;
+    limit?: number;
+  } = {}): Promise<InvestmentSignal[]> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      watchlist_id: params.watchlistId,
+      status: params.status,
+      limit: params.limit ?? 20,
+    });
+    return apiRequest(`/investment/signals${q}`);
+  },
+  refreshSignals(params: { workspaceId?: string; watchlistId?: string } = {}): Promise<InvestmentSignal[]> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      watchlist_id: params.watchlistId,
+    });
+    return apiRequest(`/investment/signals/refresh${q}`, { method: "POST" });
+  },
   classifyItem(id: string): Promise<InvestmentItem> {
     return apiRequest(`/investment/items/${id}/classify`, { method: "POST" });
   },
@@ -342,6 +585,19 @@ export const investmentApi = {
   updateWatchlist(id: string, payload: UpdateWatchlistPayload): Promise<InvestmentWatchlist> {
     return apiRequest(`/investment/watchlist/${id}`, { method: "PATCH", body: payload });
   },
+  listWatchlistSources(id: string): Promise<InvestmentSource[]> {
+    return apiRequest(`/investment/watchlist/${id}/sources`);
+  },
+  bindWatchlistSource(watchlistId: string, sourceId: string): Promise<InvestmentSource> {
+    return apiRequest(`/investment/watchlist/${watchlistId}/sources/${sourceId}`, {
+      method: "POST",
+    });
+  },
+  unbindWatchlistSource(watchlistId: string, sourceId: string): Promise<InvestmentSource> {
+    return apiRequest(`/investment/watchlist/${watchlistId}/sources/${sourceId}`, {
+      method: "DELETE",
+    });
+  },
 
   // sources
   listSources(workspaceId = WS): Promise<InvestmentSource[]> {
@@ -349,6 +605,9 @@ export const investmentApi = {
   },
   createSource(payload: CreateSourcePayload): Promise<InvestmentSource> {
     return apiRequest("/investment/sources", { method: "POST", body: payload });
+  },
+  createDefaultSources(): Promise<InvestmentSource[]> {
+    return apiRequest("/investment/sources/defaults", { method: "POST" });
   },
   updateSource(id: string, payload: UpdateSourcePayload): Promise<InvestmentSource> {
     return apiRequest(`/investment/sources/${id}`, { method: "PATCH", body: payload });
@@ -406,6 +665,16 @@ export const investmentApi = {
     }>,
   ): Promise<InvestmentClaim> {
     return apiRequest(`/investment/claims/${id}`, { method: "PATCH", body: payload });
+  },
+  setClaimStatus(
+    id: string,
+    payload: {
+      verification_status: VerificationStatus;
+      verification_summary?: string;
+      thesis_id?: string;
+    },
+  ): Promise<InvestmentClaim> {
+    return apiRequest(`/investment/claims/${id}/status`, { method: "POST", body: payload });
   },
   verifyClaim(id: string): Promise<InvestmentClaim> {
     return apiRequest(`/investment/claims/${id}/verify`, { method: "POST" });

@@ -18,7 +18,14 @@ from app.api.v1.youtube import (
     get_youtube_fetcher,
 )
 from app.infrastructure.database import Base, get_db_session
-from app.infrastructure.models import Document, Video, VideoFrameAnalysis, Workspace
+from app.infrastructure.models import (
+    Document,
+    InvestmentFact,
+    InvestmentItem,
+    Video,
+    VideoFrameAnalysis,
+    Workspace,
+)
 from app.main import app
 from app.schemas.youtube import (
     KeyPoint,
@@ -242,6 +249,103 @@ def test_summary_card_returns_visual_frames(
     assert frame["frame_type"] == "mindmap"
     assert frame["image_url"] == "/api/v1/youtube/visual-frames/vfa_1/image"
     assert frame["structured_notes"]["title"] == "行业轮动思维导图"
+
+
+def test_summary_card_returns_possible_source_traces(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="trace_ws", name="trace_ws"))
+    video = Video(
+        id="video_trace",
+        workspace_id="trace_ws",
+        video_id="trace123",
+        title="AI capex video",
+        channel_name="Research Channel",
+        fetch_status="fetched",
+        published_at=datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
+    )
+    document = Document(
+        id="doc_trace",
+        workspace_id="trace_ws",
+        title="AI capex video",
+        source_type="youtube",
+        source_uri="https://youtu.be/trace123",
+        status="ready",
+        parse_status="completed",
+        video_id=video.id,
+        summary_json={
+            "tldr": "AI capex remains strong",
+            "key_points": [],
+            "quotes": [],
+            "tags": [],
+        },
+        mindmap_data={"root_title": "AI capex video", "children": []},
+    )
+    youtube_item = InvestmentItem(
+        id="inv_youtube_trace",
+        workspace_id="trace_ws",
+        document_id=document.id,
+        dedupe_key="youtube|doc_trace",
+        title="AI capex video",
+        source_url="https://youtu.be/trace123",
+        source_name="YouTube",
+        info_layer="opinion",
+        source_credibility="personal_opinion",
+        published_at=datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
+    )
+    source_item = InvestmentItem(
+        id="inv_x_trace",
+        workspace_id="trace_ws",
+        dedupe_key="x|nvidia|1",
+        title="@nvidia: AI data center capex remains strong",
+        source_url="https://x.com/nvidia/status/1",
+        source_name="@nvidia",
+        info_layer="primary_source",
+        source_credibility="official",
+        published_at=datetime(2026, 7, 15, 8, 0, tzinfo=UTC),
+    )
+    db_session.add_all([video, document, youtube_item, source_item])
+    db_session.flush()
+    db_session.add_all(
+        [
+            InvestmentFact(
+                id="fact_youtube_trace",
+                workspace_id="trace_ws",
+                source_item_id=youtube_item.id,
+                fact_text="AI data center capex remains strong.",
+                fact_type="capex_signal",
+                entities=["NVIDIA", "AI data center"],
+                evidence_url="https://youtu.be/trace123",
+                evidence_excerpt="AI data center capex remains strong",
+                evidence_timestamp=120,
+                confidence=0.82,
+                verification_status="pending",
+            ),
+            InvestmentFact(
+                id="fact_x_trace",
+                workspace_id="trace_ws",
+                source_item_id=source_item.id,
+                fact_text="NVIDIA said AI data center capex remains strong.",
+                fact_type="capex_signal",
+                entities=["NVIDIA", "AI data center"],
+                evidence_url="https://x.com/nvidia/status/1",
+                evidence_excerpt="AI data center capex remains strong",
+                confidence=0.9,
+                verification_status="pending",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/youtube/summaries/doc_trace")
+
+    assert response.status_code == 200
+    trace = response.json()["source_traces"][0]
+    assert trace["source_item_id"] == "inv_x_trace"
+    assert trace["source_url"] == "https://x.com/nvidia/status/1"
+    assert trace["matched_fact"] == "AI data center capex remains strong."
+    assert trace["lead_time_hours"] == 4.0
 
 
 def test_update_visual_frame_mindmap_tree(

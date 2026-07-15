@@ -8,25 +8,39 @@ fetch job (returns job id immediately); ``GET /jobs/{id}`` projects the
 from fastapi import APIRouter, Depends, Query
 
 from app.schemas.investment import (
+    InformationEdgeDigestResponse,
     InvestmentClaimCreate,
     InvestmentClaimResponse,
+    InvestmentClaimStatusAction,
     InvestmentClaimUpdate,
     InvestmentDashboardResponse,
     InvestmentDigestResponse,
+    InvestmentDigestSnapshotResponse,
+    InvestmentFactResponse,
     InvestmentFetchJobResponse,
     InvestmentItemCreate,
     InvestmentItemResponse,
     InvestmentItemUpdate,
+    InvestmentSignalResponse,
     InvestmentSourceCreate,
     InvestmentSourceResponse,
     InvestmentSourceUpdate,
+    InvestmentThemeCreate,
+    InvestmentThemeResponse,
+    InvestmentThemeUpdate,
     InvestmentThesisCreate,
     InvestmentThesisResponse,
     InvestmentThesisUpdate,
     InvestmentWatchlistCreate,
     InvestmentWatchlistResponse,
     InvestmentWatchlistUpdate,
+    PersonSourceCreate,
+    PersonSourceResponse,
+    PersonSourceUpdate,
     PollSourceResponse,
+    SourceTraceResponse,
+    ThemeSourceBindRequest,
+    ThemeSourceResponse,
     XCollectorCommandComplete,
     XCollectorCommandResponse,
     XCollectorHeartbeat,
@@ -40,6 +54,100 @@ from app.services.investment.x_web import XWebInvestmentService
 
 router = APIRouter(prefix="/investment", tags=["investment"])
 SERVICE_DEPENDENCY = Depends(get_investment_service)
+
+
+# --- theme ----------------------------------------------------------------
+
+
+@router.get("/themes", response_model=list[InvestmentThemeResponse])
+async def list_themes(
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[InvestmentThemeResponse]:
+    return [
+        InvestmentThemeResponse.model_validate(theme)
+        for theme in service.list_themes(workspace_id)
+    ]
+
+
+@router.post("/themes", response_model=InvestmentThemeResponse, status_code=201)
+async def create_theme(
+    payload: InvestmentThemeCreate,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentThemeResponse:
+    return InvestmentThemeResponse.model_validate(service.create_theme(payload))
+
+
+@router.patch("/themes/{theme_id}", response_model=InvestmentThemeResponse)
+async def update_theme(
+    theme_id: str,
+    payload: InvestmentThemeUpdate,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentThemeResponse:
+    return InvestmentThemeResponse.model_validate(service.update_theme(theme_id, payload))
+
+
+@router.get("/themes/{theme_id}/sources", response_model=list[ThemeSourceResponse])
+async def list_theme_sources(
+    theme_id: str,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[ThemeSourceResponse]:
+    return [
+        ThemeSourceResponse.model_validate(binding)
+        for binding in service.list_theme_sources(theme_id, workspace_id=workspace_id)
+    ]
+
+
+@router.post(
+    "/themes/{theme_id}/sources",
+    response_model=ThemeSourceResponse,
+    status_code=201,
+)
+async def bind_theme_source(
+    theme_id: str,
+    payload: ThemeSourceBindRequest,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> ThemeSourceResponse:
+    return ThemeSourceResponse.model_validate(
+        service.bind_theme_source(theme_id, payload, workspace_id=workspace_id)
+    )
+
+
+@router.get("/person-sources", response_model=list[PersonSourceResponse])
+async def list_person_sources(
+    workspace_id: str = "ws_default",
+    theme_id: str | None = Query(default=None),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[PersonSourceResponse]:
+    return [
+        PersonSourceResponse.model_validate(person)
+        for person in service.list_person_sources(workspace_id, theme_id=theme_id)
+    ]
+
+
+@router.post(
+    "/person-sources",
+    response_model=PersonSourceResponse,
+    status_code=201,
+)
+async def create_person_source(
+    payload: PersonSourceCreate,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> PersonSourceResponse:
+    return PersonSourceResponse.model_validate(service.create_person_source(payload))
+
+
+@router.patch("/person-sources/{person_id}", response_model=PersonSourceResponse)
+async def update_person_source(
+    person_id: str,
+    payload: PersonSourceUpdate,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> PersonSourceResponse:
+    return PersonSourceResponse.model_validate(
+        service.update_person_source(person_id, payload)
+    )
 
 
 # --- dashboard -------------------------------------------------------------
@@ -71,10 +179,11 @@ async def list_macro_events(
 @router.get("/digest", response_model=InvestmentDigestResponse)
 async def digest(
     workspace_id: str = "ws_default",
+    watchlist_id: str | None = Query(default=None),
     service: InvestmentService = SERVICE_DEPENDENCY,
 ) -> InvestmentDigestResponse:
     """Daily digest: aggregate counts + today's highlights + pending claims."""
-    data = service.digest(workspace_id)
+    data = service.digest(workspace_id, watchlist_id=watchlist_id)
     return InvestmentDigestResponse(
         counts=InvestmentDashboardResponse(**data["counts"]),
         today_highlights=[
@@ -86,6 +195,45 @@ async def digest(
         challenged_items=[
             InvestmentItemResponse.model_validate(i) for i in data["challenged_items"]
         ],
+        early_signals=[
+            InvestmentSignalResponse.model_validate(signal)
+            for signal in data["early_signals"]
+        ],
+        pending_facts=[
+            InvestmentFactResponse.model_validate(fact) for fact in data["pending_facts"]
+        ],
+    )
+
+
+@router.get("/digest/snapshots", response_model=list[InvestmentDigestSnapshotResponse])
+async def list_digest_snapshots(
+    workspace_id: str = "ws_default",
+    watchlist_id: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[InvestmentDigestSnapshotResponse]:
+    return [
+        InvestmentDigestSnapshotResponse.model_validate(snapshot)
+        for snapshot in service.list_digest_snapshots(
+            workspace_id=workspace_id,
+            watchlist_id=watchlist_id,
+            limit=limit,
+        )
+    ]
+
+
+@router.post(
+    "/digest/snapshots",
+    response_model=InvestmentDigestSnapshotResponse,
+    status_code=201,
+)
+async def create_digest_snapshot(
+    workspace_id: str = "ws_default",
+    watchlist_id: str | None = Query(default=None),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentDigestSnapshotResponse:
+    return InvestmentDigestSnapshotResponse.model_validate(
+        service.create_digest_snapshot(workspace_id, watchlist_id=watchlist_id)
     )
 
 
@@ -121,6 +269,48 @@ async def update_watchlist(
     return InvestmentWatchlistResponse.model_validate(updated)
 
 
+@router.get(
+    "/watchlist/{watchlist_id}/sources",
+    response_model=list[InvestmentSourceResponse],
+)
+async def list_watchlist_sources(
+    watchlist_id: str,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[InvestmentSourceResponse]:
+    return [
+        InvestmentSourceResponse.model_validate(source)
+        for source in service.list_watchlist_sources(watchlist_id)
+    ]
+
+
+@router.post(
+    "/watchlist/{watchlist_id}/sources/{source_id}",
+    response_model=InvestmentSourceResponse,
+)
+async def bind_source_to_watchlist(
+    watchlist_id: str,
+    source_id: str,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentSourceResponse:
+    return InvestmentSourceResponse.model_validate(
+        service.bind_source_to_watchlist(watchlist_id, source_id)
+    )
+
+
+@router.delete(
+    "/watchlist/{watchlist_id}/sources/{source_id}",
+    response_model=InvestmentSourceResponse,
+)
+async def unbind_source_from_watchlist(
+    watchlist_id: str,
+    source_id: str,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentSourceResponse:
+    return InvestmentSourceResponse.model_validate(
+        service.unbind_source_from_watchlist(watchlist_id, source_id)
+    )
+
+
 # --- source ----------------------------------------------------------------
 
 
@@ -138,6 +328,21 @@ async def create_source(
     service: InvestmentService = SERVICE_DEPENDENCY,
 ) -> InvestmentSourceResponse:
     return InvestmentSourceResponse.model_validate(service.create_source(payload))
+
+
+@router.post(
+    "/sources/defaults",
+    response_model=list[InvestmentSourceResponse],
+    status_code=201,
+)
+async def create_default_sources(
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[InvestmentSourceResponse]:
+    return [
+        InvestmentSourceResponse.model_validate(source)
+        for source in service.ensure_default_x_sources(workspace_id)
+    ]
 
 
 @router.patch("/sources/{source_id}", response_model=InvestmentSourceResponse)
@@ -250,6 +455,132 @@ async def update_item(
     return InvestmentItemResponse.model_validate(service.update_item(item_id, payload))
 
 
+@router.get("/items/{item_id}/facts", response_model=list[InvestmentFactResponse])
+async def list_item_facts(
+    item_id: str,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[InvestmentFactResponse]:
+    return [
+        InvestmentFactResponse.model_validate(fact)
+        for fact in service.list_item_facts(item_id)
+    ]
+
+
+@router.get("/facts", response_model=list[InvestmentFactResponse])
+async def list_facts(
+    workspace_id: str = "ws_default",
+    item_id: str | None = Query(default=None),
+    source_id: str | None = Query(default=None),
+    watchlist_id: str | None = Query(default=None),
+    verification_status: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[InvestmentFactResponse]:
+    return [
+        InvestmentFactResponse.model_validate(fact)
+        for fact in service.list_facts(
+            workspace_id=workspace_id,
+            item_id=item_id,
+            source_id=source_id,
+            watchlist_id=watchlist_id,
+            verification_status=verification_status,
+            limit=limit,
+        )
+    ]
+
+
+# --- signal ----------------------------------------------------------------
+
+
+@router.get("/signals", response_model=list[InvestmentSignalResponse])
+async def list_signals(
+    workspace_id: str = "ws_default",
+    watchlist_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=200),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[InvestmentSignalResponse]:
+    return [
+        InvestmentSignalResponse.model_validate(signal)
+        for signal in service.list_signals(
+            workspace_id=workspace_id,
+            watchlist_id=watchlist_id,
+            status=status,
+            limit=limit,
+        )
+    ]
+
+
+@router.post("/signals/refresh", response_model=list[InvestmentSignalResponse])
+async def refresh_signals(
+    workspace_id: str = "ws_default",
+    watchlist_id: str | None = Query(default=None),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[InvestmentSignalResponse]:
+    return [
+        InvestmentSignalResponse.model_validate(signal)
+        for signal in service.refresh_signals(
+            workspace_id=workspace_id,
+            watchlist_id=watchlist_id,
+        )
+    ]
+
+
+# --- source trace ----------------------------------------------------------
+
+
+@router.get("/source-traces", response_model=list[SourceTraceResponse])
+async def list_source_traces(
+    workspace_id: str = "ws_default",
+    theme_id: str | None = Query(default=None),
+    target_item_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[SourceTraceResponse]:
+    return [
+        SourceTraceResponse.model_validate(trace)
+        for trace in service.list_source_traces(
+            workspace_id=workspace_id,
+            theme_id=theme_id,
+            target_item_id=target_item_id,
+            limit=limit,
+        )
+    ]
+
+
+@router.get("/information-edge", response_model=InformationEdgeDigestResponse)
+async def information_edge_digest(
+    workspace_id: str = "ws_default",
+    theme_id: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InformationEdgeDigestResponse:
+    data = service.information_edge_digest(
+        workspace_id=workspace_id,
+        theme_id=theme_id,
+        limit=limit,
+    )
+    return InformationEdgeDigestResponse(
+        generated_at=data["generated_at"],
+        top_signals=[
+            InvestmentSignalResponse.model_validate(signal)
+            for signal in data["top_signals"]
+        ],
+        source_traces=[
+            SourceTraceResponse.model_validate(trace)
+            for trace in data["source_traces"]
+        ],
+        unvalidated_signals=[
+            InvestmentSignalResponse.model_validate(signal)
+            for signal in data["unvalidated_signals"]
+        ],
+        stale_or_noise=[
+            InvestmentSignalResponse.model_validate(signal)
+            for signal in data["stale_or_noise"]
+        ],
+    )
+
+
 # --- thesis ----------------------------------------------------------------
 
 
@@ -313,6 +644,15 @@ async def update_claim(
     service: InvestmentService = SERVICE_DEPENDENCY,
 ) -> InvestmentClaimResponse:
     return InvestmentClaimResponse.model_validate(service.update_claim(claim_id, payload))
+
+
+@router.post("/claims/{claim_id}/status", response_model=InvestmentClaimResponse)
+async def set_claim_status(
+    claim_id: str,
+    payload: InvestmentClaimStatusAction,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentClaimResponse:
+    return InvestmentClaimResponse.model_validate(service.set_claim_status(claim_id, payload))
 
 
 # --- fetch job (async poll view) ------------------------------------------

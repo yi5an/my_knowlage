@@ -128,6 +128,7 @@ class TranslationService:
 
     def __init__(self, llm_client: StructuredOutputClient) -> None:
         self.llm_client = llm_client
+        self.last_warning: str | None = None
 
     def translate(
         self,
@@ -142,6 +143,7 @@ class TranslationService:
         - If translation fails, the original is returned (never raises) so
           the summary pipeline can continue on the source language.
         """
+        self.last_warning = None
         if not enabled:
             return transcript
         if is_chinese(transcript.language):
@@ -164,6 +166,7 @@ class TranslationService:
                 coalesced, transcript.language
             )
         except Exception as exc:  # noqa: BLE001
+            self.last_warning = f"translation failed: {exc}"
             logger.warning(
                 "translation failed for %s, falling back to source: %s",
                 transcript.video_id,
@@ -174,6 +177,8 @@ class TranslationService:
         # If every batch fell back to the source text, there's no Chinese to
         # summarize — keep the original language so the summary runs on the
         # source language instead of a phantom "zh" with English content.
+        if not any_translated:
+            self.last_warning = "translation produced no Chinese batches; source transcript kept"
         return Transcript(
             video_id=transcript.video_id,
             language="zh" if any_translated else transcript.language,

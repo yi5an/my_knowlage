@@ -61,6 +61,18 @@ export interface VideoFrameAnalysis {
   confidence: number;
 }
 
+export interface SourceTraceCandidate {
+  source_item_id: string;
+  source_title: string;
+  source_name: string | null;
+  source_url: string | null;
+  published_at: string | null;
+  matched_fact: string;
+  evidence_excerpt: string;
+  lead_time_hours: number | null;
+  confidence: number;
+}
+
 export interface MindmapNode {
   title: string;
   timestamp?: number | null;
@@ -86,6 +98,7 @@ export interface VideoSummaryCard {
   mindmap: MindmapData | null;
   transcript: string | null;
   visual_frames: VideoFrameAnalysis[];
+  source_traces: SourceTraceCandidate[];
 }
 
 export interface Subscription {

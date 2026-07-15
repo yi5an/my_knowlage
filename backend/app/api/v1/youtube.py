@@ -50,6 +50,7 @@ from app.services.document_visibility import (
     KNOWLEDGE_BASE_IMPORTED_KEY,
     is_imported_to_knowledge_base,
 )
+from app.services.investment.source_tracing import InvestmentSourceTracingService
 from app.services.structured_output import (
     StructuredOutputClient,
 )
@@ -373,6 +374,10 @@ def _summary_card_from_document(session: Session, document: Document) -> VideoSu
         transcript=transcript,
         knowledge_base_imported=is_imported_to_knowledge_base(document),
         visual_frames=_visual_frames_for_video(session, video.id if video else None),
+        source_traces=InvestmentSourceTracingService(session).trace_youtube_document(
+            document,
+            video,
+        ),
     )
 
 

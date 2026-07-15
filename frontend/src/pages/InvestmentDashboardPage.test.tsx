@@ -26,11 +26,41 @@ describe("InvestmentDashboardPage", () => {
               theses_challenged_count: 0,
               today_primary_count: 2,
               today_macro_count: 1,
+              untranslated_count: 4,
+              unextracted_count: 3,
+              unsignaled_count: 2,
+              failed_job_count: 1,
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
+        if (u.includes("/investment/digest")) {
+          return new Response(
+            JSON.stringify({
+              counts: {
+                pending_review_count: 0,
+                pending_claims_count: 0,
+                theses_challenged_count: 0,
+                today_primary_count: 0,
+                today_macro_count: 0,
+                untranslated_count: 0,
+                unextracted_count: 0,
+                unsignaled_count: 0,
+                failed_job_count: 0,
+              },
+              today_highlights: [],
+              pending_claims: [],
+              challenged_items: [],
+              early_signals: [],
+              pending_facts: [],
+            }),
+            { status: 200 },
+          );
+        }
         if (u.includes("/investment/items")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (u.includes("/investment/signals")) {
           return new Response(JSON.stringify([]), { status: 200 });
         }
         return new Response("not found", { status: 404 });
@@ -51,11 +81,13 @@ describe("InvestmentDashboardPage", () => {
   it("shows real dashboard counts from the API (no sample data)", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("3")).toBeInTheDocument(); // pending_review_count
+      expect(screen.getByText("今日待处理")).toBeInTheDocument();
     });
-    expect(screen.getByText("今日待处理")).toBeInTheDocument();
-    // "1" appears for both pending_claims_count and today_macro_count
-    expect(screen.getAllByText("1").length).toBeGreaterThanOrEqual(2);
+    expect(metricCard("今日待处理")).toHaveTextContent("3");
+    expect(metricCard("待翻译")).toHaveTextContent("4");
+    expect(metricCard("待抽取事实")).toHaveTextContent("3");
+    expect(metricCard("待生成信号")).toHaveTextContent("2");
+    expect(metricCard("失败任务")).toHaveTextContent("1");
   });
 
   it("shows an empty state for pending items when the list is empty", async () => {
@@ -64,4 +96,152 @@ describe("InvestmentDashboardPage", () => {
       expect(screen.getByText("暂无待处理信息")).toBeInTheDocument();
     });
   });
+
+  it("shows early signals from the API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/investment/dashboard")) {
+          return new Response(
+            JSON.stringify({
+              pending_review_count: 0,
+              pending_claims_count: 0,
+              theses_challenged_count: 0,
+              today_primary_count: 0,
+              today_macro_count: 0,
+            }),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/digest")) {
+          return new Response(
+            JSON.stringify({
+              counts: {
+                pending_review_count: 0,
+                pending_claims_count: 0,
+                theses_challenged_count: 0,
+                today_primary_count: 0,
+                today_macro_count: 0,
+              },
+              today_highlights: [],
+              pending_claims: [],
+              challenged_items: [],
+              early_signals: [],
+              pending_facts: [],
+            }),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/items")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (u.includes("/investment/signals")) {
+          return new Response(
+            JSON.stringify([
+              {
+                id: "sig_1",
+                workspace_id: "ws_default",
+                watchlist_id: "wl_ai",
+                title: "NVIDIA / capex_signal",
+                summary: "数据中心需求持续增强",
+                signal_type: "capex_signal",
+                first_seen_at: "2026-07-15T00:00:00Z",
+                last_seen_at: "2026-07-15T01:00:00Z",
+                source_count: 2,
+                fact_ids: ["fact_1", "fact_2"],
+                item_ids: ["inv_1", "inv_2"],
+                confidence: 0.85,
+                status: "tracking",
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("早期信号")).toBeInTheDocument();
+    expect(screen.getByText("NVIDIA / capex_signal")).toBeInTheDocument();
+    expect(screen.getByText("数据中心需求持续增强")).toBeInTheDocument();
+    expect(screen.getByText("来源 2")).toBeInTheDocument();
+    expect(screen.getByText("置信度 85%")).toBeInTheDocument();
+  });
+
+  it("shows challenged thesis items from the digest API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/investment/dashboard")) {
+          return new Response(
+            JSON.stringify({
+              pending_review_count: 0,
+              pending_claims_count: 0,
+              theses_challenged_count: 1,
+              today_primary_count: 0,
+              today_macro_count: 0,
+            }),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/digest")) {
+          return new Response(
+            JSON.stringify({
+              counts: {
+                pending_review_count: 0,
+                pending_claims_count: 0,
+                theses_challenged_count: 1,
+                today_primary_count: 0,
+                today_macro_count: 0,
+              },
+              today_highlights: [],
+              pending_claims: [],
+              challenged_items: [
+                {
+                  id: "item_challenge",
+                  workspace_id: "ws_default",
+                  dedupe_key: "item_challenge",
+                  title: "Tariff policy may raise input costs",
+                  title_zh: "关税政策可能抬升投入成本",
+                  info_layer: "opinion",
+                  source_credibility: "official",
+                  importance: "high",
+                  impact_direction: "negative",
+                  impact_horizon: "short",
+                  thesis_impact: "weakens",
+                  action_status: "tracking",
+                },
+              ],
+              early_signals: [],
+              pending_facts: [],
+            }),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/items")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (u.includes("/investment/signals")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("关税政策可能抬升投入成本")).toBeInTheDocument();
+    expect(screen.getByText("影响：weakens")).toBeInTheDocument();
+  });
 });
+
+function metricCard(title: string) {
+  const titleNode = screen.getByText(title);
+  const card = titleNode.closest(".ant-card");
+  expect(card).not.toBeNull();
+  return card as HTMLElement;
+}

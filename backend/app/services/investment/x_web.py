@@ -28,6 +28,7 @@ from app.schemas.investment import (
 )
 from app.services.investment.fetchers import InvestmentRawItem
 from app.services.investment.normalizers import compute_dedupe_key
+from app.services.investment.post_processing import enqueue_investment_post_processing
 from app.services.investment.repositories import (
     InvestmentItemRepository,
     InvestmentSourceRepository,
@@ -79,6 +80,15 @@ class XWebInvestmentService:
                     created += 1
                 else:
                     updated += 1
+            if created > 0 or updated > 0:
+                enqueue_investment_post_processing(
+                    self.session,
+                    workspace_id=source.workspace_id,
+                    target_type="investment_source",
+                    target_id=source.id,
+                    source_id=source.id,
+                    include_classification=True,
+                )
             self.session.commit()
         except Exception:
             self.session.rollback()

@@ -32,6 +32,7 @@ const VERIF_LABEL: Record<VerificationStatus, string> = {
   verified: "已证实",
   refuted: "已证伪",
   local_only: "仅本地证据",
+  ignored: "已忽略",
 };
 
 const VERIF_COLOR: Record<VerificationStatus, string> = {
@@ -40,7 +41,19 @@ const VERIF_COLOR: Record<VerificationStatus, string> = {
   verified: "success",
   refuted: "error",
   local_only: "default",
+  ignored: "default",
 };
+
+const MANUAL_STATUS_ACTIONS: Array<{
+  label: string;
+  status: VerificationStatus;
+  summary: string;
+}> = [
+  { label: "证实", status: "verified", summary: "人工标记为已证实" },
+  { label: "证伪", status: "refuted", summary: "人工标记为已证伪" },
+  { label: "仅本地", status: "local_only", summary: "人工标记为仅本地证据" },
+  { label: "忽略", status: "ignored", summary: "人工忽略" },
+];
 
 export function InvestmentClaimsPage() {
   const [claims, setClaims] = useState<InvestmentClaim[]>([]);
@@ -103,6 +116,42 @@ export function InvestmentClaimsPage() {
     }
   };
 
+  const handleSetStatus = async (
+    claim: InvestmentClaim,
+    verificationStatus: VerificationStatus,
+    verificationSummary: string,
+  ) => {
+    setVerifying((current) => ({ ...current, [claim.id]: true }));
+    try {
+      await investmentApi.setClaimStatus(claim.id, {
+        verification_status: verificationStatus,
+        verification_summary: verificationSummary,
+      });
+      message.success("状态已更新");
+      void load();
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setVerifying((current) => ({ ...current, [claim.id]: false }));
+    }
+  };
+
+  const handleLinkThesis = async (claim: InvestmentClaim, thesisId: string) => {
+    setVerifying((current) => ({ ...current, [claim.id]: true }));
+    try {
+      await investmentApi.setClaimStatus(claim.id, {
+        verification_status: claim.verification_status,
+        thesis_id: thesisId,
+      });
+      message.success("已关联投资假设");
+      void load();
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setVerifying((current) => ({ ...current, [claim.id]: false }));
+    }
+  };
+
   return (
     <main className="page">
       <PageHeader
@@ -129,6 +178,16 @@ export function InvestmentClaimsPage() {
                     >
                       验证观点
                     </Button>,
+                    ...MANUAL_STATUS_ACTIONS.map((action) => (
+                      <Button
+                        key={action.status}
+                        size="small"
+                        loading={!!verifying[c.id]}
+                        onClick={() => void handleSetStatus(c, action.status, action.summary)}
+                      >
+                        {action.label}
+                      </Button>
+                    )),
                   ]}
                 >
                   <List.Item.Meta
@@ -148,6 +207,21 @@ export function InvestmentClaimsPage() {
                         {c.verification_summary && <span>{c.verification_summary}</span>}
                         {c.evidence_doc_ids?.length > 0 && (
                           <span>证据文档：{c.evidence_doc_ids.length} 篇</span>
+                        )}
+                        {theses.length > 0 && (
+                          <Space size={8}>
+                            <span>关联假设：</span>
+                            <Select
+                              aria-label="关联假设"
+                              size="small"
+                              placeholder="选择假设"
+                              value={c.thesis_id ?? undefined}
+                              loading={!!verifying[c.id]}
+                              style={{ minWidth: 220 }}
+                              options={theses.map((t) => ({ value: t.id, label: t.title }))}
+                              onChange={(value) => void handleLinkThesis(c, value)}
+                            />
+                          </Space>
                         )}
                       </Space>
                     }

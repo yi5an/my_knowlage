@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { InfoLayerTag } from "../components/investment/InfoLayerTag";
+import { TranslationStatusTag } from "../components/investment/TranslationStatusTag";
 import { ApiError } from "../services/client";
 import {
   investmentApi,
@@ -144,6 +145,7 @@ export function InvestmentCalendarPage() {
                               {fmtDate(item.published_at)}
                             </Typography.Text>
                             {item.source_name && <Tag>{item.source_name}</Tag>}
+                            <TranslationStatusTag item={item} />
                           </Space>
                           <div style={{ marginTop: 4 }}>
                             <Typography.Text>{item.title_zh ?? item.title}</Typography.Text>

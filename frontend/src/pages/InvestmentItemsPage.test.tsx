@@ -175,6 +175,44 @@ describe("InvestmentItemsPage", () => {
     });
   });
 
+  it("marks English items without Chinese fields as pending translation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/investment/items")) {
+          return new Response(
+            JSON.stringify([
+              {
+                id: "inv_pending_translation",
+                workspace_id: "ws_default",
+                dedupe_key: "dk_pending_translation",
+                title: "Federal Reserve issues FOMC statement",
+                source_url: "https://www.federalreserve.gov/newsevents/pressreleases/x.htm",
+                source_name: "Fed Monetary",
+                info_layer: "macro_calendar",
+                source_credibility: "official",
+                published_at: "2026-06-17T18:00:00Z",
+                summary: "The Committee described rates and inflation risks.",
+                importance: "medium",
+                impact_direction: "neutral",
+                impact_horizon: "unknown",
+                thesis_impact: "unknown",
+                action_status: "pending_review",
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("待翻译")).toBeInTheDocument();
+  });
+
   it("renders source urls as clickable external links", async () => {
     vi.stubGlobal(
       "fetch",
@@ -378,6 +416,74 @@ describe("InvestmentItemsPage", () => {
     );
     expect(
       within(drawer).getByText("Median federal funds rate 3.6 percent."),
+    ).toBeInTheDocument();
+  });
+
+  it("loads and renders extracted facts in the detail drawer", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/investment/items/inv_fact/facts")) {
+          return new Response(
+            JSON.stringify([
+              {
+                id: "fact_1",
+                workspace_id: "ws_default",
+                source_item_id: "inv_fact",
+                watchlist_id: "wl_nvda",
+                fact_text: "NVIDIA announced a new AI platform.",
+                fact_text_zh: "英伟达宣布了新的 AI 平台。",
+                fact_type: "company_update",
+                entities: ["NVIDIA"],
+                evidence_url: "https://x.com/nvidia/status/1",
+                evidence_excerpt: "NVIDIA announced a new AI platform.",
+                confidence: 0.82,
+                verification_status: "pending",
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/items")) {
+          return new Response(
+            JSON.stringify([
+              {
+                id: "inv_fact",
+                workspace_id: "ws_default",
+                dedupe_key: "dk_fact",
+                title: "@nvidia: new platform",
+                source_url: "https://x.com/nvidia/status/1",
+                source_name: "@nvidia",
+                info_layer: "opinion",
+                source_credibility: "personal_opinion",
+                summary: "NVIDIA announced a new AI platform.",
+                importance: "medium",
+                impact_direction: "neutral",
+                impact_horizon: "unknown",
+                thesis_impact: "unknown",
+                action_status: "pending_review",
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "查看详情" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "查看详情" }));
+
+    const drawer = await screen.findByRole("dialog");
+    expect(await within(drawer).findByText("英伟达宣布了新的 AI 平台。")).toBeInTheDocument();
+    expect(within(drawer).getByText("置信度 82%")).toBeInTheDocument();
+    expect(
+      within(drawer).getByText("证据：NVIDIA announced a new AI platform."),
     ).toBeInTheDocument();
   });
 });

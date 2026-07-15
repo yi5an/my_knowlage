@@ -3,10 +3,13 @@ import {
   DatePicker,
   Divider,
   Drawer,
+  Empty,
   Form,
   Input,
   Select,
   Space,
+  Spin,
+  Tag,
   Typography,
   message,
 } from "antd";
@@ -16,11 +19,13 @@ import {
   type ActionStatus,
   type ImpactDirection,
   type ImpactHorizon,
+  type InvestmentFact,
   type Importance,
   type InvestmentItem,
   type ThesisImpact,
 } from "../../services/investmentApi";
 import { InfoLayerTag } from "./InfoLayerTag";
+import { TranslationStatusTag } from "./TranslationStatusTag";
 
 const IMPORTANCE_OPTS: Importance[] = ["low", "medium", "high"];
 const IMPACT_DIR_OPTS: ImpactDirection[] = ["positive", "negative", "neutral", "uncertain"];
@@ -61,6 +66,11 @@ const ZH: Record<string, string> = {
   ignored: "忽略",
   researched: "已研究",
   archived: "已归档",
+  pending: "待验证",
+  verifying: "验证中",
+  verified: "已验证",
+  refuted: "已证伪",
+  local_only: "仅本地证据",
 };
 
 /**
@@ -81,6 +91,9 @@ export function InvestmentItemDrawer({
 }) {
   const [form] = Form.useForm();
   const [classifying, setClassifying] = useState(false);
+  const [facts, setFacts] = useState<InvestmentFact[]>([]);
+  const [factsLoading, setFactsLoading] = useState(false);
+  const [factsError, setFactsError] = useState<string | null>(null);
   const displaySummary = item?.summary_zh ?? item?.summary;
   const originalSummary =
     item?.summary_zh && item.summary && item.summary_zh !== item.summary ? item.summary : null;
@@ -103,6 +116,23 @@ export function InvestmentItemDrawer({
       });
     }
   }, [item, form]);
+
+  useEffect(() => {
+    if (!item || !open) {
+      setFacts([]);
+      setFactsError(null);
+      return;
+    }
+    setFactsLoading(true);
+    setFactsError(null);
+    investmentApi
+      .listItemFacts(item.id)
+      .then(setFacts)
+      .catch((error: unknown) =>
+        setFactsError(error instanceof Error ? error.message : String(error)),
+      )
+      .finally(() => setFactsLoading(false));
+  }, [item, open]);
 
   if (!item) return null;
 
@@ -134,6 +164,7 @@ export function InvestmentItemDrawer({
         <Space>
           <span>{item.title_zh ?? item.title}</span>
           <InfoLayerTag layer={item.info_layer} />
+          <TranslationStatusTag item={item} />
         </Space>
       }
       width={520}
@@ -217,6 +248,52 @@ export function InvestmentItemDrawer({
             </Space>
           </div>
         )}
+
+        <div>
+          <Typography.Title level={5} style={{ marginBottom: 8 }}>
+            事实点
+          </Typography.Title>
+          <Spin spinning={factsLoading}>
+            {factsError ? (
+              <Typography.Text type="danger">{factsError}</Typography.Text>
+            ) : facts.length === 0 ? (
+              <Empty description="暂无结构化事实" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <Space direction="vertical" size={10} style={{ width: "100%" }}>
+                {facts.map((fact) => (
+                  <div
+                    key={fact.id}
+                    style={{
+                      border: "1px solid #f0f0f0",
+                      borderRadius: 6,
+                      padding: 10,
+                    }}
+                  >
+                    <Space size={[4, 4]} wrap style={{ marginBottom: 4 }}>
+                      <Tag>{fact.fact_type}</Tag>
+                      <Tag color="blue">置信度 {Math.round(fact.confidence * 100)}%</Tag>
+                      <Tag>{ZH[fact.verification_status] ?? fact.verification_status}</Tag>
+                    </Space>
+                    <Typography.Paragraph style={{ marginBottom: 4 }}>
+                      {fact.fact_text_zh ?? fact.fact_text}
+                    </Typography.Paragraph>
+                    <Typography.Paragraph
+                      type="secondary"
+                      style={{ whiteSpace: "pre-wrap", marginBottom: 4 }}
+                    >
+                      证据：{fact.evidence_excerpt}
+                    </Typography.Paragraph>
+                    {fact.evidence_url && (
+                      <Typography.Link href={fact.evidence_url} target="_blank" rel="noreferrer">
+                        打开证据来源
+                      </Typography.Link>
+                    )}
+                  </div>
+                ))}
+              </Space>
+            )}
+          </Spin>
+        </div>
       </Space>
 
       <Divider />

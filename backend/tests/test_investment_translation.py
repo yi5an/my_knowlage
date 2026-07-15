@@ -11,6 +11,7 @@ Uses ``MockStructuredOutputClient`` to feed canned translations. Verifies:
 from __future__ import annotations
 
 from collections.abc import Generator
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -31,6 +32,7 @@ from app.services.investment.fetch_job_handler import (
     InvestmentFetchJobHandler,
 )
 from app.services.investment.fetchers import InvestmentRawItem
+from app.services.investment.post_processing import enqueue_investment_post_processing
 from app.services.investment.translation import InvestmentTranslationService
 from app.services.investment.translation_job_handler import (
     InvestmentTranslationJobHandler,
@@ -59,8 +61,10 @@ def _make_item(
     title: str,
     summary: str | None = None,
     item_id: str | None = None,
+    source_id: str | None = None,
     title_zh: str | None = None,
     summary_zh: str | None = None,
+    published_at: datetime | None = None,
 ) -> InvestmentItem:
     item = InvestmentItem(
         id=item_id or f"inv_{uuid4().hex}",
@@ -69,13 +73,32 @@ def _make_item(
         summary=summary,
         info_layer="macro_calendar",
         source_credibility="official",
+        source_id=source_id,
         dedupe_key=f"dk_{uuid4().hex}",
         title_zh=title_zh,
         summary_zh=summary_zh,
+        published_at=published_at,
     )
     session.add(item)
     session.commit()
     return item
+
+
+def _make_source(session: Session, source_id: str) -> InvestmentSource:
+    source = InvestmentSource(
+        id=source_id,
+        workspace_id="ws_default",
+        source_type="rss",
+        name=source_id,
+        url=f"https://example.com/{source_id}.xml",
+        config={},
+        default_info_layer="news",
+        default_watchlist_ids=[],
+        poll_interval_seconds=3600,
+    )
+    session.add(source)
+    session.commit()
+    return source
 
 
 # --- service ---------------------------------------------------------------
@@ -158,6 +181,112 @@ def test_retranslates_summary_when_refetch_clears_summary_zh(session: Session):
     assert item.summary_zh == "委员会决定维持目标区间。"
 
 
+def test_translate_untranslated_can_filter_by_source(session: Session):
+    older_other = _make_item(session, "Older source item", "old summary", source_id="src_old")
+    target = _make_item(session, "Target source item", "target summary", source_id="src_target")
+    canned = InvestmentTranslationSchema(
+        translations=[
+            InvestmentTranslationItem(
+                item_id=target.id,
+                title_zh="目标来源条目",
+                summary_zh="目标摘要",
+            )
+        ]
+    )
+    client = MockStructuredOutputClient(outputs={InvestmentTranslationSchema: canned})
+
+    result = InvestmentTranslationService(
+        session=session, llm_client=client
+    ).translate_untranslated(source_id="src_target")
+
+    assert result["translated"] == 1
+    session.refresh(older_other)
+    session.refresh(target)
+    assert older_other.title_zh is None
+    assert target.title_zh == "目标来源条目"
+
+
+def test_translate_untranslated_processes_newest_published_item_first(session: Session):
+    older = _make_item(
+        session,
+        "Older macro item",
+        "older summary",
+        item_id="inv_older_macro",
+        published_at=datetime(2026, 7, 1, tzinfo=UTC),
+    )
+    newer = _make_item(
+        session,
+        "Newer macro item",
+        "newer summary",
+        item_id="inv_newer_macro",
+        published_at=datetime(2026, 7, 14, tzinfo=UTC),
+    )
+    canned = InvestmentTranslationSchema(
+        translations=[
+            InvestmentTranslationItem(
+                item_id=newer.id,
+                title_zh="较新的宏观条目",
+                summary_zh="较新的摘要",
+            )
+        ]
+    )
+    client = MockStructuredOutputClient(outputs={InvestmentTranslationSchema: canned})
+
+    result = InvestmentTranslationService(
+        session=session,
+        llm_client=client,
+    ).translate_untranslated(limit=1)
+
+    assert result["translated"] == 1
+    session.refresh(older)
+    session.refresh(newer)
+    assert newer.title_zh == "较新的宏观条目"
+    assert older.title_zh is None
+
+
+def test_enqueue_post_processing_keeps_translation_jobs_source_scoped(session: Session):
+    source_a = _make_source(session, "src_a")
+    source_b = _make_source(session, "src_b")
+    _make_item(session, "Source A item", "a summary", source_id=source_a.id)
+    _make_item(session, "Source B item", "b summary", source_id=source_b.id)
+
+    first = enqueue_investment_post_processing(
+        session,
+        workspace_id="ws_default",
+        target_type="investment_source",
+        target_id=source_a.id,
+        source_id=source_a.id,
+    )
+    second = enqueue_investment_post_processing(
+        session,
+        workspace_id="ws_default",
+        target_type="investment_source",
+        target_id=source_b.id,
+        source_id=source_b.id,
+    )
+    duplicate = enqueue_investment_post_processing(
+        session,
+        workspace_id="ws_default",
+        target_type="investment_source",
+        target_id=source_a.id,
+        source_id=source_a.id,
+    )
+    session.commit()
+
+    jobs = list(
+        session.scalars(
+            select(TaskJob)
+            .where(TaskJob.job_type == INVESTMENT_TRANSLATION_JOB_TYPE)
+            .order_by(TaskJob.target_id)
+        )
+    )
+    assert first["translation_enqueued"] is True
+    assert second["translation_enqueued"] is True
+    assert duplicate["translation_enqueued"] is False
+    assert len(jobs) == 2
+    assert [job.input["source_id"] for job in jobs] == ["src_a", "src_b"]
+
+
 def test_llm_failure_degrades_gracefully(session: Session):
     _make_item(session, "Some English title", "summary")
 
@@ -194,7 +323,7 @@ def test_llm_failure_can_be_raised_for_user_visible_retry(session: Session):
 
 
 def test_translation_handler_uses_llm_client(session: Session):
-    en = _make_item(session, "FOMC statement", "rate held")
+    en = _make_item(session, "FOMC statement", "rate held", source_id="src_x")
     canned = InvestmentTranslationSchema(
         translations=[
             InvestmentTranslationItem(
@@ -221,8 +350,42 @@ def test_translation_handler_uses_llm_client(session: Session):
     assert en.title_zh == "FOMC声明"
 
 
+def test_translation_handler_can_process_single_item_scope(session: Session):
+    older = _make_item(session, "Older source item", "old summary")
+    target = _make_item(session, "Target single item", "target summary")
+    canned = InvestmentTranslationSchema(
+        translations=[
+            InvestmentTranslationItem(
+                item_id=target.id,
+                title_zh="单条目标",
+                summary_zh="目标摘要",
+            )
+        ]
+    )
+    client = MockStructuredOutputClient(outputs={InvestmentTranslationSchema: canned})
+    job = TaskJob(
+        id="job_translate_one_item",
+        workspace_id="ws_default",
+        job_type=INVESTMENT_TRANSLATION_JOB_TYPE,
+        target_type="investment_item",
+        target_id=target.id,
+        status="running",
+        input={"workspace_id": "ws_default", "item_id": target.id},
+    )
+    session.add(job)
+    session.commit()
+
+    out = InvestmentTranslationJobHandler().handle(job, session, client)
+
+    assert out["translated"] == 1
+    session.refresh(older)
+    session.refresh(target)
+    assert older.title_zh is None
+    assert target.title_zh == "单条目标"
+
+
 def test_translation_handler_raises_when_llm_fails(session: Session):
-    _make_item(session, "FOMC statement", "rate held")
+    _make_item(session, "FOMC statement", "rate held", source_id="src_x")
 
     class _BoomClient:
         def generate(self, prompt, schema):  # noqa: ANN001

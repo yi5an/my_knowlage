@@ -20,6 +20,7 @@ import { InvestmentItemDrawer } from "../components/investment/InvestmentItemDra
 import { ImpactTag } from "../components/investment/ImpactTag";
 import { InfoLayerTag } from "../components/investment/InfoLayerTag";
 import { ReviewStatusTag } from "../components/investment/ReviewStatusTag";
+import { TranslationStatusTag } from "../components/investment/TranslationStatusTag";
 import { ApiError } from "../services/client";
 import {
   investmentApi,
@@ -143,14 +144,17 @@ export function InvestmentItemsPage() {
       key: "title",
       render: (_, r) => (
         <Space direction="vertical" size={0}>
-          <Typography.Link
-            onClick={() => {
-              setSelected(r);
-              setDrawerOpen(true);
-            }}
-          >
-            {r.title_zh ?? r.title}
-          </Typography.Link>
+          <Space size={6} wrap>
+            <Typography.Link
+              onClick={() => {
+                setSelected(r);
+                setDrawerOpen(true);
+              }}
+            >
+              {r.title_zh ?? r.title}
+            </Typography.Link>
+            <TranslationStatusTag item={r} />
+          </Space>
           {(r.summary_zh ?? r.summary) && (
             <Typography.Text
               type="secondary"

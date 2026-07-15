@@ -15,10 +15,24 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.infrastructure.database import Base, get_db_session
-from app.infrastructure.models import TaskJob, Workspace
+from app.infrastructure.models import (
+    InvestmentDigestSnapshot,
+    InvestmentFact,
+    InvestmentItem,
+    InvestmentSignal,
+    TaskJob,
+    Workspace,
+)
 from app.main import app
+from app.services.investment.fact_extraction import (
+    INVESTMENT_FACT_EXTRACTION_JOB_TYPE,
+    InvestmentFactExtractionItem,
+    InvestmentFactExtractionSchema,
+    InvestmentFactJobHandler,
+)
 from app.services.investment.investment_dependencies import get_investment_service
 from app.services.investment.service import InvestmentService
+from app.services.structured_output import MockStructuredOutputClient
 
 
 @pytest.fixture()
@@ -83,6 +97,256 @@ def test_update_watchlist(client: TestClient):
     assert patched.json()["notes"] == "watch earnings"
 
 
+def test_bind_source_to_watchlist_and_filter_items(
+    client: TestClient,
+):
+    watchlist = client.post(
+        "/api/v1/investment/watchlist",
+        json={"name": "NVIDIA", "watch_type": "company", "ticker": "NVDA"},
+    ).json()
+    source = client.post(
+        "/api/v1/investment/sources",
+        json={
+            "source_type": "x_web",
+            "name": "NVIDIA X",
+            "config": {"mode": "account", "username": "nvidia"},
+            "poll_interval_seconds": 900,
+        },
+    ).json()
+    other_source = client.post(
+        "/api/v1/investment/sources",
+        json={
+            "source_type": "x_web",
+            "name": "Elon X",
+            "config": {"mode": "account", "username": "elonmusk"},
+            "poll_interval_seconds": 900,
+        },
+    ).json()
+
+    bind = client.post(
+        f"/api/v1/investment/watchlist/{watchlist['id']}/sources/{source['id']}"
+    )
+    duplicate_bind = client.post(
+        f"/api/v1/investment/watchlist/{watchlist['id']}/sources/{source['id']}"
+    )
+
+    assert bind.status_code == 200, bind.text
+    assert duplicate_bind.status_code == 200, duplicate_bind.text
+    assert bind.json()["default_watchlist_ids"] == [watchlist["id"]]
+    assert duplicate_bind.json()["default_watchlist_ids"] == [watchlist["id"]]
+
+    sources = client.get(f"/api/v1/investment/watchlist/{watchlist['id']}/sources")
+    assert sources.status_code == 200
+    assert [s["id"] for s in sources.json()] == [source["id"]]
+
+    imported_nvda = client.post(
+        "/api/v1/investment/import/x-posts",
+        json={
+            "source_id": source["id"],
+            "collector_id": "collector_test",
+            "items": [
+                {
+                    "tweet_id": "2075367885438890135",
+                    "author_username": "nvidia",
+                    "text": "NVIDIA announces a new AI platform",
+                    "published_at": "2026-07-14T00:00:00Z",
+                    "url": "https://x.com/nvidia/status/2075367885438890135",
+                    "metrics": {"like_count": 10},
+                    "media": [],
+                }
+            ],
+        },
+    )
+    imported_other = client.post(
+        "/api/v1/investment/import/x-posts",
+        json={
+            "source_id": other_source["id"],
+            "collector_id": "collector_test",
+            "items": [
+                {
+                    "tweet_id": "2075367885438890136",
+                    "author_username": "elonmusk",
+                    "text": "Tesla unrelated post",
+                    "published_at": "2026-07-14T00:00:00Z",
+                    "url": "https://x.com/elonmusk/status/2075367885438890136",
+                    "metrics": {"like_count": 2},
+                    "media": [],
+                }
+            ],
+        },
+    )
+    assert imported_nvda.status_code == 200, imported_nvda.text
+    assert imported_other.status_code == 200, imported_other.text
+
+    filtered = client.get(f"/api/v1/investment/items?watchlist_id={watchlist['id']}")
+    assert filtered.status_code == 200
+    assert [item["source_id"] for item in filtered.json()] == [source["id"]]
+    assert filtered.json()[0]["title"] == "@nvidia: NVIDIA announces a new AI platform"
+
+    unbind = client.delete(
+        f"/api/v1/investment/watchlist/{watchlist['id']}/sources/{source['id']}"
+    )
+    assert unbind.status_code == 200
+    assert unbind.json()["default_watchlist_ids"] == []
+
+    assert client.get(f"/api/v1/investment/items?watchlist_id={watchlist['id']}").json() == []
+
+
+def test_list_item_facts(client: TestClient, db_session: Session):
+    item = client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "NVIDIA announces platform",
+            "source_url": "https://x.com/nvidia/status/1",
+        },
+    ).json()
+    db_session.add(
+        InvestmentFact(
+            id="fact_api",
+            workspace_id="ws_default",
+            source_item_id=item["id"],
+            fact_text="NVIDIA announced a platform.",
+            fact_text_zh="英伟达宣布了一个平台。",
+            fact_type="company_update",
+            entities=["NVIDIA"],
+            evidence_url="https://x.com/nvidia/status/1",
+            evidence_excerpt="NVIDIA announces platform",
+            confidence=0.8,
+            verification_status="pending",
+        )
+    )
+    db_session.commit()
+
+    response = client.get(f"/api/v1/investment/items/{item['id']}/facts")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": "fact_api",
+            "workspace_id": "ws_default",
+            "source_item_id": item["id"],
+            "watchlist_id": None,
+            "fact_text": "NVIDIA announced a platform.",
+            "fact_text_zh": "英伟达宣布了一个平台。",
+            "fact_type": "company_update",
+            "entities": ["NVIDIA"],
+            "evidence_url": "https://x.com/nvidia/status/1",
+            "evidence_excerpt": "NVIDIA announces platform",
+            "evidence_timestamp": None,
+            "confidence": 0.8,
+            "verification_status": "pending",
+            "created_at": response.json()[0]["created_at"],
+            "updated_at": response.json()[0]["updated_at"],
+        }
+    ]
+
+
+def test_list_facts_can_filter_by_source_watchlist_and_status(
+    client: TestClient, db_session: Session
+):
+    watchlist = client.post(
+        "/api/v1/investment/watchlist",
+        json={"name": "AI Infra", "watch_type": "theme"},
+    ).json()
+    source = client.post(
+        "/api/v1/investment/sources",
+        json={
+            "source_type": "x_web",
+            "name": "NVIDIA X",
+            "config": {"mode": "account", "username": "nvidia"},
+        },
+    ).json()
+    other_source = client.post(
+        "/api/v1/investment/sources",
+        json={
+            "source_type": "x_web",
+            "name": "Macro X",
+            "config": {"mode": "keyword", "query": "fed rates"},
+        },
+    ).json()
+    item = client.post(
+        "/api/v1/investment/items",
+        json={
+            "source_id": source["id"],
+            "title": "NVIDIA announces platform",
+            "source_url": "https://x.com/nvidia/status/1",
+        },
+    ).json()
+    verified_item = client.post(
+        "/api/v1/investment/items",
+        json={
+            "source_id": source["id"],
+            "title": "NVIDIA verifies guidance",
+            "source_url": "https://x.com/nvidia/status/2",
+        },
+    ).json()
+    other_item = client.post(
+        "/api/v1/investment/items",
+        json={
+            "source_id": other_source["id"],
+            "title": "Fed announces policy",
+            "source_url": "https://x.com/fed/status/1",
+        },
+    ).json()
+    db_session.add_all(
+        [
+            InvestmentFact(
+                id="fact_source_pending",
+                workspace_id="ws_default",
+                source_item_id=item["id"],
+                watchlist_id=watchlist["id"],
+                fact_text="NVIDIA announced a platform.",
+                fact_type="company_update",
+                evidence_url="https://x.com/nvidia/status/1",
+                evidence_excerpt="NVIDIA announces platform",
+                confidence=0.9,
+                verification_status="pending",
+            ),
+            InvestmentFact(
+                id="fact_source_verified",
+                workspace_id="ws_default",
+                source_item_id=verified_item["id"],
+                watchlist_id=watchlist["id"],
+                fact_text="NVIDIA verified guidance.",
+                fact_type="company_update",
+                evidence_url="https://x.com/nvidia/status/2",
+                evidence_excerpt="NVIDIA verifies guidance",
+                confidence=0.8,
+                verification_status="verified",
+            ),
+            InvestmentFact(
+                id="fact_other_source",
+                workspace_id="ws_default",
+                source_item_id=other_item["id"],
+                fact_text="Fed announced policy.",
+                fact_type="policy_update",
+                evidence_url="https://x.com/fed/status/1",
+                evidence_excerpt="Fed announces policy",
+                confidence=0.7,
+                verification_status="pending",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    by_source = client.get(
+        f"/api/v1/investment/facts?source_id={source['id']}&verification_status=pending"
+    )
+
+    assert by_source.status_code == 200
+    assert [fact["id"] for fact in by_source.json()] == ["fact_source_pending"]
+
+    by_watchlist = client.get(
+        f"/api/v1/investment/facts?watchlist_id={watchlist['id']}"
+    )
+
+    assert by_watchlist.status_code == 200
+    assert [fact["id"] for fact in by_watchlist.json()] == [
+        "fact_source_pending",
+        "fact_source_verified",
+    ]
+
+
 # --- item ------------------------------------------------------------------
 
 
@@ -109,6 +373,133 @@ def test_create_and_list_item(client: TestClient):
     # filter by a different layer returns nothing
     empty = client.get("/api/v1/investment/items?info_layer=opinion")
     assert empty.json() == []
+
+
+def test_create_item_enqueues_translation_job(
+    client: TestClient,
+    db_session: Session,
+):
+    resp = client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "AI capex thread",
+            "summary": "Hyperscaler capex remains strong.",
+            "info_layer": "opinion",
+            "source_credibility": "unverified",
+            "source_url": "https://x.com/investor/status/123",
+        },
+    )
+
+    assert resp.status_code == 201, resp.text
+    jobs = list(
+        db_session.query(TaskJob).filter(TaskJob.job_type == "investment_translation")
+    )
+    assert len(jobs) == 1
+    assert jobs[0].status == "pending"
+    assert jobs[0].workspace_id == "ws_default"
+    assert jobs[0].target_type == "investment_item"
+    assert jobs[0].input == {"workspace_id": "ws_default", "item_id": resp.json()["id"]}
+
+
+def test_x_import_fact_extraction_flow_can_be_processed_and_read(
+    client: TestClient,
+    db_session: Session,
+):
+    watchlist = client.post(
+        "/api/v1/investment/watchlist",
+        json={"name": "POTUS", "watch_type": "official_account", "keywords": ["policy"]},
+    ).json()
+    thesis = client.post(
+        "/api/v1/investment/theses",
+        json={
+            "watchlist_id": watchlist["id"],
+            "title": "POTUS policy changes can move markets",
+            "body": "Track new policy announcements from official POTUS sources.",
+        },
+    ).json()
+    source = client.post(
+        "/api/v1/investment/sources",
+        json={
+            "source_type": "x_web",
+            "name": "POTUS",
+            "config": {"mode": "account", "username": "POTUS"},
+            "default_watchlist_ids": [watchlist["id"]],
+            "poll_interval_seconds": 900,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/investment/import/x-posts",
+        json={
+            "source_id": source["id"],
+            "collector_id": "collector_test",
+            "items": [
+                {
+                    "tweet_id": "2075367885438890137",
+                    "author_username": "POTUS",
+                    "text": "The President announced a new policy.",
+                    "published_at": "2026-07-14T00:00:00Z",
+                    "url": "https://x.com/POTUS/status/2075367885438890137",
+                    "metrics": {"like_count": 5},
+                    "media": [],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    jobs = list(
+        db_session.query(TaskJob).filter(
+            TaskJob.job_type == INVESTMENT_FACT_EXTRACTION_JOB_TYPE
+        )
+    )
+    assert len(jobs) == 1
+    assert jobs[0].target_type == "investment_source"
+    assert jobs[0].target_id == source["id"]
+    assert jobs[0].input == {"workspace_id": "ws_default", "source_id": source["id"]}
+
+    item = client.get(f"/api/v1/investment/items?source_id={source['id']}").json()[0]
+    out = InvestmentFactJobHandler().handle(
+        jobs[0],
+        db_session,
+        MockStructuredOutputClient(
+            outputs={
+                InvestmentFactExtractionSchema: InvestmentFactExtractionSchema(
+                    facts=[
+                        InvestmentFactExtractionItem(
+                            fact_text="The President announced a new policy.",
+                            fact_text_zh="总统宣布了一项新政策。",
+                            fact_type="policy_update",
+                            entities=["POTUS"],
+                            evidence_excerpt="The President announced a new policy.",
+                            confidence=0.8,
+                        )
+                    ]
+                )
+            }
+        ),
+    )
+
+    assert out["facts_created"] == 1
+    facts = client.get(f"/api/v1/investment/items/{item['id']}/facts")
+    assert facts.status_code == 200
+    assert facts.json()[0]["fact_text_zh"] == "总统宣布了一项新政策。"
+    assert facts.json()[0]["evidence_url"] == item["source_url"]
+    assert facts.json()[0]["confidence"] == 0.8
+
+    signals = client.get("/api/v1/investment/signals")
+    assert signals.status_code == 200
+    assert signals.json()[0]["signal_type"] == "policy_update"
+    assert signals.json()[0]["fact_ids"] == [facts.json()[0]["id"]]
+    assert signals.json()[0]["source_count"] == 1
+
+    claims = client.get(
+        f"/api/v1/investment/claims?watchlist_id={watchlist['id']}&verification_status=pending"
+    )
+    assert claims.status_code == 200
+    assert len(claims.json()) == 1
+    assert claims.json()[0]["thesis_id"] == thesis["id"]
+    assert claims.json()[0]["claim_text"] == "总统宣布了一项新政策。"
 
 
 def test_item_response_includes_attachments_from_raw_payload(client: TestClient):
@@ -202,6 +593,52 @@ def test_create_source_and_poll_enqueues_job(client: TestClient, db_session: Ses
     assert job.status == "pending"
 
 
+def test_google_news_rss_source_is_marked_disabled_when_x_first(client: TestClient):
+    resp = client.post(
+        "/api/v1/investment/sources",
+        json={
+            "source_type": "rss",
+            "name": "Google News - Fed",
+            "url": "https://news.google.com/rss/search?q=Federal%20Reserve",
+        },
+    )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["enabled"] is False
+    assert "Google News fallback disabled" in body["last_error"]
+
+
+def test_create_default_x_sources_is_idempotent(client: TestClient):
+    first = client.post("/api/v1/investment/sources/defaults")
+
+    assert first.status_code == 201, first.text
+    first_body = first.json()
+    assert [source["name"] for source in first_body] == [
+        "POTUS 官方",
+        "特朗普个人",
+        "NVIDIA 官方",
+        "马斯克",
+        "美联储主题",
+    ]
+    assert first_body[0]["config"] == {
+        "mode": "account",
+        "username": "POTUS",
+        "max_items_per_poll": 50,
+    }
+    assert first_body[-1]["config"]["mode"] == "keyword"
+
+    second = client.post("/api/v1/investment/sources/defaults")
+
+    assert second.status_code == 201
+    listed = client.get("/api/v1/investment/sources")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 5
+    assert [source["id"] for source in second.json()] == [
+        source["id"] for source in first_body
+    ]
+
+
 def test_poll_is_idempotent_while_pending(client: TestClient, db_session: Session):
     src = client.post(
         "/api/v1/investment/sources", json={"source_type": "rss", "name": "s"}
@@ -260,10 +697,43 @@ def test_create_thesis_and_claim(client: TestClient):
     assert len(listed.json()) == 1
 
 
+def test_claim_status_action_updates_status_summary_and_thesis(client: TestClient):
+    wl = client.post(
+        "/api/v1/investment/watchlist", json={"name": "NVDA", "ticker": "NVDA"}
+    ).json()
+    thesis = client.post(
+        "/api/v1/investment/theses",
+        json={"watchlist_id": wl["id"], "title": "AI demand stays strong"},
+    ).json()
+    claim = client.post(
+        "/api/v1/investment/claims",
+        json={
+            "watchlist_id": wl["id"],
+            "claim_text": "Data center revenue doubles",
+            "required_evidence": ["10-K segment data"],
+        },
+    ).json()
+
+    response = client.post(
+        f"/api/v1/investment/claims/{claim['id']}/status",
+        json={
+            "verification_status": "refuted",
+            "verification_summary": "最新财报没有支持收入翻倍。",
+            "thesis_id": thesis["id"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["verification_status"] == "refuted"
+    assert body["verification_summary"] == "最新财报没有支持收入翻倍。"
+    assert body["thesis_id"] == thesis["id"]
+
+
 # --- dashboard (real counts, no sample data) -------------------------------
 
 
-def test_dashboard_reflects_real_counts(client: TestClient):
+def test_dashboard_reflects_real_counts(client: TestClient, db_session: Session):
     # empty workspace -> all zero
     empty = client.get("/api/v1/investment/dashboard").json()
     assert empty == {
@@ -272,6 +742,10 @@ def test_dashboard_reflects_real_counts(client: TestClient):
         "theses_challenged_count": 0,
         "today_primary_count": 0,
         "today_macro_count": 0,
+        "untranslated_count": 0,
+        "unextracted_count": 0,
+        "unsignaled_count": 0,
+        "failed_job_count": 0,
     }
 
     client.post(
@@ -282,12 +756,56 @@ def test_dashboard_reflects_real_counts(client: TestClient):
         "/api/v1/investment/items",
         json={"title": "b", "action_status": "tracking", "thesis_impact": "weakens"},
     )
+    suggested = client.post(
+        "/api/v1/investment/items",
+        json={"title": "suggested challenge", "action_status": "tracking"},
+    ).json()
+    suggested_item = db_session.get(InvestmentItem, suggested["id"])
+    assert suggested_item is not None
+    suggested_item.suggested_thesis_impact = "contradicts"
+    db_session.commit()
     client.post("/api/v1/investment/claims", json={"claim_text": "c"})
+    translated = client.post(
+        "/api/v1/investment/items",
+        json={"title": "translated", "summary": "done", "action_status": "tracking"},
+    ).json()
+    translated_item = db_session.get(InvestmentItem, translated["id"])
+    assert translated_item is not None
+    translated_item.title_zh = "已翻译"
+    translated_item.summary_zh = "完成"
+    db_session.add(
+        InvestmentFact(
+            id="fact_ops",
+            workspace_id="ws_default",
+            source_item_id=translated["id"],
+            fact_text="ops fact",
+            fact_type="ops",
+            evidence_excerpt="ops fact",
+            confidence=0.8,
+            verification_status="pending",
+        )
+    )
+    db_session.add(
+        TaskJob(
+            id="job_ops_failed",
+            workspace_id="ws_default",
+            job_type="investment_fact_extract",
+            target_type="investment_item",
+            target_id=suggested["id"],
+            status="failed",
+            error_message="boom",
+        )
+    )
+    db_session.commit()
 
     filled = client.get("/api/v1/investment/dashboard").json()
     assert filled["pending_review_count"] == 1
-    assert filled["theses_challenged_count"] == 1
+    assert filled["theses_challenged_count"] == 2
     assert filled["pending_claims_count"] == 1
+    assert filled["untranslated_count"] == 3
+    assert filled["unextracted_count"] == 3
+    assert filled["unsignaled_count"] == 1
+    assert filled["failed_job_count"] == 1
 
 
 # --- macro-events & digest -------------------------------------------------
@@ -348,7 +866,7 @@ def test_macro_events_importance_filter(client: TestClient):
     assert only_high[0]["importance"] == "high"
 
 
-def test_digest_aggregates_counts_and_lists(client: TestClient):
+def test_digest_aggregates_counts_and_lists(client: TestClient, db_session: Session):
     now_iso = datetime.now(UTC).isoformat()
     client.post(
         "/api/v1/investment/items",
@@ -369,6 +887,46 @@ def test_digest_aggregates_counts_and_lists(client: TestClient):
         },
     )
     client.post("/api/v1/investment/claims", json={"claim_text": "claim to verify"})
+    item = client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "NVIDIA platform",
+            "source_url": "https://x.com/nvidia/status/1",
+            "action_status": "tracking",
+        },
+    ).json()
+    db_session.add(
+        InvestmentFact(
+            id="fact_digest",
+            workspace_id="ws_default",
+            source_item_id=item["id"],
+            fact_text="NVIDIA announced a platform.",
+            fact_text_zh="英伟达宣布了一个平台。",
+            fact_type="company_update",
+            entities=["NVIDIA"],
+            evidence_url="https://x.com/nvidia/status/1",
+            evidence_excerpt="NVIDIA platform",
+            confidence=0.8,
+            verification_status="pending",
+        )
+    )
+    db_session.add(
+        InvestmentSignal(
+            id="sig_digest",
+            workspace_id="ws_default",
+            title="NVIDIA / company_update",
+            summary="英伟达宣布了一个平台。",
+            signal_type="company_update",
+            first_seen_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+            source_count=1,
+            fact_ids=["fact_digest"],
+            item_ids=[item["id"]],
+            confidence=0.8,
+            status="tracking",
+        )
+    )
+    db_session.commit()
 
     resp = client.get("/api/v1/investment/digest")
     assert resp.status_code == 200
@@ -381,3 +939,215 @@ def test_digest_aggregates_counts_and_lists(client: TestClient):
     assert "a" in titles
     assert any(c["claim_text"] == "claim to verify" for c in body["pending_claims"])
     assert any(i["title"] == "b" for i in body["challenged_items"])
+    assert body["pending_facts"][0]["id"] == "fact_digest"
+    assert body["early_signals"][0]["id"] == "sig_digest"
+
+
+def test_digest_can_be_scoped_to_watchlist(client: TestClient, db_session: Session):
+    wl_ai = client.post(
+        "/api/v1/investment/watchlist",
+        json={"name": "AI Infra", "watch_type": "theme"},
+    ).json()
+    wl_macro = client.post(
+        "/api/v1/investment/watchlist",
+        json={"name": "Macro", "watch_type": "macro"},
+    ).json()
+    src_ai = client.post(
+        "/api/v1/investment/sources",
+        json={
+            "source_type": "x_web",
+            "name": "NVIDIA",
+            "config": {"mode": "account", "username": "nvidia"},
+            "default_watchlist_ids": [wl_ai["id"]],
+            "poll_interval_seconds": 900,
+        },
+    ).json()
+    src_macro = client.post(
+        "/api/v1/investment/sources",
+        json={
+            "source_type": "x_web",
+            "name": "POTUS",
+            "config": {"mode": "account", "username": "POTUS"},
+            "default_watchlist_ids": [wl_macro["id"]],
+            "poll_interval_seconds": 900,
+        },
+    ).json()
+    ai_item = client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "AI data center demand",
+            "source_id": src_ai["id"],
+            "action_status": "pending_review",
+            "published_at": datetime.now(UTC).isoformat(),
+        },
+    ).json()
+    macro_item = client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "Macro policy note",
+            "source_id": src_macro["id"],
+            "action_status": "pending_review",
+            "published_at": datetime.now(UTC).isoformat(),
+        },
+    ).json()
+    client.post(
+        "/api/v1/investment/claims",
+        json={"watchlist_id": wl_ai["id"], "claim_text": "AI claim"},
+    )
+    client.post(
+        "/api/v1/investment/claims",
+        json={"watchlist_id": wl_macro["id"], "claim_text": "Macro claim"},
+    )
+    db_session.add(
+        InvestmentFact(
+            id="fact_ai_digest",
+            workspace_id="ws_default",
+            source_item_id=ai_item["id"],
+            watchlist_id=wl_ai["id"],
+            fact_text="AI demand remains strong.",
+            fact_type="demand_signal",
+            entities=["NVIDIA"],
+            evidence_url="https://x.com/nvidia/status/1",
+            evidence_excerpt="AI demand remains strong.",
+            confidence=0.8,
+            verification_status="pending",
+        )
+    )
+    db_session.add(
+        InvestmentFact(
+            id="fact_macro_digest",
+            workspace_id="ws_default",
+            source_item_id=macro_item["id"],
+            watchlist_id=wl_macro["id"],
+            fact_text="Macro policy changed.",
+            fact_type="policy_update",
+            entities=["POTUS"],
+            evidence_url="https://x.com/POTUS/status/1",
+            evidence_excerpt="Macro policy changed.",
+            confidence=0.7,
+            verification_status="pending",
+        )
+    )
+    db_session.add(
+        InvestmentSignal(
+            id="sig_ai_digest",
+            workspace_id="ws_default",
+            watchlist_id=wl_ai["id"],
+            title="NVIDIA / demand_signal",
+            summary="AI demand remains strong.",
+            signal_type="demand_signal",
+            first_seen_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+            source_count=1,
+            fact_ids=["fact_ai_digest"],
+            item_ids=[ai_item["id"]],
+            confidence=0.8,
+            status="tracking",
+        )
+    )
+    db_session.add(
+        InvestmentSignal(
+            id="sig_macro_digest",
+            workspace_id="ws_default",
+            watchlist_id=wl_macro["id"],
+            title="POTUS / policy_update",
+            summary="Macro policy changed.",
+            signal_type="policy_update",
+            first_seen_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+            source_count=1,
+            fact_ids=["fact_macro_digest"],
+            item_ids=[macro_item["id"]],
+            confidence=0.7,
+            status="tracking",
+        )
+    )
+    db_session.commit()
+
+    body = client.get(f"/api/v1/investment/digest?watchlist_id={wl_ai['id']}").json()
+
+    assert [item["title"] for item in body["today_highlights"]] == [
+        "AI data center demand"
+    ]
+    assert [claim["claim_text"] for claim in body["pending_claims"]] == ["AI claim"]
+    assert [fact["id"] for fact in body["pending_facts"]] == ["fact_ai_digest"]
+    assert [signal["id"] for signal in body["early_signals"]] == ["sig_ai_digest"]
+
+
+def test_digest_snapshot_persists_current_digest(client: TestClient, db_session: Session):
+    watchlist = client.post(
+        "/api/v1/investment/watchlist",
+        json={"name": "AI Infra", "watch_type": "theme"},
+    ).json()
+    source = client.post(
+        "/api/v1/investment/sources",
+        json={
+            "source_type": "x_web",
+            "name": "NVIDIA",
+            "config": {"mode": "account", "username": "nvidia"},
+            "default_watchlist_ids": [watchlist["id"]],
+            "poll_interval_seconds": 900,
+        },
+    ).json()
+    item = client.post(
+        "/api/v1/investment/items",
+        json={
+            "title": "AI data center demand",
+            "source_id": source["id"],
+            "action_status": "pending_review",
+            "published_at": datetime.now(UTC).isoformat(),
+        },
+    ).json()
+    db_session.add(
+        InvestmentFact(
+            id="fact_snapshot",
+            workspace_id="ws_default",
+            source_item_id=item["id"],
+            watchlist_id=watchlist["id"],
+            fact_text="AI demand remains strong.",
+            fact_type="demand_signal",
+            entities=["NVIDIA"],
+            evidence_url="https://x.com/nvidia/status/1",
+            evidence_excerpt="AI demand remains strong.",
+            confidence=0.8,
+            verification_status="pending",
+        )
+    )
+    db_session.add(
+        InvestmentSignal(
+            id="sig_snapshot",
+            workspace_id="ws_default",
+            watchlist_id=watchlist["id"],
+            title="NVIDIA / demand_signal",
+            summary="AI demand remains strong.",
+            signal_type="demand_signal",
+            first_seen_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+            source_count=1,
+            fact_ids=["fact_snapshot"],
+            item_ids=[item["id"]],
+            confidence=0.8,
+            status="tracking",
+        )
+    )
+    db_session.commit()
+
+    created = client.post(
+        f"/api/v1/investment/digest/snapshots?watchlist_id={watchlist['id']}"
+    )
+
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["watchlist_id"] == watchlist["id"]
+    assert body["digest"]["early_signals"][0]["id"] == "sig_snapshot"
+    assert body["digest"]["pending_facts"][0]["id"] == "fact_snapshot"
+
+    saved = db_session.get(InvestmentDigestSnapshot, body["id"])
+    assert saved is not None
+    assert saved.digest["early_signals"][0]["id"] == "sig_snapshot"
+
+    listed = client.get(
+        f"/api/v1/investment/digest/snapshots?watchlist_id={watchlist['id']}"
+    )
+    assert listed.status_code == 200
+    assert [snapshot["id"] for snapshot in listed.json()] == [body["id"]]

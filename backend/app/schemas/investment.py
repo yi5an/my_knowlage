@@ -668,6 +668,37 @@ class InvestmentSignalResponse(BaseModel):
     item_ids: list[str] = Field(default_factory=list)
     confidence: float
     status: str
+    signal_stage: str = Field(default="new")
+    source_layers: list[str] = Field(default_factory=list)
+    first_source_layer: str | None = None
+    first_source_id: str | None = None
+    validation_state: str = Field(default="pending")
+    validation_sources: list[str] = Field(default_factory=list)
+    market_feedback: dict[str, object] = Field(default_factory=dict)
+    lead_time_hours: float | None = None
+    information_edge_score: float = 0.0
+    actionability: str = Field(default="weak_signal")
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# --- source trace ----------------------------------------------------------
+
+
+class SourceTraceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    theme_id: str | None = None
+    target_item_id: str
+    source_item_id: str | None = None
+    trace_type: str
+    match_reason: str
+    matched_fact: str | None = None
+    lead_time_hours: float | None = None
+    confidence: float
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -715,6 +746,14 @@ class InvestmentDigestResponse(BaseModel):
     challenged_items: list[InvestmentItemResponse] = Field(default_factory=list)
     early_signals: list[InvestmentSignalResponse] = Field(default_factory=list)
     pending_facts: list[InvestmentFactResponse] = Field(default_factory=list)
+
+
+class InformationEdgeDigestResponse(BaseModel):
+    generated_at: datetime
+    top_signals: list[InvestmentSignalResponse] = Field(default_factory=list)
+    source_traces: list[SourceTraceResponse] = Field(default_factory=list)
+    unvalidated_signals: list[InvestmentSignalResponse] = Field(default_factory=list)
+    stale_or_noise: list[InvestmentSignalResponse] = Field(default_factory=list)
 
 
 class InvestmentDigestSnapshotResponse(BaseModel):

@@ -38,6 +38,7 @@ import {
   updateVisualFrameMindmap,
   youtubeTimestampUrl,
   type VideoFrameAnalysis,
+  type SourceTraceCandidate,
   type VisualMindmapTreeNode,
   type VideoSummaryCard,
 } from "../services/youtubeApi";
@@ -203,6 +204,15 @@ export function VideoSummaryPage() {
           </Row>
         </Card>
 
+        {card.source_traces?.length > 0 && (
+          <Card title="可能信息来源">
+            <List
+              dataSource={card.source_traces}
+              renderItem={(trace) => <SourceTraceItem trace={trace} />}
+            />
+          </Card>
+        )}
+
         <Tabs
           items={[
             {
@@ -308,6 +318,43 @@ export function VideoSummaryPage() {
       </Space>
     </main>
   );
+}
+
+function SourceTraceItem({ trace }: { trace: SourceTraceCandidate }) {
+  return (
+    <List.Item>
+      <List.Item.Meta
+        title={
+          <Space wrap>
+            <Text strong>{trace.source_title}</Text>
+            {trace.source_name && <Tag>{trace.source_name}</Tag>}
+            {trace.lead_time_hours !== null && (
+              <Tag color="blue">领先 {formatLeadHours(trace.lead_time_hours)}</Tag>
+            )}
+            <Tag>置信度 {Math.round(trace.confidence * 100)}%</Tag>
+          </Space>
+        }
+        description={
+          <Space direction="vertical" size={2}>
+            <span>匹配事实：{trace.matched_fact}</span>
+            <span>证据：{trace.evidence_excerpt}</span>
+            {trace.source_url && (
+              <a href={trace.source_url} target="_blank" rel="noreferrer">
+                打开原始来源
+              </a>
+            )}
+          </Space>
+        }
+      />
+    </List.Item>
+  );
+}
+
+function formatLeadHours(value: number): string {
+  if (Number.isInteger(value)) {
+    return `${value}h`;
+  }
+  return `${value.toFixed(1)}h`;
 }
 
 const frameTypeLabel: Record<VideoFrameAnalysis["frame_type"], string> = {

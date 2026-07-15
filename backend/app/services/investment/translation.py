@@ -48,6 +48,8 @@ class InvestmentTranslationService:
         workspace_id: str = "ws_default",
         limit: int = 20,
         *,
+        source_id: str | None = None,
+        item_id: str | None = None,
         raise_on_failure: bool = False,
     ) -> dict[str, int]:
         """Translate up to ``limit`` items lacking Chinese title or summary.
@@ -56,18 +58,28 @@ class InvestmentTranslationService:
         failures and returns what got through; with ``raise_on_failure=True``,
         raises a RuntimeError so callers can surface the failure.
         """
+        conditions = [
+            InvestmentItem.workspace_id == workspace_id,
+            (InvestmentItem.title_zh.is_(None))
+            | (
+                InvestmentItem.summary.is_not(None)
+                & InvestmentItem.summary_zh.is_(None)
+            ),
+        ]
+        if source_id is not None:
+            conditions.append(InvestmentItem.source_id == source_id)
+        if item_id is not None:
+            conditions.append(InvestmentItem.id == item_id)
+
         items = list(
             self.session.scalars(
                 select(InvestmentItem)
-                .where(
-                    InvestmentItem.workspace_id == workspace_id,
-                    (InvestmentItem.title_zh.is_(None))
-                    | (
-                        InvestmentItem.summary.is_not(None)
-                        & InvestmentItem.summary_zh.is_(None)
-                    ),
+                .where(*conditions)
+                .order_by(
+                    InvestmentItem.published_at.is_(None),
+                    InvestmentItem.published_at.desc(),
+                    InvestmentItem.created_at.desc(),
                 )
-                .order_by(InvestmentItem.created_at)
                 .limit(limit)
             )
         )

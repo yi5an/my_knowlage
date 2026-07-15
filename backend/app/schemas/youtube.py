@@ -260,6 +260,18 @@ class ManualSummaryResponse(BaseModel):
     status: str
 
 
+class SourceTraceCandidate(BaseModel):
+    source_item_id: str
+    source_title: str
+    source_name: str | None = None
+    source_url: str | None = None
+    published_at: datetime | None = None
+    matched_fact: str
+    evidence_excerpt: str
+    lead_time_hours: float | None = None
+    confidence: float
+
+
 class VideoSummaryCard(BaseModel):
     """The full summary card as returned to the frontend."""
 
@@ -276,3 +288,4 @@ class VideoSummaryCard(BaseModel):
     transcript: str | None = None
     transcript_url: HttpUrl | None = None
     visual_frames: list[VideoFrameAnalysisResponse] = Field(default_factory=list)
+    source_traces: list[SourceTraceCandidate] = Field(default_factory=list)

@@ -114,6 +114,46 @@ describe("VideoSummaryPage", () => {
     expect(screen.getByText("[00:30 ↗]")).toBeInTheDocument();
   });
 
+  it("renders possible upstream source traces", async () => {
+    const tracedCard = {
+      ...summaryCard,
+      source_traces: [
+        {
+          source_item_id: "inv_x_trace",
+          source_title: "@nvidia: AI data center capex remains strong",
+          source_name: "@nvidia",
+          source_url: "https://x.com/nvidia/status/1",
+          published_at: "2026-07-15T08:00:00Z",
+          matched_fact: "AI data center capex remains strong.",
+          evidence_excerpt: "AI data center capex remains strong",
+          lead_time_hours: 4,
+          confidence: 0.91,
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/youtube/summaries/doc_yt_1")) {
+        return Response.json(tracedCard);
+      }
+      if (url.endsWith("/youtube/summaries/doc_yt_1/mark-read")) {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByText("可能信息来源")).toBeInTheDocument();
+    expect(screen.getByText("@nvidia: AI data center capex remains strong")).toBeInTheDocument();
+    expect(screen.getByText("领先 4h")).toBeInTheDocument();
+    expect(screen.getByText("匹配事实：AI data center capex remains strong.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "打开原始来源" })).toHaveAttribute(
+      "href",
+      "https://x.com/nvidia/status/1",
+    );
+  });
+
   it("cleans noisy visual OCR notes and hides duplicate raw text by default", async () => {
     const rawOcr = [
       "大摩|周期论剑",

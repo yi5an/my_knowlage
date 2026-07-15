@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,6 +34,12 @@ from app.services.investment.fetchers import (
     SourceConfigError,
     get_fetcher,
 )
+from app.services.investment.post_processing import (
+    INVESTMENT_CLASSIFICATION_JOB_TYPE,
+    INVESTMENT_FACT_EXTRACTION_JOB_TYPE,
+    INVESTMENT_TRANSLATION_JOB_TYPE,
+    enqueue_investment_post_processing,
+)
 from app.services.investment.repositories import (
     InvestmentItemRepository,
     InvestmentSourceRepository,
@@ -44,12 +49,6 @@ from app.services.task_worker import JobDeferred
 logger = logging.getLogger(__name__)
 
 INVESTMENT_FETCH_JOB_TYPE = "investment_fetch"
-INVESTMENT_TRANSLATION_JOB_TYPE = "investment_translation"
-INVESTMENT_CLASSIFICATION_JOB_TYPE = "investment_classification"
-
-
-def _new_job_id() -> str:
-    return f"job_{uuid4().hex}"
 
 
 def _build_http_client(source: InvestmentSource) -> HttpClient:
@@ -119,17 +118,16 @@ class InvestmentFetchJobHandler:
         seen = len(raw_items)
         skipped = seen - created
 
-        # Reflect success on the source row.
         InvestmentSourceRepository(session).mark_polled(source, success=True)
+        enqueue_investment_post_processing(
+            session,
+            workspace_id=source.workspace_id,
+            target_type="investment_source",
+            target_id=source.id,
+            source_id=source.id,
+            include_classification=True,
+        )
         session.commit()
-
-        # If source items need post-processing, enqueue jobs even when the
-        # current fetch was fully deduped. This backfills older rows created
-        # before translation/classification jobs existed.
-        if created > 0 or _has_untranslated_items(session, source):
-            _enqueue_translation(session, source)
-        if created > 0 or _has_unclassified_items(session, source):
-            _enqueue_classification(session, source)
 
         logger.info(
             "investment fetch: source %s -> %d seen, %d created, %d skipped",
@@ -205,12 +203,15 @@ class InvestmentFetchJobHandler:
         skipped = seen - created
 
         InvestmentSourceRepository(session).mark_polled(source, success=True)
+        enqueue_investment_post_processing(
+            session,
+            workspace_id=source.workspace_id,
+            target_type="investment_source",
+            target_id=source.id,
+            source_id=source.id,
+            include_classification=True,
+        )
         session.commit()
-
-        if created > 0 or _has_untranslated_items(session, source):
-            _enqueue_translation(session, source)
-        if created > 0 or _has_unclassified_items(session, source):
-            _enqueue_classification(session, source)
 
         return {
             "stage": "completed",
@@ -220,94 +221,6 @@ class InvestmentFetchJobHandler:
             "items_created": created,
             "items_skipped": skipped,
         }
-
-
-def _enqueue_translation(session: Session, source: InvestmentSource) -> None:
-    """Insert a pending ``investment_translation`` TaskJob for the source.
-
-    Idempotent: if there is already a pending/running translation job, do
-    nothing (the existing one will cover the new items, or a later fetch will
-    enqueue another once it completes).
-    """
-    existing = session.scalar(
-        select(TaskJob.id).where(
-            TaskJob.job_type == INVESTMENT_TRANSLATION_JOB_TYPE,
-            TaskJob.workspace_id == source.workspace_id,
-            TaskJob.status.in_(("pending", "running")),
-        )
-    )
-    if existing is not None:
-        return
-    session.add(
-        TaskJob(
-            id=_new_job_id(),
-            workspace_id=source.workspace_id,
-            job_type=INVESTMENT_TRANSLATION_JOB_TYPE,
-            target_type="investment_source",
-            target_id=source.id,
-            status="pending",
-            input={"source_id": source.id, "workspace_id": source.workspace_id},
-        )
-    )
-    session.commit()
-
-
-def _has_untranslated_items(session: Session, source: InvestmentSource) -> bool:
-    """True when this source still has title/summary text lacking Chinese text."""
-    return (
-        session.scalar(
-            select(InvestmentItem.id).where(
-                InvestmentItem.workspace_id == source.workspace_id,
-                InvestmentItem.source_id == source.id,
-                (InvestmentItem.title_zh.is_(None))
-                | (
-                    InvestmentItem.summary.is_not(None)
-                    & InvestmentItem.summary_zh.is_(None)
-                ),
-            )
-        )
-        is not None
-    )
-
-
-def _has_unclassified_items(session: Session, source: InvestmentSource) -> bool:
-    """True when this source still has items lacking suggested classification."""
-    return (
-        session.scalar(
-            select(InvestmentItem.id).where(
-                InvestmentItem.workspace_id == source.workspace_id,
-                InvestmentItem.source_id == source.id,
-                InvestmentItem.suggested_importance.is_(None),
-            )
-        )
-        is not None
-    )
-
-
-def _enqueue_classification(session: Session, source: InvestmentSource) -> None:
-    """Insert a pending ``investment_classification`` TaskJob for new items."""
-    existing = session.scalar(
-        select(TaskJob.id).where(
-            TaskJob.job_type == INVESTMENT_CLASSIFICATION_JOB_TYPE,
-            TaskJob.workspace_id == source.workspace_id,
-            TaskJob.target_id == source.id,
-            TaskJob.status.in_(("pending", "running")),
-        )
-    )
-    if existing is not None:
-        return
-    session.add(
-        TaskJob(
-            id=_new_job_id(),
-            workspace_id=source.workspace_id,
-            job_type=INVESTMENT_CLASSIFICATION_JOB_TYPE,
-            target_type="investment_source",
-            target_id=source.id,
-            status="pending",
-            input={"source_id": source.id, "workspace_id": source.workspace_id},
-        )
-    )
-    session.commit()
 
 
 class InvestmentClassificationJobHandler:
@@ -357,6 +270,7 @@ def register() -> None:
     from ``main.py`` lifespan. Idempotent. Imports ``task_worker._HANDLERS``
     lazily to avoid a circular import at module load.
     """
+    from app.services.investment.fact_extraction import _HANDLER as _FACT_HANDLER
     from app.services.investment.translation_job_handler import (
         _HANDLER as _TRANSLATION_HANDLER,
     )
@@ -365,6 +279,7 @@ def register() -> None:
     _HANDLERS[INVESTMENT_FETCH_JOB_TYPE] = _HANDLER
     _HANDLERS[INVESTMENT_TRANSLATION_JOB_TYPE] = _TRANSLATION_HANDLER
     _HANDLERS[INVESTMENT_CLASSIFICATION_JOB_TYPE] = _CLASSIFICATION_HANDLER
+    _HANDLERS[INVESTMENT_FACT_EXTRACTION_JOB_TYPE] = _FACT_HANDLER
 
 
 def now_utc() -> datetime:
