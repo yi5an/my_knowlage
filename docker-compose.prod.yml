@@ -43,8 +43,8 @@ services:
       LLM_TIMEOUT_SECONDS: ${KNOWPILOT_PROD_LLM_TIMEOUT_SECONDS:-300}
       GLM_ASR_BASE_URL: ${KNOWPILOT_PROD_ASR_BASE_URL:-http://asr-nano:8052/v1}
       GLM_ASR_MODEL: ${KNOWPILOT_PROD_ASR_MODEL:-fun-asr-nano}
-      YOUTUBE_VISUAL_ANALYSIS_ENABLED: ${YOUTUBE_VISUAL_ANALYSIS_ENABLED:-false}
-      OCR_BASE_URL: ${OCR_BASE_URL:-http://paddleocr:8866}
+      YOUTUBE_VISUAL_ANALYSIS_ENABLED: ${KNOWPILOT_PROD_YOUTUBE_VISUAL_ANALYSIS_ENABLED:-true}
+      OCR_BASE_URL: ${KNOWPILOT_PROD_OCR_BASE_URL:-http://host.docker.internal:8126}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
