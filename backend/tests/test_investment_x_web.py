@@ -173,6 +173,92 @@ def test_x_post_import_is_idempotent_and_refreshes_metrics(
     assert items[0].source_credibility == "personal_opinion"
 
 
+def test_x_image_post_import_uses_media_text_and_attachments(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    source = _create_x_source(client)
+
+    response = client.post(
+        "/api/v1/investment/import/x-posts",
+        json={
+            "source_id": source["id"],
+            "collector_id": "collector_test",
+            "items": [
+                {
+                    "tweet_id": "2077626867297681867",
+                    "author_username": "elonmusk",
+                    "text": "https://t.co/P1LR8HK9SM",
+                    "published_at": "2026-07-16T05:30:00Z",
+                    "url": "https://x.com/elonmusk/status/2077626867297681867",
+                    "metrics": {"like_count": 30065},
+                    "media": [
+                        {
+                            "type": "photo",
+                            "url": "https://pbs.twimg.com/media/HNU2oBdWYAA-b08.jpg",
+                            "preview_url": "https://pbs.twimg.com/media/HNU2oBdWYAA-b08.jpg",
+                            "text_excerpt": "Optimus production line: actuator yield improved.",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    item = db_session.scalar(select(InvestmentItem))
+    assert item is not None
+    assert item.title == "@elonmusk: Optimus production line: actuator yield improved."
+    assert item.summary == "图片文字：\nOptimus production line: actuator yield improved."
+    assert item.raw_payload["attachments"] == [
+        {
+            "title": "X 图片 1",
+            "url": "https://pbs.twimg.com/media/HNU2oBdWYAA-b08.jpg",
+            "content_type": "image",
+            "text_excerpt": "Optimus production line: actuator yield improved.",
+        }
+    ]
+
+
+def test_x_image_post_without_ocr_uses_media_title_instead_of_short_url(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    source = _create_x_source(client)
+
+    response = client.post(
+        "/api/v1/investment/import/x-posts",
+        json={
+            "source_id": source["id"],
+            "collector_id": "collector_test",
+            "items": [
+                {
+                    "tweet_id": "2077626867297681868",
+                    "author_username": "elonmusk",
+                    "text": "https://t.co/P1LR8HK9SM",
+                    "published_at": "2026-07-16T05:30:00Z",
+                    "url": "https://x.com/elonmusk/status/2077626867297681868",
+                    "metrics": {"like_count": 30065},
+                    "media": [
+                        {
+                            "type": "photo",
+                            "url": "https://pbs.twimg.com/media/HNU2oBdWYAA-b08.jpg",
+                            "preview_url": "https://pbs.twimg.com/media/HNU2oBdWYAA-b08.jpg",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    item = db_session.scalar(select(InvestmentItem))
+    assert item is not None
+    assert item.title == "@elonmusk: 图片贴文（1 张图片）"
+    assert item.summary == "包含 1 张图片，需打开媒体查看。"
+    assert item.raw_payload["attachments"][0]["title"] == "X 图片 1"
+
+
 def test_x_post_import_enqueues_translation_job(
     client: TestClient,
     db_session: Session,

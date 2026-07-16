@@ -35,6 +35,7 @@ describe("normalizeTimeline", () => {
         type: "photo",
         url: "https://pbs.twimg.com/media/example.jpg",
         preview_url: "https://pbs.twimg.com/media/example.jpg",
+        alt_text: "A robot standing in a factory line",
       },
     ]);
     expect(posts[0]?.quoted_tweet).toMatchObject({

@@ -2,6 +2,7 @@ export interface XMedia {
   type: "photo" | "video" | "animated_gif";
   url: string;
   preview_url?: string;
+  alt_text?: string;
 }
 
 export interface XPostReference {

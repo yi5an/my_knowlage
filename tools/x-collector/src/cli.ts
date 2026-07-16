@@ -1,4 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -73,7 +74,7 @@ async function install(config: ReturnType<typeof loadConfig>): Promise<void> {
   );
   await mkdir(launchAgentsDir, {recursive: true});
   const plist = renderLaunchAgent({
-    nodePath: process.execPath,
+    nodePath: process.env.X_COLLECTOR_NODE_PATH || stableNodePath(),
     appPath: join(process.cwd(), "dist/cli.js"),
     envFile,
     logDir,
@@ -82,6 +83,10 @@ async function install(config: ReturnType<typeof loadConfig>): Promise<void> {
   await unloadLaunchAgent();
   await loadLaunchAgent(join(launchAgentsDir, "com.knowpilot.x-collector.plist"));
   console.log(`LaunchAgent 已安装并启动：${join(launchAgentsDir, "com.knowpilot.x-collector.plist")}`);
+}
+
+function stableNodePath(): string {
+  return existsSync("/opt/homebrew/bin/node") ? "/opt/homebrew/bin/node" : process.execPath;
 }
 
 async function uninstall(): Promise<void> {

@@ -44,6 +44,24 @@ function itemTimeLabel(item: InvestmentItem): string | null {
   return null;
 }
 
+function itemSummaryText(item: InvestmentItem): string | null {
+  return item.summary_zh ?? item.summary ?? null;
+}
+
+function itemMediaLabel(item: InvestmentItem): string | null {
+  const attachments = item.attachments ?? [];
+  if (attachments.length === 0) return null;
+  const imageCount = attachments.filter((attachment) =>
+    String(attachment.content_type ?? "").startsWith("image"),
+  ).length;
+  const videoCount = attachments.filter((attachment) =>
+    String(attachment.content_type ?? "").startsWith("video"),
+  ).length;
+  if (imageCount > 0) return `图片 ${imageCount}`;
+  if (videoCount > 0) return `视频 ${videoCount}`;
+  return `媒体 ${attachments.length}`;
+}
+
 export function InvestmentDashboardPage() {
   const [dashboard, setDashboard] = useState<InvestmentDashboard>(EMPTY_DASHBOARD);
   const [pending, setPending] = useState<InvestmentItem[]>([]);
@@ -187,6 +205,7 @@ export function InvestmentDashboardPage() {
                               {itemTimeLabel(item)}
                             </Typography.Text>
                           )}
+                          {itemMediaLabel(item) && <Tag>{itemMediaLabel(item)}</Tag>}
                           {item.source_url && (
                             <Tag>
                               <a href={item.source_url} target="_blank" rel="noreferrer">
@@ -196,6 +215,15 @@ export function InvestmentDashboardPage() {
                           )}
                           <ReviewStatusTag status={item.action_status} />
                         </Space>
+                        {itemSummaryText(item) && (
+                          <Typography.Paragraph
+                            type="secondary"
+                            ellipsis={{ rows: 2 }}
+                            style={{ marginBottom: 0, maxWidth: 860, whiteSpace: "pre-wrap" }}
+                          >
+                            {itemSummaryText(item)}
+                          </Typography.Paragraph>
+                        )}
                       </Space>
                     }
                   />
@@ -230,12 +258,27 @@ export function InvestmentDashboardPage() {
                             {itemTimeLabel(item)}
                           </Typography.Text>
                         )}
+                        {itemMediaLabel(item) && <Tag>{itemMediaLabel(item)}</Tag>}
                         {item.source_url && (
                           <Tag>
                             <a href={item.source_url} target="_blank" rel="noreferrer">
                               原文
                             </a>
                           </Tag>
+                        )}
+                        {itemSummaryText(item) && (
+                          <Typography.Paragraph
+                            type="secondary"
+                            ellipsis={{ rows: 2 }}
+                            style={{
+                              flexBasis: "100%",
+                              marginBottom: 0,
+                              maxWidth: 860,
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
+                            {itemSummaryText(item)}
+                          </Typography.Paragraph>
                         )}
                       </Space>
                     }

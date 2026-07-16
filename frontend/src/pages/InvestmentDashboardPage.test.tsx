@@ -159,6 +159,15 @@ describe("InvestmentDashboardPage", () => {
                 action_status: "pending_review",
                 source_name: "X / NVIDIA",
                 published_at: "2026-07-16T09:30:00Z",
+                summary: "图片文字：\nGB300 NVL72 rack-scale AI system ships to partners.",
+                attachments: [
+                  {
+                    title: "X 图片 1",
+                    url: "https://pbs.twimg.com/media/example.jpg",
+                    content_type: "image",
+                    text_excerpt: "GB300 NVL72 rack-scale AI system ships to partners.",
+                  },
+                ],
               },
             ]),
             { status: 200 },
@@ -175,6 +184,8 @@ describe("InvestmentDashboardPage", () => {
 
     expect(await screen.findByText("英伟达发布新的 AI 系统")).toBeInTheDocument();
     expect(screen.getByText("发布时间 07-16 17:30")).toBeInTheDocument();
+    expect(screen.getByText(/GB300 NVL72 rack-scale AI system/)).toBeInTheDocument();
+    expect(screen.getByText("图片 1")).toBeInTheDocument();
   });
 
   it("shows early signals from the API", async () => {

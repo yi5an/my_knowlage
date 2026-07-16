@@ -42,6 +42,7 @@
                                   {
                                     "type": "photo",
                                     "media_url_https": "https://pbs.twimg.com/media/example.jpg",
+                                    "ext_alt_text": "A robot standing in a factory line",
                                     "url": "https://t.co/example"
                                   }
                                 ]

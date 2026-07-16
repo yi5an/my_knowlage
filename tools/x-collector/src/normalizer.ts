@@ -103,8 +103,14 @@ function normalizeMedia(result: JsonObject, legacy: JsonObject | undefined): XMe
     const item = asObject(entry);
     const type = stringValue(item?.type);
     const preview = stringValue(item?.media_url_https);
+    const altText = stringValue(item?.ext_alt_text);
     if (type === "photo" && preview) {
-      media.push({type: "photo", url: preview, preview_url: preview});
+      media.push({
+        type: "photo",
+        url: preview,
+        preview_url: preview,
+        ...(altText ? {alt_text: altText} : {}),
+      });
       continue;
     }
     if ((type === "video" || type === "animated_gif") && preview) {
@@ -118,7 +124,12 @@ function normalizeMedia(result: JsonObject, legacy: JsonObject | undefined): XMe
         .sort((left, right) => (numberValue(right.bitrate) ?? 0) - (numberValue(left.bitrate) ?? 0))
         .map((variant) => stringValue(variant.url))
         .find((url): url is string => Boolean(url));
-      media.push({type, url: videoUrl ?? preview, preview_url: preview});
+      media.push({
+        type,
+        url: videoUrl ?? preview,
+        preview_url: preview,
+        ...(altText ? {alt_text: altText} : {}),
+      });
     }
   }
   return media;
