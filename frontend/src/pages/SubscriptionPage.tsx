@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -27,9 +27,11 @@ import {
 import {
   createSubscription,
   deleteSubscription,
+  getSummaryStatusByVideo,
   listSubscriptions,
   triggerPoll,
   type PollResponse,
+  type SummaryJobStatus,
   type Subscription,
 } from "../services/youtubeApi";
 
@@ -43,6 +45,8 @@ export function SubscriptionPage() {
   const [form] = Form.useForm();
   const [polling, setPolling] = useState(false);
   const [pollResult, setPollResult] = useState<PollResponse | null>(null);
+  const [pollStatuses, setPollStatuses] = useState<Record<string, SummaryJobStatus>>({});
+  const pollStatusesRef = useRef<Record<string, SummaryJobStatus>>({});
 
   async function load() {
     setLoading(true);
@@ -89,6 +93,8 @@ export function SubscriptionPage() {
   async function handlePoll() {
     setPolling(true);
     setPollResult(null);
+    pollStatusesRef.current = {};
+    setPollStatuses({});
     try {
       const result = await triggerPoll();
       setPollResult(result);
@@ -103,6 +109,73 @@ export function SubscriptionPage() {
     } finally {
       setPolling(false);
     }
+  }
+
+  async function refreshPollStatuses(result: PollResponse) {
+    if (result.videos.length === 0) return;
+    const statuses = await Promise.all(
+      result.videos.map(async (video) => {
+        try {
+          return [video.video_id, await getSummaryStatusByVideo(video.video_id)] as const;
+        } catch (e) {
+          return [
+            video.video_id,
+            {
+              video_id: video.video_id,
+              status: "failed",
+              error: `状态获取失败：${String(e)}`,
+            } satisfies SummaryJobStatus,
+          ] as const;
+        }
+      }),
+    );
+    const nextStatuses = Object.fromEntries(statuses);
+    pollStatusesRef.current = nextStatuses;
+    setPollStatuses(nextStatuses);
+  }
+
+  useEffect(() => {
+    if (!pollResult || pollResult.videos.length === 0) return undefined;
+    let cancelled = false;
+    const refresh = async () => {
+      if (cancelled) return;
+      await refreshPollStatuses(pollResult);
+    };
+    void refresh();
+    const timer = window.setInterval(() => {
+      const active = pollResult.videos.some((video) => {
+        const status = pollStatusesRef.current[video.video_id]?.status;
+        return !status || status === "processing" || status === "unknown";
+      });
+      if (active) void refresh();
+    }, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [pollResult]);
+
+  const pollStatusCounts = pollResult
+    ? pollResult.videos.reduce(
+        (acc, video) => {
+          const status = pollStatuses[video.video_id]?.status;
+          if (status === "succeeded") acc.succeeded += 1;
+          else if (status === "failed" || status === "no_transcript" || status === "access_denied") {
+            acc.failed += 1;
+          } else acc.processing += 1;
+          return acc;
+        },
+        { succeeded: 0, failed: 0, processing: 0 },
+      )
+    : { succeeded: 0, failed: 0, processing: 0 };
+
+  function renderSummaryStatus(status?: SummaryJobStatus) {
+    if (!status || status.status === "unknown" || status.status === "processing") {
+      return <Tag color="processing">总结中</Tag>;
+    }
+    if (status.status === "succeeded") return <Tag color="success">已完成</Tag>;
+    if (status.status === "access_denied") return <Tag color="default">无访问权限</Tag>;
+    return <Tag color="error">总结失败</Tag>;
   }
 
   return (
@@ -131,15 +204,58 @@ export function SubscriptionPage() {
 
         {pollResult && (
           <Card size="small">
-            <Text strong>上次轮询：</Text>
-            <Text>
-              {" "}检查 {pollResult.poll_count} 个频道，发现 {pollResult.discovered} 个新视频。
-            </Text>
-            {pollResult.discovered > 0 && (
-              <Tag color="processing" style={{ marginLeft: 8 }}>
-                后台总结中…
-              </Tag>
-            )}
+            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+              <Space wrap>
+                <Text strong>上次轮询：</Text>
+                <Text>
+                  检查 {pollResult.poll_count} 个频道，发现 {pollResult.discovered} 个新视频。
+                </Text>
+                {pollResult.discovered > 0 && (
+                  <>
+                    <Tag color="success">已完成 {pollStatusCounts.succeeded}</Tag>
+                    <Tag color={pollStatusCounts.failed ? "error" : "default"}>
+                      失败 {pollStatusCounts.failed}
+                    </Tag>
+                    <Tag color={pollStatusCounts.processing ? "processing" : "default"}>
+                      处理中 {pollStatusCounts.processing}
+                    </Tag>
+                  </>
+                )}
+              </Space>
+              {pollResult.videos.length > 0 && (
+                <List
+                  size="small"
+                  dataSource={pollResult.videos}
+                  renderItem={(video) => {
+                    const status = pollStatuses[video.video_id];
+                    return (
+                      <List.Item>
+                        <List.Item.Meta
+                          title={
+                            <Space wrap>
+                              <Text strong>{video.title}</Text>
+                              {renderSummaryStatus(status)}
+                            </Space>
+                          }
+                          description={
+                            <Space direction="vertical" size={2}>
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                {video.video_id}
+                              </Text>
+                              {status?.error && (
+                                <Text type="danger" style={{ fontSize: 12 }}>
+                                  {status.error}
+                                </Text>
+                              )}
+                            </Space>
+                          }
+                        />
+                      </List.Item>
+                    );
+                  }}
+                />
+              )}
+            </Space>
           </Card>
         )}
 
