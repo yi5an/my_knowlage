@@ -128,6 +128,65 @@ def _build_investment_scheduler() -> IntervalScheduler | None:
     return build_investment_scheduler()
 
 
+def _mark_interrupted_youtube_summaries() -> None:
+    """Fail YouTube summaries left processing by a previous backend process.
+
+    Manual YouTube retries currently run in in-process background threads. A
+    deploy/restart kills those threads, but their partial Document/Video rows
+    can remain in ``processing`` forever. On startup no old thread can still be
+    alive, so surface these rows as retryable failures instead of pretending
+    they are still running.
+    """
+    from sqlalchemy import select
+
+    from app.infrastructure.database import SessionLocal
+    from app.infrastructure.models import Document, Video
+
+    message = "summary interrupted by backend restart; please retry processing"
+    session = SessionLocal()
+    try:
+        interrupted_docs = list(
+            session.scalars(
+                select(Document).where(
+                    Document.source_type == "youtube",
+                    Document.parse_status == "processing",
+                )
+            )
+        )
+        for doc in interrupted_docs:
+            doc.parse_status = "failed"
+            doc.status = "failed"
+            doc.ai_summary = message
+            if doc.video_id:
+                video = session.get(Video, doc.video_id)
+                if video is not None and not video.error_message:
+                    video.error_message = message
+
+        # A restart can also happen after ASR/transcript succeeded but before a
+        # Document shell was created. Those rows sit at fetch_status="fetched"
+        # with no completed document, which the status endpoint reports as
+        # processing forever.
+        interrupted_videos = session.execute(
+            select(Video, Document)
+            .outerjoin(Document, Document.video_id == Video.id)
+            .where(
+                Video.platform == "youtube",
+                Video.fetch_status == "fetched",
+                Document.id.is_(None),
+            )
+        ).all()
+        for video, _doc in interrupted_videos:
+            video.fetch_status = "failed"
+            video.error_message = message
+
+        changed = len(interrupted_docs) + len(interrupted_videos)
+        if changed:
+            session.commit()
+            logger.warning("marked %d interrupted YouTube summaries as failed", changed)
+    finally:
+        session.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Register the investment fetch handler before the worker scheduler starts
@@ -135,6 +194,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.services.investment.fetch_job_handler import register as register_investment_handler
 
     register_investment_handler()
+    _mark_interrupted_youtube_summaries()
 
     scheduler = _build_polling_scheduler()
     if scheduler is not None:

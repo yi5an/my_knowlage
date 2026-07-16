@@ -26,7 +26,7 @@ from app.infrastructure.models import (
     VideoFrameAnalysis,
     Workspace,
 )
-from app.main import app
+from app.main import _mark_interrupted_youtube_summaries, app
 from app.schemas.youtube import (
     KeyPoint,
     SummaryResult,
@@ -556,6 +556,79 @@ def test_summary_history_includes_failed_and_pending_video_rows_without_document
     assert body[1]["summary_status"] == "pending"
     assert body[1]["failure_stage"] == "pending"
     assert body[1]["retryable"] is True
+
+
+def test_startup_marks_interrupted_youtube_processing_as_failed(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_factory = db_session.info["factory"]
+    monkeypatch.setattr("app.infrastructure.database.SessionLocal", session_factory)
+
+    db_session.add(Workspace(id="ws_interrupted", name="Interrupted workspace"))
+    processing_video = Video(
+        id="video_processing",
+        workspace_id="ws_interrupted",
+        video_id="processing123",
+        title="Processing video",
+        fetch_status="fetched",
+    )
+    fetched_without_doc = Video(
+        id="video_without_doc",
+        workspace_id="ws_interrupted",
+        video_id="withoutdoc123",
+        title="Fetched without doc",
+        fetch_status="fetched",
+    )
+    completed_video = Video(
+        id="video_completed_startup",
+        workspace_id="ws_interrupted",
+        video_id="completed123",
+        title="Completed video",
+        fetch_status="fetched",
+    )
+    db_session.add_all([processing_video, fetched_without_doc, completed_video])
+    db_session.add_all(
+        [
+            Document(
+                id="doc_processing",
+                workspace_id="ws_interrupted",
+                title="Interrupted summary",
+                source_type="youtube",
+                source_uri="https://youtu.be/processing123",
+                status="processing",
+                parse_status="processing",
+                video_id=processing_video.id,
+            ),
+            Document(
+                id="doc_completed_startup",
+                workspace_id="ws_interrupted",
+                title="Completed summary",
+                source_type="youtube",
+                source_uri="https://youtu.be/completed123",
+                status="ready",
+                parse_status="completed",
+                video_id=completed_video.id,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    _mark_interrupted_youtube_summaries()
+
+    db_session.expire_all()
+    interrupted_doc = db_session.get(Document, "doc_processing")
+    missing_doc_video = db_session.get(Video, "video_without_doc")
+    completed_doc = db_session.get(Document, "doc_completed_startup")
+    assert interrupted_doc is not None
+    assert interrupted_doc.parse_status == "failed"
+    assert interrupted_doc.status == "failed"
+    assert "backend restart" in (interrupted_doc.ai_summary or "")
+    assert missing_doc_video is not None
+    assert missing_doc_video.fetch_status == "failed"
+    assert "backend restart" in (missing_doc_video.error_message or "")
+    assert completed_doc is not None
+    assert completed_doc.parse_status == "completed"
 
 
 def test_retry_failed_video_starts_background_processing(
