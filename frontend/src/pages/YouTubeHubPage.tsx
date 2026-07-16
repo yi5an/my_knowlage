@@ -100,7 +100,7 @@ export function YouTubeHubPage() {
       if (item.failure_stage === "transcript") return <Tag color="red">转写失败</Tag>;
       return <Tag color="red">总结失败</Tag>;
     }
-    if (item.failure_stage === "pending") return <Tag color="warning">待重试</Tag>;
+    if (item.failure_stage === "pending") return <Tag color="warning">待处理</Tag>;
     if (item.summary_status === "no_transcript") return <Tag color="orange">无字幕</Tag>;
     return <Tag color="processing">处理中</Tag>;
   }

@@ -211,6 +211,7 @@ class SubscriptionService:
         if not metas:
             return
         from app.infrastructure.models import Video
+        from app.services.youtube.summary_job_handler import enqueue_youtube_summary_job
 
         existing_ids = set(
             self.session.scalars(
@@ -223,24 +224,25 @@ class SubscriptionService:
         for meta in metas:
             if meta.video_id in existing_ids:
                 continue
-            self.session.add(
-                Video(
-                    id=f"video_{uuid4().hex}",
-                    workspace_id=sub.workspace_id,
-                    subscription_id=sub.id,
-                    platform="youtube",
-                    video_id=meta.video_id,
-                    title=meta.title or meta.video_id,
-                    channel_id=meta.channel_id,
-                    channel_name=meta.channel_name,
-                    duration_sec=meta.duration_sec,
-                    published_at=meta.published_at,
-                    thumbnail_url=meta.thumbnail_url,
-                    description=meta.description,
-                    chapters=[c.model_dump(mode="json") for c in meta.chapters],
-                    fetch_status="pending",
-                )
+            video = Video(
+                id=f"video_{uuid4().hex}",
+                workspace_id=sub.workspace_id,
+                subscription_id=sub.id,
+                platform="youtube",
+                video_id=meta.video_id,
+                title=meta.title or meta.video_id,
+                channel_id=meta.channel_id,
+                channel_name=meta.channel_name,
+                duration_sec=meta.duration_sec,
+                published_at=meta.published_at,
+                thumbnail_url=meta.thumbnail_url,
+                description=meta.description,
+                chapters=[c.model_dump(mode="json") for c in meta.chapters],
+                fetch_status="pending",
             )
+            self.session.add(video)
+            self.session.flush()
+            enqueue_youtube_summary_job(self.session, video, reason="subscription_poll")
         self.session.commit()
 
     def _record_success(self, sub: Subscription, metas: list[VideoMeta]) -> None:

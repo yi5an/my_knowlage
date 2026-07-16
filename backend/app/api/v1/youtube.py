@@ -62,6 +62,7 @@ from app.services.youtube.fetcher import (
 )
 from app.services.youtube.orchestrator import VideoSummaryOrchestrator
 from app.services.youtube.summary import build_summary_service_from_settings
+from app.services.youtube.summary_job_handler import enqueue_youtube_summary_job
 from app.services.youtube.transcript import TranscriptExtractor
 from app.services.youtube.translation import TranslationService
 from app.services.youtube.urls import UnparseableTargetError, parse_target
@@ -781,19 +782,11 @@ async def retry_video(
         doc.ai_summary = None
     session.commit()
 
-    task_job_id = f"yt_retry_{video.video_id}_{threading.get_ident()}"
-    thread = threading.Thread(
-        target=_run_summary_meta_in_background,
-        args=(_video_meta_from_row(video), video.workspace_id, video.subscription_id),
-        kwargs={"task_job_id": task_job_id},
-        name=f"yt-retry-{video.video_id}",
-        daemon=True,
-    )
-    thread.start()
+    job = enqueue_youtube_summary_job(session, video, reason="manual_retry")
     return ManualSummaryResponse(
         video_id=video.video_id,
         document_id=doc.id if doc is not None else "",
-        task_job_id=task_job_id,
+        task_job_id=job.id,
         status="processing",
     )
 
@@ -979,15 +972,6 @@ async def trigger_poll(
         for sub, metas in pairs
         for m in metas
     ]
-    # Kick off summaries in the background (non-blocking).
-    if videos:
-        thread = threading.Thread(
-            target=_run_subscription_summaries_async,
-            args=(pairs,),
-            daemon=True,
-            name="yt-subscription-poll",
-        )
-        thread.start()
     return PollResponse(poll_count=len(pairs), discovered=len(videos), videos=videos)
 
 
@@ -1029,14 +1013,6 @@ async def trigger_poll_one(
         for sub, metas in pairs
         for m in metas
     ]
-    if videos:
-        thread = threading.Thread(
-            target=_run_subscription_summaries_async,
-            args=(pairs,),
-            daemon=True,
-            name=f"yt-sub-poll-{subscription_id}",
-        )
-        thread.start()
     return PollResponse(poll_count=len(pairs), discovered=len(videos), videos=videos)
 
 

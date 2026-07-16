@@ -187,14 +187,33 @@ def _mark_interrupted_youtube_summaries() -> None:
         session.close()
 
 
+def _enqueue_unfinished_youtube_summaries() -> None:
+    """Backfill durable jobs for visible YouTube pending/interrupted rows."""
+    from app.infrastructure.database import SessionLocal
+    from app.services.youtube.summary_job_handler import (
+        enqueue_unfinished_youtube_summary_jobs,
+    )
+
+    session = SessionLocal()
+    try:
+        count = enqueue_unfinished_youtube_summary_jobs(session)
+        if count:
+            logger.warning("enqueued %d unfinished YouTube summaries", count)
+    finally:
+        session.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Register the investment fetch handler before the worker scheduler starts
     # so the generic TaskJobProcessor can dispatch investment_fetch jobs.
     from app.services.investment.fetch_job_handler import register as register_investment_handler
+    from app.services.youtube.summary_job_handler import register as register_youtube_handler
 
     register_investment_handler()
+    register_youtube_handler()
     _mark_interrupted_youtube_summaries()
+    _enqueue_unfinished_youtube_summaries()
 
     scheduler = _build_polling_scheduler()
     if scheduler is not None:

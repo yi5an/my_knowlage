@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -23,6 +23,7 @@ from app.infrastructure.models import (
     InvestmentFact,
     InvestmentItem,
     Subscription,
+    TaskJob,
     Video,
     VideoFrameAnalysis,
     Workspace,
@@ -633,7 +634,7 @@ def test_startup_marks_interrupted_youtube_processing_as_failed(
     assert completed_doc.parse_status == "completed"
 
 
-def test_retry_failed_video_starts_background_processing(
+def test_retry_failed_video_enqueues_processing_job(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -659,15 +660,10 @@ def test_retry_failed_video_starts_background_processing(
     body = response.json()
     assert body["video_id"] == VIDEO_ID
     assert body["status"] == "processing"
-
-    document_id = ""
-    for _ in range(50):
-        status = client.get(f"/api/v1/youtube/summaries/by-video/{VIDEO_ID}").json()
-        if status["status"] == "succeeded":
-            document_id = status["document_id"]
-            break
-        assert status["status"] in ("processing", "unknown"), status
-    assert document_id, "retry never reported succeeded"
+    job = db_session.get(TaskJob, body["task_job_id"])
+    assert job is not None
+    assert job.job_type == "youtube_summary"
+    assert job.status == "pending"
 
 
 def test_summary_list_shows_access_denied_as_not_retryable(
@@ -1051,3 +1047,43 @@ def test_manual_subscription_poll_stages_discovered_videos_in_history(
     assert items[0]["title"] == "Visible before summary starts"
     assert items[0]["summary_status"] == "pending"
     assert items[0]["failure_stage"] == "pending"
+    staged_video = db_session.scalar(select(Video).where(Video.video_id == video_id))
+    assert staged_video is not None
+    job = db_session.query(TaskJob).filter_by(target_id=staged_video.id).one_or_none()
+    assert job is not None
+    assert job.job_type == "youtube_summary"
+    assert job.status == "pending"
+
+
+def test_retry_video_enqueues_durable_youtube_summary_job(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="retry_queue_ws", name="retry_queue_ws"))
+    video = Video(
+        id="video_retry_queue",
+        workspace_id="retry_queue_ws",
+        video_id="retryqueue01",
+        title="Retry through task queue",
+        fetch_status="failed",
+        error_message="summary interrupted by backend restart; please retry processing",
+    )
+    db_session.add(video)
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/youtube/videos/retryqueue01/retry?workspace_id=retry_queue_ws"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "processing"
+    assert body["task_job_id"].startswith("job_yt_")
+    db_session.refresh(video)
+    assert video.fetch_status == "pending"
+    assert video.error_message is None
+    job = db_session.get(TaskJob, body["task_job_id"])
+    assert job is not None
+    assert job.job_type == "youtube_summary"
+    assert job.target_id == video.id
+    assert job.status == "pending"

@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.infrastructure.database import Base
-from app.infrastructure.models import Video, Workspace
+from app.infrastructure.models import TaskJob, Video, Workspace
 from app.schemas.youtube import YouTubeAutoRetrySettings
 from app.services.youtube.auto_retry import (
     AUTO_RETRY_COUNT_KEY,
@@ -18,6 +18,10 @@ from app.services.youtube.auto_retry import (
     FailedVideoRetryScanner,
 )
 from app.services.youtube.orchestrator import SummaryJobResult
+from app.services.youtube.summary_job_handler import (
+    YOUTUBE_SUMMARY_JOB_TYPE,
+    enqueue_unfinished_youtube_summary_jobs,
+)
 
 
 @pytest.fixture()
@@ -223,3 +227,28 @@ def test_failed_video_scanner_skips_access_denied_future_backoff_and_retry_cap(
     assert report.retried == 0
     assert report.skipped == 2
     assert orch.calls == []
+
+
+def test_unfinished_youtube_summary_enqueue_recovers_running_jobs(
+    session: Session,
+) -> None:
+    video = _failed_video(session, video_id="pending_video", status="pending")
+    job = TaskJob(
+        id="job_running_youtube",
+        workspace_id="ws_default",
+        job_type=YOUTUBE_SUMMARY_JOB_TYPE,
+        target_type="video",
+        target_id=video.id,
+        status="running",
+        progress=20,
+        input={"video_id": video.video_id},
+    )
+    session.add(job)
+    session.commit()
+
+    count = enqueue_unfinished_youtube_summary_jobs(session)
+
+    assert count == 1
+    session.refresh(job)
+    assert job.status == "pending"
+    assert job.progress == 0
