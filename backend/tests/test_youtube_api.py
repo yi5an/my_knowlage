@@ -3,7 +3,7 @@ whole stack runs against an in-memory DB and fake external services.
 """
 
 from collections.abc import Generator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -22,6 +22,7 @@ from app.infrastructure.models import (
     Document,
     InvestmentFact,
     InvestmentItem,
+    Subscription,
     Video,
     VideoFrameAnalysis,
     Workspace,
@@ -918,3 +919,43 @@ def test_subscription_rejects_invalid_channel(client: TestClient) -> None:
         json={"channel_id": "not-a-valid-channel"},
     )
     assert response.status_code == 400
+
+
+def test_manual_subscription_poll_checks_not_due_subscriptions(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel_id = "UC_forcepollchannel000000"
+    video_id = "forcepoll01"
+    db_session.add(Workspace(id="ws_force_poll", name="ws_force_poll"))
+    db_session.add(
+        Subscription(
+            id="sub_force_poll",
+            workspace_id="ws_force_poll",
+            platform="youtube",
+            channel_id=channel_id,
+            channel_name="Force Poll Channel",
+            poll_interval=3600,
+            next_poll_at=datetime.now(UTC) + timedelta(hours=1),
+            enabled=True,
+        )
+    )
+    db_session.commit()
+    meta = VideoMeta(
+        video_id=video_id,
+        title="Fresh video despite future next_poll_at",
+        channel_id=channel_id,
+        channel_name="Force Poll Channel",
+        published_at=datetime.now(UTC),
+    )
+    fetcher = FakeYouTubeFetcher().add_video(meta).add_channel(channel_id, [video_id])
+    monkeypatch.setattr("app.api.v1.youtube.get_fetcher_for_subscriptions", lambda: fetcher)
+
+    response = client.post("/api/v1/youtube/poll?workspace_id=ws_force_poll")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["poll_count"] == 1
+    assert body["discovered"] == 1
+    assert body["videos"][0]["video_id"] == video_id

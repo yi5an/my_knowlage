@@ -70,7 +70,9 @@ class SubscriptionService:
         return self._now or datetime.now(UTC)
 
     def discover_new_videos(
-        self, workspace_id: str | None = None
+        self, workspace_id: str | None = None,
+        *,
+        force: bool = False,
     ) -> list[tuple[Subscription, list[VideoMeta]]]:
         """Fast discovery pass: fetch latest videos for due subscriptions and
         filter out already-seen ones, WITHOUT running the (slow) summary
@@ -79,14 +81,17 @@ class SubscriptionService:
 
         Used by the non-blocking poll endpoint: it returns immediately with
         the discovered video ids, and the summaries are produced async.
+        Set ``force=True`` for user-triggered refreshes that should check all
+        enabled subscriptions regardless of their scheduled ``next_poll_at``.
         """
         statement = select(Subscription).where(Subscription.enabled.is_(True))
         if workspace_id is not None:
             statement = statement.where(Subscription.workspace_id == workspace_id)
-        now = self.now()
-        statement = statement.where(
-            (Subscription.next_poll_at.is_(None)) | (Subscription.next_poll_at <= now)
-        )
+        if not force:
+            now = self.now()
+            statement = statement.where(
+                (Subscription.next_poll_at.is_(None)) | (Subscription.next_poll_at <= now)
+            )
         subscriptions = list(self.session.scalars(statement).all())
         results: list[tuple[Subscription, list[VideoMeta]]] = []
         for sub in subscriptions:

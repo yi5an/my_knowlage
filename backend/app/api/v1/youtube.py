@@ -963,7 +963,7 @@ async def trigger_poll(
             fetcher=get_fetcher_for_subscriptions(),
             orchestrator=build_orchestrator(session),
         )
-        pairs = service.discover_new_videos(workspace_id=workspace_id)
+        pairs = service.discover_new_videos(workspace_id=workspace_id, force=True)
     finally:
         session.close()
 

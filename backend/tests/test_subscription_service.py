@@ -201,6 +201,21 @@ def test_poll_subscription_specific(session: Session) -> None:
     assert result.outcomes == []
 
 
+def test_discovery_force_polls_not_due_subscriptions(session: Session) -> None:
+    sub = _sub(session, next_poll_at=NOW + timedelta(hours=1))
+    fetcher = FakeYouTubeFetcher().add_video(_meta())
+    fetcher.add_channel(sub.channel_id, ["dQw4w9WgXcQ"])
+    service = _service(session, fetcher, FakeTranscriptExtractor())
+
+    due_only = service.discover_new_videos()
+    forced = service.discover_new_videos(force=True)
+
+    assert due_only == []
+    assert [(s.id, [m.video_id for m in metas]) for s, metas in forced] == [
+        (sub.id, ["dQw4w9WgXcQ"])
+    ]
+
+
 def test_no_transcript_video_counted_as_skipped(session: Session) -> None:
     sub = _sub(session, next_poll_at=NOW - timedelta(minutes=5))
     fetcher = FakeYouTubeFetcher().add_video(_meta())
