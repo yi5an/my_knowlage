@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.infrastructure.database import Base
-from app.infrastructure.models import TaskJob, Video, Workspace
+from app.infrastructure.models import Document, TaskJob, Video, Workspace
 from app.schemas.youtube import YouTubeAutoRetrySettings
 from app.services.youtube.auto_retry import (
     AUTO_RETRY_COUNT_KEY,
@@ -19,6 +19,7 @@ from app.services.youtube.auto_retry import (
 )
 from app.services.youtube.orchestrator import SummaryJobResult
 from app.services.youtube.summary_job_handler import (
+    INTERRUPTED_MESSAGE,
     YOUTUBE_SUMMARY_JOB_TYPE,
     enqueue_unfinished_youtube_summary_jobs,
 )
@@ -252,3 +253,73 @@ def test_unfinished_youtube_summary_enqueue_recovers_running_jobs(
     session.refresh(job)
     assert job.status == "pending"
     assert job.progress == 0
+
+
+def test_unfinished_youtube_summary_enqueue_clears_interrupted_error(
+    session: Session,
+) -> None:
+    video = _failed_video(
+        session,
+        video_id="interrupted_video",
+        status="failed",
+    )
+    video.error_message = INTERRUPTED_MESSAGE
+    doc = Document(
+        id="doc_interrupted_video",
+        workspace_id="ws_default",
+        title="Interrupted summary",
+        source_type="youtube",
+        source_uri="https://youtu.be/interrupted_video",
+        video_id=video.id,
+        parse_status="failed",
+        status="failed",
+        ai_summary=INTERRUPTED_MESSAGE,
+    )
+    session.add(doc)
+    session.commit()
+
+    count = enqueue_unfinished_youtube_summary_jobs(session)
+
+    assert count == 1
+    session.refresh(video)
+    session.refresh(doc)
+    assert video.fetch_status == "pending"
+    assert video.error_message is None
+    assert doc.parse_status == "processing"
+    assert doc.status == "processing"
+    assert doc.ai_summary is None
+
+
+def test_unfinished_youtube_summary_enqueue_clears_stale_interrupted_text(
+    session: Session,
+) -> None:
+    video = _failed_video(
+        session,
+        video_id="stale_interrupted_video",
+        status="pending",
+    )
+    video.error_message = INTERRUPTED_MESSAGE
+    doc = Document(
+        id="doc_stale_interrupted_video",
+        workspace_id="ws_default",
+        title="Stale interrupted summary",
+        source_type="youtube",
+        source_uri="https://youtu.be/stale_interrupted_video",
+        video_id=video.id,
+        parse_status="processing",
+        status="processing",
+        ai_summary=INTERRUPTED_MESSAGE,
+    )
+    session.add(doc)
+    session.commit()
+
+    count = enqueue_unfinished_youtube_summary_jobs(session)
+
+    assert count == 1
+    session.refresh(video)
+    session.refresh(doc)
+    assert video.fetch_status == "pending"
+    assert video.error_message is None
+    assert doc.parse_status == "processing"
+    assert doc.status == "processing"
+    assert doc.ai_summary is None

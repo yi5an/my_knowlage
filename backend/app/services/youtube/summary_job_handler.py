@@ -18,6 +18,7 @@ from app.services.youtube.orchestrator import VideoSummaryOrchestrator
 logger = logging.getLogger(__name__)
 
 YOUTUBE_SUMMARY_JOB_TYPE = "youtube_summary"
+INTERRUPTED_MESSAGE = "summary interrupted by backend restart; please retry processing"
 
 
 def enqueue_youtube_summary_job(
@@ -101,9 +102,29 @@ def enqueue_unfinished_youtube_summary_jobs(
     )
     count = 0
     for video in videos:
+        _clear_interrupted_state(session, video)
         enqueue_youtube_summary_job(session, video, reason="startup_recovery")
         count += 1
     return count
+
+
+def _clear_interrupted_state(session: Session, video: Video) -> None:
+    """Move restart-interrupted rows back to processing while queued."""
+    if _is_interrupted(video.error_message):
+        if video.fetch_status == "failed":
+            video.fetch_status = "pending"
+        video.error_message = None
+    doc = session.scalar(select(Document).where(Document.video_id == video.id))
+    if doc is not None and _is_interrupted(doc.ai_summary):
+        if doc.parse_status == "failed":
+            doc.parse_status = "processing"
+            doc.status = "processing"
+        doc.ai_summary = None
+    session.commit()
+
+
+def _is_interrupted(value: str | None) -> bool:
+    return bool(value and INTERRUPTED_MESSAGE in value)
 
 
 class YouTubeSummaryJobHandler(JobHandler):
