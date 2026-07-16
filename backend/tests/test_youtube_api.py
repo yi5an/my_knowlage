@@ -549,7 +549,7 @@ def test_summary_history_includes_failed_and_pending_video_rows_without_document
 
     assert response.status_code == 200
     body = response.json()
-    assert [item["video_id"] for item in body] == ["pendingnodoc", "failednodoc1"]
+    assert [item["video_id"] for item in body] == ["failednodoc1", "pendingnodoc"]
     by_video = {item["video_id"]: item for item in body}
     assert by_video["failednodoc1"]["document_id"] == ""
     assert by_video["failednodoc1"]["summary_status"] == "failed"
@@ -880,7 +880,7 @@ def test_summary_history_orders_by_video_published_time(
     ]
 
 
-def test_summary_history_prioritizes_pending_discovered_videos(
+def test_summary_history_orders_pending_videos_by_published_time(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -923,7 +923,7 @@ def test_summary_history_prioritizes_pending_discovered_videos(
     response = client.get("/api/v1/youtube/summaries?workspace_id=pending_order_ws")
 
     assert response.status_code == 200
-    assert [item["video_id"] for item in response.json()] == ["oldpending", "newcompleted"]
+    assert [item["video_id"] for item in response.json()] == ["newcompleted", "oldpending"]
 
 
 def test_manual_summary_rejects_channel_url(client: TestClient) -> None:
