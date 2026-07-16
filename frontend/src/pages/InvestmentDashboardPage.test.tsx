@@ -97,6 +97,86 @@ describe("InvestmentDashboardPage", () => {
     });
   });
 
+  it("shows timestamps for pending investment items", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/investment/dashboard")) {
+          return new Response(
+            JSON.stringify({
+              pending_review_count: 1,
+              pending_claims_count: 0,
+              theses_challenged_count: 0,
+              today_primary_count: 0,
+              today_macro_count: 0,
+              untranslated_count: 0,
+              unextracted_count: 0,
+              unsignaled_count: 0,
+              failed_job_count: 0,
+            }),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/digest")) {
+          return new Response(
+            JSON.stringify({
+              counts: {
+                pending_review_count: 0,
+                pending_claims_count: 0,
+                theses_challenged_count: 0,
+                today_primary_count: 0,
+                today_macro_count: 0,
+                untranslated_count: 0,
+                unextracted_count: 0,
+                unsignaled_count: 0,
+                failed_job_count: 0,
+              },
+              today_highlights: [],
+              pending_claims: [],
+              challenged_items: [],
+              early_signals: [],
+              pending_facts: [],
+            }),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/items")) {
+          return new Response(
+            JSON.stringify([
+              {
+                id: "item_x",
+                workspace_id: "ws_default",
+                dedupe_key: "item_x",
+                title: "NVIDIA launches new AI system",
+                title_zh: "英伟达发布新的 AI 系统",
+                info_layer: "opinion",
+                source_credibility: "analyst",
+                importance: "medium",
+                impact_direction: "positive",
+                impact_horizon: "short",
+                thesis_impact: "supports",
+                action_status: "pending_review",
+                source_name: "X / NVIDIA",
+                published_at: "2026-07-16T09:30:00Z",
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/signals")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("英伟达发布新的 AI 系统")).toBeInTheDocument();
+    expect(screen.getByText("发布时间 07-16 17:30")).toBeInTheDocument();
+  });
+
   it("shows early signals from the API", async () => {
     vi.stubGlobal(
       "fetch",
@@ -169,6 +249,7 @@ describe("InvestmentDashboardPage", () => {
     expect(screen.getByText("数据中心需求持续增强")).toBeInTheDocument();
     expect(screen.getByText("来源 2")).toBeInTheDocument();
     expect(screen.getByText("置信度 85%")).toBeInTheDocument();
+    expect(screen.getByText("最近出现 07-15 09:00")).toBeInTheDocument();
   });
 
   it("shows challenged thesis items from the digest API", async () => {
@@ -214,6 +295,7 @@ describe("InvestmentDashboardPage", () => {
                   impact_horizon: "short",
                   thesis_impact: "weakens",
                   action_status: "tracking",
+                  published_at: "2026-07-16T08:00:00Z",
                 },
               ],
               early_signals: [],
@@ -236,6 +318,7 @@ describe("InvestmentDashboardPage", () => {
 
     expect(await screen.findByText("关税政策可能抬升投入成本")).toBeInTheDocument();
     expect(screen.getByText("影响：weakens")).toBeInTheDocument();
+    expect(screen.getByText("发布时间 07-16 16:00")).toBeInTheDocument();
   });
 });
 

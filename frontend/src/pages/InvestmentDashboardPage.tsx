@@ -24,6 +24,26 @@ const EMPTY_DASHBOARD: InvestmentDashboard = {
   failed_job_count: 0,
 };
 
+function formatDateTime(value?: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (num: number) => String(num).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
+    date.getMinutes(),
+  )}`;
+}
+
+function itemTimeLabel(item: InvestmentItem): string | null {
+  const eventTime = formatDateTime(item.event_at);
+  if (eventTime) return `事件时间 ${eventTime}`;
+  const publishedTime = formatDateTime(item.published_at);
+  if (publishedTime) return `发布时间 ${publishedTime}`;
+  const reviewTime = formatDateTime(item.review_at);
+  if (reviewTime) return `待复核 ${reviewTime}`;
+  return null;
+}
+
 export function InvestmentDashboardPage() {
   const [dashboard, setDashboard] = useState<InvestmentDashboard>(EMPTY_DASHBOARD);
   const [pending, setPending] = useState<InvestmentItem[]>([]);
@@ -159,16 +179,23 @@ export function InvestmentDashboardPage() {
                       </Space>
                     }
                     description={
-                      <Space size="large">
-                        <span>{item.source_name ?? "未知来源"}</span>
-                        {item.source_url && (
-                          <Tag>
-                            <a href={item.source_url} target="_blank" rel="noreferrer">
-                              原文
-                            </a>
-                          </Tag>
-                        )}
-                        <ReviewStatusTag status={item.action_status} />
+                      <Space direction="vertical" size={4}>
+                        <Space size="large" wrap>
+                          <span>{item.source_name ?? "未知来源"}</span>
+                          {itemTimeLabel(item) && (
+                            <Typography.Text type="secondary">
+                              {itemTimeLabel(item)}
+                            </Typography.Text>
+                          )}
+                          {item.source_url && (
+                            <Tag>
+                              <a href={item.source_url} target="_blank" rel="noreferrer">
+                                原文
+                              </a>
+                            </Tag>
+                          )}
+                          <ReviewStatusTag status={item.action_status} />
+                        </Space>
                       </Space>
                     }
                   />
@@ -196,8 +223,13 @@ export function InvestmentDashboardPage() {
                       </Space>
                     }
                     description={
-                      <Space size="large">
+                      <Space size="large" wrap>
                         <span>{item.source_name ?? "未知来源"}</span>
+                        {itemTimeLabel(item) && (
+                          <Typography.Text type="secondary">
+                            {itemTimeLabel(item)}
+                          </Typography.Text>
+                        )}
                         {item.source_url && (
                           <Tag>
                             <a href={item.source_url} target="_blank" rel="noreferrer">
@@ -240,6 +272,11 @@ export function InvestmentDashboardPage() {
                           关联事实 {signal.fact_ids.length} 条 · 关联信息{" "}
                           {signal.item_ids.length} 条
                         </Typography.Text>
+                        {formatDateTime(signal.last_seen_at) && (
+                          <Typography.Text type="secondary">
+                            最近出现 {formatDateTime(signal.last_seen_at)}
+                          </Typography.Text>
+                        )}
                       </Space>
                     }
                   />
