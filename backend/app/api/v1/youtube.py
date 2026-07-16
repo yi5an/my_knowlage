@@ -19,7 +19,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -620,7 +620,14 @@ async def list_summaries(
         select(Video, Document)
         .outerjoin(Document, Document.video_id == Video.id)
         .where(Video.workspace_id == workspace_id)
-        .order_by(Video.published_at.desc().nullslast(), Video.created_at.desc())
+        .order_by(
+            case((Video.fetch_status == "pending", 0), else_=1),
+            case((Video.fetch_status == "pending", Video.created_at), else_=None)
+            .desc()
+            .nullslast(),
+            Video.published_at.desc().nullslast(),
+            Video.created_at.desc(),
+        )
         .limit(limit)
     ).all()
     return [_summary_list_item(video, doc) for video, doc in rows]

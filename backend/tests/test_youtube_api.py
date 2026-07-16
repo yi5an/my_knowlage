@@ -548,15 +548,16 @@ def test_summary_history_includes_failed_and_pending_video_rows_without_document
 
     assert response.status_code == 200
     body = response.json()
-    assert [item["video_id"] for item in body] == ["failednodoc1", "pendingnodoc"]
-    assert body[0]["document_id"] == ""
-    assert body[0]["summary_status"] == "failed"
-    assert body[0]["failure_stage"] == "transcript"
-    assert body[0]["retryable"] is True
-    assert body[0]["error"] == "asr: empty transcription"
-    assert body[1]["summary_status"] == "pending"
-    assert body[1]["failure_stage"] == "pending"
-    assert body[1]["retryable"] is True
+    assert [item["video_id"] for item in body] == ["pendingnodoc", "failednodoc1"]
+    by_video = {item["video_id"]: item for item in body}
+    assert by_video["failednodoc1"]["document_id"] == ""
+    assert by_video["failednodoc1"]["summary_status"] == "failed"
+    assert by_video["failednodoc1"]["failure_stage"] == "transcript"
+    assert by_video["failednodoc1"]["retryable"] is True
+    assert by_video["failednodoc1"]["error"] == "asr: empty transcription"
+    assert by_video["pendingnodoc"]["summary_status"] == "pending"
+    assert by_video["pendingnodoc"]["failure_stage"] == "pending"
+    assert by_video["pendingnodoc"]["retryable"] is True
 
 
 def test_startup_marks_interrupted_youtube_processing_as_failed(
@@ -881,6 +882,52 @@ def test_summary_history_orders_by_video_published_time(
         "doc_newer_published",
         "doc_older_published",
     ]
+
+
+def test_summary_history_prioritizes_pending_discovered_videos(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="pending_order_ws", name="pending_order_ws"))
+    pending_video = Video(
+        id="video_old_pending_recently_discovered",
+        workspace_id="pending_order_ws",
+        video_id="oldpending",
+        title="Old published but newly discovered",
+        fetch_status="pending",
+        published_at=datetime(2016, 8, 6, tzinfo=UTC),
+        created_at=datetime(2026, 7, 16, 10, 0, tzinfo=UTC),
+    )
+    completed_video = Video(
+        id="video_new_completed",
+        workspace_id="pending_order_ws",
+        video_id="newcompleted",
+        title="New completed summary",
+        fetch_status="fetched",
+        published_at=datetime(2026, 7, 15, tzinfo=UTC),
+        created_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    db_session.add_all([pending_video, completed_video])
+    db_session.add(
+        Document(
+            id="doc_new_completed",
+            workspace_id="pending_order_ws",
+            title="New completed summary",
+            source_type="youtube",
+            source_uri="https://youtu.be/newcompleted",
+            status="ready",
+            parse_status="completed",
+            video_id=completed_video.id,
+            summary_json={"tldr": "Ready", "tags": []},
+            created_at=datetime(2026, 7, 15, tzinfo=UTC),
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/youtube/summaries?workspace_id=pending_order_ws")
+
+    assert response.status_code == 200
+    assert [item["video_id"] for item in response.json()] == ["oldpending", "newcompleted"]
 
 
 def test_manual_summary_rejects_channel_url(client: TestClient) -> None:
