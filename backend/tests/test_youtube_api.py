@@ -959,3 +959,48 @@ def test_manual_subscription_poll_checks_not_due_subscriptions(
     assert body["poll_count"] == 1
     assert body["discovered"] == 1
     assert body["videos"][0]["video_id"] == video_id
+
+
+def test_manual_subscription_poll_stages_discovered_videos_in_history(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel_id = "UC_stagepollchannel00000"
+    video_id = "stagepoll01"
+    db_session.add(Workspace(id="ws_stage_poll", name="ws_stage_poll"))
+    db_session.add(
+        Subscription(
+            id="sub_stage_poll",
+            workspace_id="ws_stage_poll",
+            platform="youtube",
+            channel_id=channel_id,
+            channel_name="Stage Poll Channel",
+            poll_interval=3600,
+            next_poll_at=datetime.now(UTC) + timedelta(hours=1),
+            enabled=True,
+        )
+    )
+    db_session.commit()
+    meta = VideoMeta(
+        video_id=video_id,
+        title="Visible before summary starts",
+        channel_id=channel_id,
+        channel_name="Stage Poll Channel",
+        published_at=datetime.now(UTC),
+    )
+    fetcher = FakeYouTubeFetcher().add_video(meta).add_channel(channel_id, [video_id])
+    monkeypatch.setattr("app.api.v1.youtube.get_fetcher_for_subscriptions", lambda: fetcher)
+    monkeypatch.setattr("app.api.v1.youtube._run_subscription_summaries_async", lambda pairs: None)
+
+    poll = client.post("/api/v1/youtube/poll?workspace_id=ws_stage_poll")
+    history = client.get("/api/v1/youtube/summaries?workspace_id=ws_stage_poll")
+
+    assert poll.status_code == 200
+    assert poll.json()["discovered"] == 1
+    assert history.status_code == 200
+    items = history.json()
+    assert [item["video_id"] for item in items] == [video_id]
+    assert items[0]["title"] == "Visible before summary starts"
+    assert items[0]["summary_status"] == "pending"
+    assert items[0]["failure_stage"] == "pending"

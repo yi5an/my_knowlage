@@ -102,6 +102,7 @@ class SubscriptionService:
                 self._record_failure(sub, str(exc))
                 continue
             new_metas = self._filter_new(sub, metas)
+            self._stage_discovered_videos(sub, new_metas)
             # Record the poll as done immediately (timestamps + last_video_id).
             # The actual summaries happen async; the orchestrator's upsert is
             # idempotent so a re-poll won't double-process.
@@ -200,6 +201,47 @@ class SubscriptionService:
             ).all()
         )
         return [m for m in metas if m.video_id not in existing_ids]
+
+    def _stage_discovered_videos(
+        self,
+        sub: Subscription,
+        metas: list[VideoMeta],
+    ) -> None:
+        """Persist discovered videos before the slow summary worker starts."""
+        if not metas:
+            return
+        from app.infrastructure.models import Video
+
+        existing_ids = set(
+            self.session.scalars(
+                select(Video.video_id).where(
+                    Video.workspace_id == sub.workspace_id,
+                    Video.video_id.in_([m.video_id for m in metas]),
+                )
+            ).all()
+        )
+        for meta in metas:
+            if meta.video_id in existing_ids:
+                continue
+            self.session.add(
+                Video(
+                    id=f"video_{uuid4().hex}",
+                    workspace_id=sub.workspace_id,
+                    subscription_id=sub.id,
+                    platform="youtube",
+                    video_id=meta.video_id,
+                    title=meta.title or meta.video_id,
+                    channel_id=meta.channel_id,
+                    channel_name=meta.channel_name,
+                    duration_sec=meta.duration_sec,
+                    published_at=meta.published_at,
+                    thumbnail_url=meta.thumbnail_url,
+                    description=meta.description,
+                    chapters=[c.model_dump(mode="json") for c in meta.chapters],
+                    fetch_status="pending",
+                )
+            )
+        self.session.commit()
 
     def _record_success(self, sub: Subscription, metas: list[VideoMeta]) -> None:
         now = self.now()
