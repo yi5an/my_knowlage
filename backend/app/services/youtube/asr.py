@@ -31,6 +31,7 @@ from app.schemas.youtube import Transcript, TranscriptSegment
 
 if TYPE_CHECKING:
     import httpx
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +107,7 @@ class _AudioWindow:
 class AsrService(Protocol):
     """Pluggable ASR fallback. Real impl is :class:`GlrmAsrService`."""
 
-    def transcribe(self, video_id: str) -> Transcript:
-        ...
+    def transcribe(self, video_id: str) -> Transcript: ...
 
 
 def _format_ts(sec: float) -> str:
@@ -161,8 +161,7 @@ class GlmAsrService:
             windows = self._split_audio(audio_path, workdir, duration)
             if not windows:
                 raise AudioSplitError(
-                    f"no audio windows produced for {video_id} "
-                    f"(duration={duration:.1f}s)"
+                    f"no audio windows produced for {video_id} (duration={duration:.1f}s)"
                 )
             logger.info(
                 "asr: video %s → %d windows (%.1fs total)",
@@ -224,16 +223,10 @@ class GlmAsrService:
                 break
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
-                if (
-                    attempt >= _AUDIO_DOWNLOAD_ATTEMPTS
-                    or not _is_retryable_download_error(exc)
-                ):
-                    raise AudioDownloadError(
-                        f"yt-dlp failed for {video_id}: {exc}"
-                    ) from exc
+                if attempt >= _AUDIO_DOWNLOAD_ATTEMPTS or not _is_retryable_download_error(exc):
+                    raise AudioDownloadError(f"yt-dlp failed for {video_id}: {exc}") from exc
                 logger.warning(
-                    "asr: yt-dlp transient download error for %s "
-                    "(attempt %d/%d): %s",
+                    "asr: yt-dlp transient download error for %s (attempt %d/%d): %s",
                     video_id,
                     attempt,
                     _AUDIO_DOWNLOAD_ATTEMPTS,
@@ -293,9 +286,7 @@ class GlmAsrService:
             )
         return duration
 
-    def _split_audio(
-        self, audio_path: str, workdir: str, duration: float
-    ) -> list[_AudioWindow]:
+    def _split_audio(self, audio_path: str, workdir: str, duration: float) -> list[_AudioWindow]:
         """Slice the audio into ``segment_sec`` windows via ffmpeg."""
         if duration <= 0:
             return []
@@ -348,9 +339,7 @@ class GlmAsrService:
 
         with httpx.Client(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
             for i, window in enumerate(windows):
-                text, duration_sec = self._post_one(
-                    client, url, headers, window, previous_text
-                )
+                text, duration_sec = self._post_one(client, url, headers, window, previous_text)
                 if not text:
                     logger.warning(
                         "asr: empty result for window %d @ %s",
@@ -398,8 +387,7 @@ class GlmAsrService:
 
         if resp.status_code >= 400:
             raise AsrTranscriptionError(
-                f"ASR HTTP {resp.status_code} @ {_format_ts(window.start_sec)}: "
-                f"{resp.text[:300]}"
+                f"ASR HTTP {resp.status_code} @ {_format_ts(window.start_sec)}: {resp.text[:300]}"
             )
         try:
             payload = resp.json()
@@ -408,11 +396,7 @@ class GlmAsrService:
                 f"ASR returned non-JSON @ {_format_ts(window.start_sec)}: {resp.text[:200]}"
             ) from exc
 
-        text = (
-            payload.get("text")
-            or (payload.get("result") or {}).get("text")
-            or ""
-        )
+        text = payload.get("text") or (payload.get("result") or {}).get("text") or ""
         return text, float(self.segment_sec)
 
 
@@ -533,7 +517,7 @@ class FakeAsrService:
         raise AsrError(f"no canned ASR transcript for {video_id}")
 
 
-def build_asr_service_from_settings() -> AsrService | None:
+def build_asr_service_from_settings(session: Session | None = None) -> AsrService | None:
     """Factory used by main.py / the API layer to wire the real service.
 
     Returns None when ASR is disabled or the key is missing, so callers
@@ -542,6 +526,22 @@ def build_asr_service_from_settings() -> AsrService | None:
     from app.core.config import get_settings
 
     settings = get_settings()
+    if session is not None:
+        from app.services.model_runtime import ModelRuntimeResolver
+
+        managed = ModelRuntimeResolver(session).resolve("asr")
+        if managed is not None:
+            if not managed.api_key:
+                raise AsrError("Managed ASR provider requires an API key.")
+            return GlmAsrService(
+                api_key=managed.api_key,
+                base_url=managed.base_url or settings.asr_base_url,
+                model=managed.model_name,
+                segment_sec=settings.asr_segment_sec,
+                workspace=settings.asr_audio_workspace,
+                language=settings.asr_language,
+                proxy_url=settings.youtube_proxy_url,
+            )
     if not settings.asr_enabled or not settings.asr_api_key:
         return None
     primary = GlmAsrService(

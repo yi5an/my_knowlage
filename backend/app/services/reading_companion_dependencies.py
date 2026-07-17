@@ -17,6 +17,6 @@ def get_reading_companion_service(
 ) -> ReadingCompanionService:
     return ReadingCompanionService(
         session=session,
-        llm_client=build_llm_client_from_settings(),
+        llm_client=build_llm_client_from_settings(session),
         evidence_adapter=ReadingEvidenceAdapter(session, rag_service),
     )

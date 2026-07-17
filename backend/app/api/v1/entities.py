@@ -91,9 +91,7 @@ async def list_entities(
     session: Session = DB_SESSION_DEPENDENCY,
 ) -> list[EntityResponse]:
     statement = (
-        select(Entity)
-        .where(Entity.workspace_id == workspace_id)
-        .order_by(Entity.updated_at.desc())
+        select(Entity).where(Entity.workspace_id == workspace_id).order_by(Entity.updated_at.desc())
     )
     return [_entity_response(item) for item in session.scalars(statement)]
 
@@ -169,7 +167,7 @@ def _build_merge_service(session: Session) -> EntityMergeService:
 
     return EntityMergeService(
         session=session,
-        llm_client=build_llm_client_from_settings(),
+        llm_client=build_llm_client_from_settings(session),
         graph_store=get_graph_store(),
     )
 
@@ -209,7 +207,7 @@ async def cleanup_entities(
 
     service = EntityCleanupService(
         session=session,
-        llm_client=build_llm_client_from_settings(),
+        llm_client=build_llm_client_from_settings(session),
         graph_store=get_graph_store(),
     )
     return service.cleanup(request)

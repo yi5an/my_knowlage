@@ -24,6 +24,7 @@ class Settings(BaseSettings):
         default="./storage",
         alias="LOCAL_STORAGE_DIR",
     )
+    model_encryption_key: str | None = Field(default=None, alias="MODEL_ENCRYPTION_KEY")
     embedding_provider: str = Field(default="mock", alias="EMBEDDING_PROVIDER")
     embedding_base_url: str | None = Field(default=None, alias="EMBEDDING_BASE_URL")
     embedding_api_key: str | None = Field(default=None, alias="EMBEDDING_API_KEY")

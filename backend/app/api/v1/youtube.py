@@ -123,9 +123,7 @@ def build_orchestrator(session: Session) -> VideoSummaryOrchestrator:
     # Use the REST-direct fetcher (urllib) — it works in restricted networks
     # where googleapiclient times out. Consistent with the scheduler path.
     fetcher = get_fetcher_from_settings(settings)
-    asr_service = (
-        build_asr_service_from_settings() if settings.asr_enabled else None
-    )
+    asr_service = build_asr_service_from_settings(session) if settings.asr_enabled else None
     visual_analysis_service = build_visual_analysis_service_from_settings(settings, session)
     # Wire the extraction pipeline so summaries feed entities/relations into
     # the knowledge graph. Without this the graph only shows doc→chunk
@@ -133,9 +131,7 @@ def build_orchestrator(session: Session) -> VideoSummaryOrchestrator:
     # summaries so extraction shares the GLM-5.2 endpoint.
     from app.services.youtube.extraction_pipeline import DefaultExtractionPipeline
 
-    extraction_pipeline = DefaultExtractionPipeline(
-        session=session, llm_client=summary_client
-    )
+    extraction_pipeline = DefaultExtractionPipeline(session=session, llm_client=summary_client)
     return VideoSummaryOrchestrator(
         session=session,
         fetcher=fetcher,
@@ -685,9 +681,7 @@ async def get_summary_status_by_video(
 
     from app.infrastructure.models import Document
 
-    video = session.scalar(
-        select(Video).where(Video.video_id == video_id)
-    )
+    video = session.scalar(select(Video).where(Video.video_id == video_id))
     if video is None:
         # Background thread hasn't fetched+upserted yet — still warming up.
         return SummaryJobStatus(video_id=video_id, status="unknown")
@@ -777,8 +771,7 @@ async def list_summaries(
             select(Video, Document)
             .outerjoin(Document, Document.video_id == Video.id)
             .where(Video.workspace_id == workspace_id)
-        )
-        .all()
+        ).all()
     )
     rows.sort(key=lambda row: _summary_list_sort_value(row[0]), reverse=True)
     return [_summary_list_item(video, doc) for video, doc in rows[:limit]]
@@ -815,8 +808,10 @@ def _summary_list_item(video: Video, doc: Document | None) -> SummaryListItem:
     # video is deleted/private; showing the shell as "processing" leaves a
     # duplicate-looking row with a retry button forever.
     terminal_video_status = video.fetch_status in ("failed", "no_transcript", "access_denied")
-    status = video.fetch_status if terminal_video_status else (
-        doc.parse_status if doc is not None else video.fetch_status
+    status = (
+        video.fetch_status
+        if terminal_video_status
+        else (doc.parse_status if doc is not None else video.fetch_status)
     )
     error = None
     if terminal_video_status:
@@ -825,11 +820,7 @@ def _summary_list_item(video: Video, doc: Document | None) -> SummaryListItem:
         error = doc.ai_summary
     # access_denied is a PERMANENT block — never offer a retry, since the
     # video can't be fetched without channel membership / region change.
-    retryable = (
-        status != "completed"
-        and status != "access_denied"
-        and bool(video.video_id)
-    )
+    retryable = status != "completed" and status != "access_denied" and bool(video.video_id)
     return SummaryListItem(
         document_id=doc.id if doc is not None else "",
         video_id=video.video_id,
@@ -1110,9 +1101,7 @@ def _run_subscription_summaries_async(
                         subscription_id=sub.id,
                     )
                 except Exception:  # noqa: BLE001
-                    logger.exception(
-                        "background summary failed for %s", meta.video_id
-                    )
+                    logger.exception("background summary failed for %s", meta.video_id)
     finally:
         session.close()
 
@@ -1149,9 +1138,7 @@ async def trigger_poll(
     return PollResponse(poll_count=len(pairs), discovered=len(videos), videos=videos)
 
 
-@router.post(
-    "/subscriptions/{subscription_id}/poll", response_model=PollResponse
-)
+@router.post("/subscriptions/{subscription_id}/poll", response_model=PollResponse)
 async def trigger_poll_one(
     subscription_id: str,
     workspace_id: Annotated[str, Query()] = "ws_default",

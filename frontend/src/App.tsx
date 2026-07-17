@@ -35,6 +35,7 @@ import { InvestmentThemesPage } from "./pages/InvestmentThemesPage";
 import { InvestmentThesesPage } from "./pages/InvestmentThesesPage";
 import { InvestmentWatchlistPage } from "./pages/InvestmentWatchlistPage";
 import { LibraryPage } from "./pages/LibraryPage";
+import { ModelManagementPage } from "./pages/ModelManagementPage";
 import { NotebookPage } from "./pages/NotebookPage";
 import { ReaderPage } from "./pages/ReaderPage";
 import { ResearchPage } from "./pages/ResearchPage";
@@ -153,6 +154,7 @@ export function App() {
             <Route path="/investment/digest" element={<InvestmentDigestPage />} />
             <Route path="/notebooklm" element={<NotebookPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/models" element={<ModelManagementPage />} />
           </Routes>
         </Content>
       </Layout>

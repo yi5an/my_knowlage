@@ -225,7 +225,7 @@ def build_youtube_orchestrator_for_job(
         summary_service=summary_service,
         translation_service=TranslationService(llm_client),
         translate_enabled=settings.translate_to_chinese,
-        asr_service=build_asr_service_from_settings() if settings.asr_enabled else None,
+        asr_service=build_asr_service_from_settings(session) if settings.asr_enabled else None,
         extraction_pipeline=DefaultExtractionPipeline(
             session=session,
             llm_client=llm_client,

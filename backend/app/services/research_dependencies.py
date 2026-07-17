@@ -27,7 +27,7 @@ RESEARCH_LLM_MAX_OUTPUT_TOKENS = 4096
 RESEARCH_LLM_RETRIES = 3
 
 
-def build_llm_client_from_settings() -> StructuredOutputClient:
+def build_llm_client_from_settings(session: Session | None = None) -> StructuredOutputClient:
     """Build a structured-output LLM client from settings.
 
     Mirrors ``services/youtube/summary.build_summary_service_from_settings``:
@@ -35,6 +35,21 @@ def build_llm_client_from_settings() -> StructuredOutputClient:
     mock client for no-key local mode (tests / offline development).
     """
     settings = get_settings()
+    if session is not None:
+        from app.services.model_runtime import ModelRuntimeResolver
+
+        managed = ModelRuntimeResolver(session).resolve("llm")
+        if managed is not None:
+            if not managed.api_key:
+                raise RuntimeError("Managed LLM provider requires an API key.")
+            return OpenAICompatibleStructuredOutputClient(
+                api_key=managed.api_key,
+                model=managed.model_name,
+                base_url=managed.base_url,
+                max_output_tokens=managed.max_output_tokens or RESEARCH_LLM_MAX_OUTPUT_TOKENS,
+                retries=RESEARCH_LLM_RETRIES,
+                timeout_seconds=managed.timeout_seconds,
+            )
     api_key = settings.llm_api_key
     if api_key:
         return OpenAICompatibleStructuredOutputClient(
@@ -43,9 +58,7 @@ def build_llm_client_from_settings() -> StructuredOutputClient:
             base_url=settings.llm_base_url,
             # Research output is richer than summaries; favour a larger budget
             # over the global default so reports/claims don't get truncated.
-            max_output_tokens=max(
-                settings.llm_max_output_tokens, RESEARCH_LLM_MAX_OUTPUT_TOKENS
-            ),
+            max_output_tokens=max(settings.llm_max_output_tokens, RESEARCH_LLM_MAX_OUTPUT_TOKENS),
             retries=RESEARCH_LLM_RETRIES,
         )
     return MockStructuredOutputClient()
@@ -67,6 +80,6 @@ def build_web_client_from_settings() -> WebSearchClient:
 def get_research_agent_service(session: Session = DB_SESSION_DEPENDENCY) -> ResearchAgentService:
     return ResearchAgentService(
         session=session,
-        llm_client=build_llm_client_from_settings(),
+        llm_client=build_llm_client_from_settings(session),
         web_search_client=build_web_client_from_settings(),
     )

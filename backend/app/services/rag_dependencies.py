@@ -20,8 +20,20 @@ _mock_reranker = MockRerankerClient()
 DB_SESSION_DEPENDENCY = Depends(get_db_session)
 
 
-def get_embedding_client() -> EmbeddingClient:
+def get_embedding_client(session: Session | None = None) -> EmbeddingClient:
     settings = get_settings()
+    if session is not None:
+        from app.services.model_runtime import ModelRuntimeResolver
+
+        managed = ModelRuntimeResolver(session).resolve("embedding")
+        if managed is not None:
+            if not managed.api_key or not managed.base_url:
+                raise RuntimeError("Managed embedding provider requires an API key and base URL.")
+            return OpenAICompatibleEmbeddingClient(
+                base_url=managed.base_url,
+                model=managed.model_name,
+                api_key=managed.api_key,
+            )
     if settings.embedding_provider == "openai-compatible":
         if not settings.embedding_base_url:
             msg = "EMBEDDING_BASE_URL is required for openai-compatible embeddings."
@@ -52,7 +64,7 @@ def get_reranker_client() -> RerankerClient:
 def get_rag_service(session: Session = DB_SESSION_DEPENDENCY) -> RagService:
     return RagService(
         session=session,
-        embedding_client=get_embedding_client(),
+        embedding_client=get_embedding_client(session),
         vector_store=get_vector_store(),
         reranker=get_reranker_client(),
         min_score=get_settings().rag_min_score,

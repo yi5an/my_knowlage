@@ -75,10 +75,7 @@ class OcrClient:
         response.raise_for_status()
         payload = response.json()
         raw_blocks = (
-            payload.get("blocks")
-            or payload.get("ocr_blocks")
-            or payload.get("lines")
-            or []
+            payload.get("blocks") or payload.get("ocr_blocks") or payload.get("lines") or []
         )
         if not raw_blocks and isinstance(payload.get("text"), str):
             confidence = float(payload.get("confidence") or 0.0)
@@ -470,9 +467,7 @@ class VideoVisualAnalysisService:
     ) -> list[VideoFrameAnalysisResult]:
         output_dir = self.storage_dir / "youtube_frames" / youtube_video_id
         output_dir.parent.mkdir(parents=True, exist_ok=True)
-        temp_dir = Path(
-            tempfile.mkdtemp(prefix=f".{youtube_video_id}_", dir=output_dir.parent)
-        )
+        temp_dir = Path(tempfile.mkdtemp(prefix=f".{youtube_video_id}_", dir=output_dir.parent))
         try:
             frames = self.frame_extractor.extract(
                 youtube_video_id,
@@ -550,7 +545,12 @@ def build_visual_analysis_service_from_settings(
 ) -> VideoVisualAnalysisService | None:
     if not getattr(settings, "youtube_visual_analysis_enabled", False):
         return None
-    ocr_base_url = getattr(settings, "ocr_base_url", None)
+    from app.services.model_runtime import ModelRuntimeResolver
+
+    managed = ModelRuntimeResolver(session).resolve("ocr")
+    ocr_base_url = (
+        managed.base_url if managed is not None else getattr(settings, "ocr_base_url", None)
+    )
     if not ocr_base_url:
         logger.warning("visual analysis enabled but OCR_BASE_URL is not configured")
         return None
@@ -562,7 +562,11 @@ def build_visual_analysis_service_from_settings(
         ),
         ocr_client=OcrClient(
             base_url=ocr_base_url,
-            timeout_seconds=getattr(settings, "ocr_timeout_seconds", 60.0),
+            timeout_seconds=(
+                managed.timeout_seconds
+                if managed is not None
+                else getattr(settings, "ocr_timeout_seconds", 60.0)
+            ),
         ),
         storage_dir=Path(getattr(settings, "local_storage_dir", "./storage")),
         proxy_url=getattr(settings, "youtube_proxy_url", None),

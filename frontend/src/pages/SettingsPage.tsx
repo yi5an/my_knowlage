@@ -71,7 +71,7 @@ export function SettingsPage() {
     <main className="page">
       <PageHeader
         title="设置"
-        description="工作区偏好设置与提供商占位项，不含 API 密钥。"
+        description="工作区偏好设置与平台模型管理。API Key 在后端加密保存，不会回显。"
       />
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
@@ -90,20 +90,10 @@ export function SettingsPage() {
           </Card>
         </Col>
         <Col xs={24} lg={12}>
-          <Card title="模型路由占位项" className="panel-card">
+          <Card title="模型管理" className="panel-card">
             <Form layout="vertical">
-              <Form.Item label="LLM 提供商">
-                <Select
-                  defaultValue="not_configured"
-                  options={[{ label: "未配置", value: "not_configured" }]}
-                />
-              </Form.Item>
-              <Form.Item label="Embedding 提供商">
-                <Select
-                  defaultValue="not_configured"
-                  options={[{ label: "未配置", value: "not_configured" }]}
-                />
-              </Form.Item>
+              <p>管理 LLM、Embedding、ASR、OCR 的提供商、模型地址、加密 API Key 和默认路由。</p>
+              <Button type="primary" href="/settings/models">打开模型管理</Button>
             </Form>
           </Card>
         </Col>

@@ -534,6 +534,12 @@ class ModelProvider(TimestampMixin, Base):
     provider_type: Mapped[str] = mapped_column(String(64), nullable=False)
     base_url: Mapped[str | None] = mapped_column(Text())
     api_key_ref: Mapped[str | None] = mapped_column(Text())
+    api_key_ciphertext: Mapped[str | None] = mapped_column(Text())
+    api_key_hint: Mapped[str | None] = mapped_column(String(32))
+    timeout_seconds: Mapped[float] = mapped_column(Float(), default=120.0, server_default="120")
+    last_test_status: Mapped[str | None] = mapped_column(String(64))
+    last_test_message: Mapped[str | None] = mapped_column(Text())
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     enabled: Mapped[bool] = mapped_column(Boolean(), default=True, server_default="true")
     metadata_: Mapped[JsonObject] = mapped_column("metadata", JsonType, default=dict)
 
@@ -558,6 +564,17 @@ class ModelConfig(TimestampMixin, Base):
     metadata_: Mapped[JsonObject] = mapped_column("metadata", JsonType, default=dict)
 
     provider: Mapped[ModelProvider] = relationship()
+
+
+class ModelRoute(TimestampMixin, Base):
+    __tablename__ = "model_route"
+    __table_args__ = (UniqueConstraint("capability", name="uq_model_route_capability"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    capability: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_config_id: Mapped[str] = mapped_column(ForeignKey("model_config.id"), nullable=False)
+
+    model_config: Mapped[ModelConfig] = relationship()
 
 
 # --- YouTube source extension (subscription + video metadata) ---
