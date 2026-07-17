@@ -17,6 +17,7 @@ dist/
 coverage/
 
 .playwright-mcp/
+.worktrees/
 *.db-wal
 *.db-shm
 *.db-journal
