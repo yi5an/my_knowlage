@@ -565,6 +565,9 @@ export function InvestmentWatchlistPage() {
           </Space>
           {sourceDrafts.map((draft, index) => (
             <Card key={`${draft.source_type}-${index}`} size="small" style={{ marginBottom: 8 }} title={SOURCE_TYPE_LABEL[draft.source_type]}>
+              <Form.Item label="来源类型" name={["source_drafts", index, "source_type"]} rules={[{ required: true }]}>
+                <Select options={["rss", "sec_edgar", "x_web", "federal_reserve_rss", "bls", "fred"].map((sourceType) => ({ value: sourceType, label: SOURCE_TYPE_LABEL[sourceType as SourceType] }))} />
+              </Form.Item>
               <Form.Item label="名称" name={["source_drafts", index, "name"]} rules={[{ required: true }]}><Input /></Form.Item>
               {draft.source_type === "sec_edgar" && <Form.Item label="CIK" name={["source_drafts", index, "cik"]} rules={[{ required: true }]}><Input /></Form.Item>}
               {draft.source_type === "x_web" && <Form.Item label="X 用户名" name={["source_drafts", index, "x_username"]} rules={[{ required: true }]}><Input placeholder="@nvidia" /></Form.Item>}
