@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Empty,
   Form,
   Input,
@@ -17,6 +18,7 @@ import {
 } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
+import { buildSourcePayload, SOURCE_TYPE_LABEL, type SourceDraftValues } from "../components/investment/sourcePayload";
 import { ApiError } from "../services/client";
 import {
   investmentApi,
@@ -26,7 +28,15 @@ import {
   type InvestmentSource,
   type InvestmentThesis,
   type InvestmentWatchlist,
+  type SourceType,
 } from "../services/investmentApi";
+
+const TEMPLATE_TYPES: Record<string, SourceType[]> = {
+  stock: ["sec_edgar", "rss", "x_web"],
+  company: ["sec_edgar", "rss", "x_web"],
+  macro: ["federal_reserve_rss", "bls", "fred", "x_web"],
+  etf: ["rss", "x_web"],
+};
 
 export function InvestmentWatchlistPage() {
   const [items, setItems] = useState<InvestmentWatchlist[]>([]);
@@ -48,6 +58,8 @@ export function InvestmentWatchlistPage() {
   const [pollingSourceIds, setPollingSourceIds] = useState<Record<string, boolean>>({});
   const [form] = Form.useForm();
   const [bindSourceForm] = Form.useForm();
+  const watchType = Form.useWatch("watch_type", form) ?? "stock";
+  const sourceDrafts = (Form.useWatch("source_drafts", form) ?? []) as SourceDraftValues[];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -126,6 +138,13 @@ export function InvestmentWatchlistPage() {
       return;
     }
     const values = await form.validateFields();
+    let payloads;
+    try {
+      payloads = ((values.source_drafts ?? []) as SourceDraftValues[]).map(buildSourcePayload);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e));
+      return;
+    }
     const created = await investmentApi.createWatchlist({
       name: values.name,
       watch_type: values.watch_type ?? "stock",
@@ -142,9 +161,16 @@ export function InvestmentWatchlistPage() {
         await investmentApi.pollSource(sourceId);
       }),
     );
+    const createdSources = await Promise.allSettled(
+      payloads.map(async (payload) => {
+        const source = await investmentApi.createSource({ ...payload, default_watchlist_ids: [created.id] });
+        await investmentApi.pollSource(source.id);
+      }),
+    );
     const failed = bound.filter((result) => result.status === "rejected").length;
-    if (sourceIds.length > 0) {
-      message.success(failed === 0 ? "信息源已绑定并开始抓取" : `已开始抓取，${failed} 个信息源失败`);
+    if (sourceIds.length + payloads.length > 0) {
+      const totalFailed = failed + createdSources.filter((result) => result.status === "rejected").length;
+      message.success(totalFailed === 0 ? "信息源已绑定并开始抓取" : `已开始抓取，${totalFailed} 个信息源失败`);
     }
     setOpen(false);
     setOnboardingStep("details");
@@ -518,6 +544,33 @@ export function InvestmentWatchlistPage() {
               options={sources.map((source) => ({ value: source.id, label: source.name }))}
             />
           </Form.Item>
+          <Typography.Text strong>推荐信息源模板</Typography.Text>
+          <Space wrap style={{ marginTop: 8, marginBottom: 12 }}>
+            {(TEMPLATE_TYPES[watchType] ?? TEMPLATE_TYPES.stock).map((sourceType) => (
+              <Checkbox
+                key={sourceType}
+                checked={sourceDrafts.some((draft) => draft.source_type === sourceType)}
+                onChange={(event) => {
+                  const drafts = sourceDrafts.filter((draft) => draft.source_type !== sourceType);
+                  if (event.target.checked) drafts.push({ source_type: sourceType, name: SOURCE_TYPE_LABEL[sourceType] });
+                  form.setFieldValue("source_drafts", drafts);
+                }}
+              >
+                {SOURCE_TYPE_LABEL[sourceType]}
+              </Checkbox>
+            ))}
+            <Button size="small" onClick={() => form.setFieldValue("source_drafts", [...sourceDrafts, { source_type: "rss", name: "自定义 RSS" }])}>
+              添加自定义来源
+            </Button>
+          </Space>
+          {sourceDrafts.map((draft, index) => (
+            <Card key={`${draft.source_type}-${index}`} size="small" style={{ marginBottom: 8 }} title={SOURCE_TYPE_LABEL[draft.source_type]}>
+              <Form.Item label="名称" name={["source_drafts", index, "name"]} rules={[{ required: true }]}><Input /></Form.Item>
+              {draft.source_type === "sec_edgar" && <Form.Item label="CIK" name={["source_drafts", index, "cik"]} rules={[{ required: true }]}><Input /></Form.Item>}
+              {draft.source_type === "x_web" && <Form.Item label="X 用户名" name={["source_drafts", index, "x_username"]} rules={[{ required: true }]}><Input placeholder="@nvidia" /></Form.Item>}
+              {draft.source_type !== "sec_edgar" && draft.source_type !== "x_web" && <Form.Item label="URL / 序列 ID" name={["source_drafts", index, draft.source_type === "bls" || draft.source_type === "fred" ? "series" : "url"]} rules={[{ required: true }]}><Input /></Form.Item>}
+            </Card>
+          ))}
           </>}
         </Form>
       </Modal>

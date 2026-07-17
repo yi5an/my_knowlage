@@ -228,5 +228,6 @@ describe("InvestmentWatchlistPage", () => {
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "NVIDIA" } });
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     expect(await screen.findByText("配置首批信息源")).toBeInTheDocument();
+    expect(screen.getByText("推荐信息源模板")).toBeInTheDocument();
   });
 });
