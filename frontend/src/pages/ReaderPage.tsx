@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { BulbOutlined, CheckOutlined, CloseOutlined, SafetyOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Col, Empty, List, Row, Space, Spin, Tag, Typography } from "antd";
 import { useParams } from "react-router-dom";
@@ -70,7 +70,7 @@ export function ReaderPage() {
       <PageHeader title={reader.title} description="AI 主动标记重点，并用本地资料提供佐证或冲突信息。" />
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={5}><Card title="大纲" className="panel-card sticky-panel"><List size="small" dataSource={reader.chunks} renderItem={(item) => <List.Item><a href={`#chunk-${item.id}`}>{item.heading ?? "正文"}</a></List.Item>} /></Card></Col>
-        <Col xs={24} lg={12}><article className="reader-document">{reader.chunks.map((chunk) => <section id={`chunk-${chunk.id}`} key={chunk.id}><Typography.Title level={3}>{chunk.heading}</Typography.Title><Typography.Paragraph>{chunk.content}</Typography.Paragraph></section>)}</article></Col>
+        <Col xs={24} lg={12}><article className="reader-document">{reader.chunks.map((chunk) => <section id={`chunk-${chunk.id}`} key={chunk.id}><Typography.Title level={3}>{chunk.heading}</Typography.Title><Typography.Paragraph>{renderChunk(chunk.content, insights.filter((item) => item.chunk_id === chunk.id))}</Typography.Paragraph></section>)}</article></Col>
         <Col xs={24} lg={7}><Card title="AI 陪读" className="panel-card sticky-panel" extra={<BulbOutlined />}>
           {!reader.analysis && <Button type="primary" onClick={() => void startAnalysis()}>开始分析</Button>}
           {reader.analysis && ["pending", "running"].includes(reader.analysis.status) && <Spin tip="正在分析文档与本地证据..." />}
@@ -94,4 +94,20 @@ function InsightList({ insights, onReview }: { insights: ReadingInsight[]; onRev
     {insight.corroborations.map((source) => <Typography.Paragraph key={source.id} style={{ marginTop: 8 }}><Tag>{source.stance}</Tag><b>{source.source_title}</b>：{source.excerpt}</Typography.Paragraph>)}
     {insight.status === "active" && <Space><Button size="small" icon={<CheckOutlined />} onClick={() => void onReview(insight, "confirmed")}>确认</Button><Button size="small" icon={<CloseOutlined />} onClick={() => void onReview(insight, "dismissed")}>忽略</Button></Space>}
   </Card></List.Item>} />;
+}
+
+function renderChunk(content: string, insights: ReadingInsight[]) {
+  const anchors = insights
+    .filter((item) => item.start_offset >= 0 && item.end_offset <= content.length)
+    .sort((left, right) => left.start_offset - right.start_offset);
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  for (const insight of anchors) {
+    if (insight.start_offset < cursor) continue;
+    nodes.push(content.slice(cursor, insight.start_offset));
+    nodes.push(<mark key={insight.id} title={`${KIND_LABEL[insight.kind]}：${insight.headline}`}>{content.slice(insight.start_offset, insight.end_offset)}</mark>);
+    cursor = insight.end_offset;
+  }
+  nodes.push(content.slice(cursor));
+  return nodes;
 }
