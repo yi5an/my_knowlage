@@ -29,6 +29,17 @@ export function ReaderPage() {
     return () => { cancelled = true; };
   }, [documentId]);
 
+  useEffect(() => {
+    if (!documentId || !reader || reader.analysis) return;
+    let cancelled = false;
+    readingCompanionApi.trigger(documentId).then((job) => readingCompanionApi.getAnalysis(job.analysis_id)).then((analysis) => {
+      if (!cancelled) setReader((current) => current ? { ...current, analysis } : current);
+    }).catch((reason) => {
+      if (!cancelled) setError(String(reason));
+    });
+    return () => { cancelled = true; };
+  }, [documentId, reader]);
+
   const analysisId = reader?.analysis?.id;
   const analysisStatus = reader?.analysis?.status;
   useEffect(() => {
