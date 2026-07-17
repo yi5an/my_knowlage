@@ -16,9 +16,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.error import URLError
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import ProxyHandler, build_opener
+from urllib.request import Request as UrlRequest
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -36,6 +37,7 @@ from app.infrastructure.models import (
 )
 from app.schemas.youtube import (
     Chapter,
+    LocalVideoDownloadResponse,
     ManualSummaryRequest,
     ManualSummaryResponse,
     SubscribeRequest,
@@ -62,6 +64,7 @@ from app.services.youtube.fetcher import (
     FetcherError,
     YouTubeFetcher,
 )
+from app.services.youtube.local_video import enqueue_local_video_download_job
 from app.services.youtube.orchestrator import VideoSummaryOrchestrator
 from app.services.youtube.summary import build_summary_service_from_settings
 from app.services.youtube.summary_job_handler import enqueue_youtube_summary_job
@@ -191,7 +194,7 @@ def _download_thumbnail(url: str, proxy_url: str | None) -> tuple[bytes, str]:
     if proxy_url:
         handlers.append(ProxyHandler({"http": proxy_url, "https": proxy_url}))
     opener = build_opener(*handlers)
-    request = Request(
+    request = UrlRequest(
         url,
         headers={
             "User-Agent": (
@@ -393,6 +396,59 @@ async def get_video_thumbnail(
     )
 
 
+@router.post("/videos/{video_id}/local-video/download", response_model=LocalVideoDownloadResponse)
+async def download_local_video(
+    video_id: str,
+    session: SessionDep,
+    workspace_id: Annotated[str, Query()] = "ws_default",
+) -> LocalVideoDownloadResponse:
+    video = session.scalar(
+        select(Video).where(Video.workspace_id == workspace_id, Video.video_id == video_id)
+    )
+    if video is None:
+        raise HTTPException(status_code=404, detail="video not found")
+    if video.local_video_status == "downloaded" and video.local_video_path:
+        return _local_video_response(video)
+    job = enqueue_local_video_download_job(session, video)
+    session.refresh(video)
+    return _local_video_response(video, task_job_id=job.id)
+
+
+@router.get("/videos/{video_id}/local-video", response_model=None)
+async def get_local_video(
+    video_id: str,
+    request: Request,
+    session: SessionDep,
+    workspace_id: Annotated[str, Query()] = "ws_default",
+) -> Response:
+    video = session.scalar(
+        select(Video).where(Video.workspace_id == workspace_id, Video.video_id == video_id)
+    )
+    if video is None or video.local_video_status != "downloaded" or not video.local_video_path:
+        raise HTTPException(status_code=404, detail="local video not found")
+    video_path = _safe_local_video_path(video.local_video_path)
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="local video file not found")
+
+    size = video_path.stat().st_size
+    range_header = request.headers.get("range")
+    headers = {"Accept-Ranges": "bytes"}
+    if not range_header:
+        return FileResponse(video_path, media_type="video/mp4", headers=headers)
+
+    start, end = _parse_range_header(range_header, size)
+    with video_path.open("rb") as file:
+        file.seek(start)
+        content = file.read(end - start + 1)
+    headers.update(
+        {
+            "Content-Range": f"bytes {start}-{end}/{size}",
+            "Content-Length": str(len(content)),
+        }
+    )
+    return Response(content=content, status_code=206, media_type="video/mp4", headers=headers)
+
+
 def _summary_card_from_document(session: Session, document: Document) -> VideoSummaryCard:
     video = session.get(Video, document.video_id) if document.video_id else None
     summary_dict = document.summary_json or None
@@ -423,7 +479,62 @@ def _summary_card_from_document(session: Session, document: Document) -> VideoSu
             document,
             video,
         ),
+        local_video_status=video.local_video_status if video else "not_downloaded",
+        local_video_url=_local_video_url(video) if video else None,
+        local_video_size=video.local_video_size if video else None,
+        local_video_error=video.local_video_error if video else None,
     )
+
+
+def _local_video_url(video: Video | None) -> str | None:
+    if video is None or video.local_video_status != "downloaded" or not video.local_video_path:
+        return None
+    return f"/api/v1/youtube/videos/{video.video_id}/local-video"
+
+
+def _local_video_response(
+    video: Video,
+    *,
+    task_job_id: str | None = None,
+) -> LocalVideoDownloadResponse:
+    return LocalVideoDownloadResponse(
+        video_id=video.video_id,
+        status=video.local_video_status,
+        task_job_id=task_job_id,
+        local_video_url=_local_video_url(video),
+        local_video_size=video.local_video_size,
+        error=video.local_video_error,
+    )
+
+
+def _safe_local_video_path(raw_path: str) -> Path:
+    settings = get_settings()
+    storage_root = Path(settings.youtube_local_video_dir).resolve()
+    video_path = Path(raw_path).resolve()
+    try:
+        video_path.relative_to(storage_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="local video path is outside storage") from exc
+    return video_path
+
+
+def _parse_range_header(value: str, size: int) -> tuple[int, int]:
+    if not value.startswith("bytes="):
+        raise HTTPException(status_code=416, detail="unsupported range unit")
+    raw_range = value.removeprefix("bytes=").split(",", 1)[0].strip()
+    start_text, _, end_text = raw_range.partition("-")
+    if not start_text and not end_text:
+        raise HTTPException(status_code=416, detail="invalid range")
+    if start_text:
+        start = int(start_text)
+        end = int(end_text) if end_text else size - 1
+    else:
+        suffix = int(end_text)
+        start = max(0, size - suffix)
+        end = size - 1
+    if start < 0 or end < start or start >= size:
+        raise HTTPException(status_code=416, detail="range not satisfiable")
+    return start, min(end, size - 1)
 
 
 def _visual_frames_for_video(

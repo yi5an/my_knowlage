@@ -24,6 +24,10 @@ const summaryCard = {
   mindmap: null,
   transcript: "Transcript text",
   visual_frames: [],
+  local_video_status: "not_downloaded",
+  local_video_url: null,
+  local_video_size: null,
+  local_video_error: null,
 };
 
 function renderPage() {
@@ -151,6 +155,71 @@ describe("VideoSummaryPage", () => {
     expect(screen.getByRole("link", { name: "打开原始来源" })).toHaveAttribute(
       "href",
       "https://x.com/nvidia/status/1",
+    );
+  });
+
+  it("can enqueue a local video download from the summary page", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/youtube/summaries/doc_yt_1")) {
+        return Response.json(summaryCard);
+      }
+      if (url.endsWith("/youtube/summaries/doc_yt_1/mark-read")) {
+        return new Response(null, { status: 204 });
+      }
+      if (
+        url.endsWith("/youtube/videos/dQw4w9WgXcQ/local-video/download") &&
+        init?.method === "POST"
+      ) {
+        return Response.json({
+          video_id: "dQw4w9WgXcQ",
+          status: "queued",
+          task_job_id: "job_yt_video_download_1",
+          local_video_url: null,
+          local_video_size: null,
+          error: null,
+        });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const downloadButton = await screen.findByRole("button", { name: "下载到 NAS" });
+    fireEvent.click(downloadButton);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/youtube/videos/dQw4w9WgXcQ/local-video/download",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    expect(await screen.findByText("下载已加入队列")).toBeInTheDocument();
+  });
+
+  it("renders the local video player when the video has been downloaded", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/youtube/summaries/doc_yt_1")) {
+        return Response.json({
+          ...summaryCard,
+          local_video_status: "downloaded",
+          local_video_url: "/api/v1/youtube/videos/dQw4w9WgXcQ/local-video",
+          local_video_size: 1024,
+        });
+      }
+      if (url.endsWith("/youtube/summaries/doc_yt_1/mark-read")) {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const player = await screen.findByTestId("youtube-local-video-player");
+    expect(player).toHaveAttribute(
+      "src",
+      "/api/v1/youtube/videos/dQw4w9WgXcQ/local-video",
     );
   });
 

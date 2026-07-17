@@ -260,6 +260,15 @@ class ManualSummaryResponse(BaseModel):
     status: str
 
 
+class LocalVideoDownloadResponse(BaseModel):
+    video_id: str
+    status: str
+    task_job_id: str | None = None
+    local_video_url: str | None = None
+    local_video_size: int | None = None
+    error: str | None = None
+
+
 class SourceTraceCandidate(BaseModel):
     source_item_id: str
     source_title: str
@@ -289,3 +298,7 @@ class VideoSummaryCard(BaseModel):
     transcript_url: HttpUrl | None = None
     visual_frames: list[VideoFrameAnalysisResponse] = Field(default_factory=list)
     source_traces: list[SourceTraceCandidate] = Field(default_factory=list)
+    local_video_status: str = "not_downloaded"
+    local_video_url: str | None = None
+    local_video_size: int | None = None
+    local_video_error: str | None = None

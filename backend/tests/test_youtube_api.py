@@ -296,6 +296,136 @@ def test_video_thumbnail_endpoint_proxies_stored_youtube_thumbnail(
     }
 
 
+def test_enqueue_local_video_download_job(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="download_ws", name="download_ws"))
+    db_session.add(
+        Video(
+            id="video_download",
+            workspace_id="download_ws",
+            video_id="download123",
+            title="Download me",
+            fetch_status="fetched",
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/youtube/videos/download123/local-video/download?workspace_id=download_ws"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["video_id"] == "download123"
+    assert body["status"] == "queued"
+    assert body["task_job_id"].startswith("job_yt_video_download_")
+    video = db_session.get(Video, "video_download")
+    assert video is not None
+    assert video.local_video_status == "queued"
+
+
+def test_local_video_stream_supports_range_requests(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video_dir = tmp_path / "youtube_videos"
+    video_dir.mkdir()
+    local_file = video_dir / "range123.mp4"
+    local_file.write_bytes(b"0123456789")
+
+    class StubSettings:
+        youtube_local_video_dir = str(video_dir)
+
+    monkeypatch.setattr("app.api.v1.youtube.get_settings", lambda: StubSettings())
+    db_session.add(Workspace(id="range_ws", name="range_ws"))
+    db_session.add(
+        Video(
+            id="video_range",
+            workspace_id="range_ws",
+            video_id="range123",
+            title="Range video",
+            fetch_status="fetched",
+            local_video_status="downloaded",
+            local_video_path=str(local_file),
+            local_video_size=10,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/api/v1/youtube/videos/range123/local-video?workspace_id=range_ws",
+        headers={"Range": "bytes=2-5"},
+    )
+
+    assert response.status_code == 206
+    assert response.content == b"2345"
+    assert response.headers["content-range"] == "bytes 2-5/10"
+    assert response.headers["accept-ranges"] == "bytes"
+
+
+def test_local_video_download_handler_updates_video_row(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.youtube.local_video import (
+        LocalVideoDownloadResult,
+        YouTubeLocalVideoDownloadHandler,
+    )
+
+    db_session.add(Workspace(id="handler_ws", name="handler_ws"))
+    video = Video(
+        id="video_handler",
+        workspace_id="handler_ws",
+        video_id="handler123",
+        title="Handler video",
+        fetch_status="fetched",
+    )
+    job = TaskJob(
+        id="job_download_handler",
+        workspace_id="handler_ws",
+        job_type="youtube_local_video_download",
+        target_type="video",
+        target_id=video.id,
+        status="running",
+        input={"video_id": video.video_id},
+    )
+    db_session.add_all([video, job])
+    db_session.commit()
+    output_file = tmp_path / "handler123.mp4"
+    output_file.write_bytes(b"local-video")
+
+    class StubSettings:
+        youtube_local_video_dir = str(tmp_path)
+        youtube_proxy_url = "http://proxy.local:7892"
+
+    class FakeDownloader:
+        def download(self, *, video_id: str, target_root: Path, proxy_url: str | None):
+            assert video_id == "handler123"
+            assert target_root == tmp_path
+            assert proxy_url == "http://proxy.local:7892"
+            return LocalVideoDownloadResult(path=str(output_file), size=output_file.stat().st_size)
+
+    monkeypatch.setattr("app.core.config.get_settings", lambda: StubSettings())
+
+    result = YouTubeLocalVideoDownloadHandler(FakeDownloader()).handle(
+        job,
+        db_session,
+        llm_client=None,  # type: ignore[arg-type]
+    )
+
+    db_session.refresh(video)
+    assert result["status"] == "downloaded"
+    assert video.local_video_status == "downloaded"
+    assert video.local_video_path == str(output_file)
+    assert video.local_video_size == len(b"local-video")
+    assert video.local_video_downloaded_at is not None
+
+
 def test_summary_card_returns_possible_source_traces(
     client: TestClient,
     db_session: Session,

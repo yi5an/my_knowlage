@@ -32,6 +32,7 @@ import {
 } from "@ant-design/icons";
 
 import {
+  downloadLocalVideo,
   getSummaryCard,
   importSummaryToKnowledgeBase,
   markSummaryRead,
@@ -54,6 +55,7 @@ export function VideoSummaryPage() {
   const [loading, setLoading] = useState(true);
   const [creatingClaim, setCreatingClaim] = useState(false);
   const [importingToKnowledgeBase, setImportingToKnowledgeBase] = useState(false);
+  const [downloadingLocalVideo, setDownloadingLocalVideo] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -121,6 +123,30 @@ export function VideoSummaryPage() {
       message.error(e instanceof Error ? e.message : String(e));
     } finally {
       setImportingToKnowledgeBase(false);
+    }
+  };
+
+  const handleDownloadLocalVideo = async () => {
+    if (!card) return;
+    setDownloadingLocalVideo(true);
+    try {
+      const result = await downloadLocalVideo(card.video_id);
+      setCard((current) =>
+        current
+          ? {
+              ...current,
+              local_video_status: result.status,
+              local_video_url: result.local_video_url,
+              local_video_size: result.local_video_size,
+              local_video_error: result.error,
+            }
+          : current,
+      );
+      message.success("下载已加入队列");
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloadingLocalVideo(false);
     }
   };
 
@@ -206,6 +232,45 @@ export function VideoSummaryPage() {
               </Space>
             </Col>
           </Row>
+        </Card>
+
+        <Card
+          title="本地视频"
+          extra={
+            card.local_video_status === "downloaded" ? (
+              <Tag color="success">已下载</Tag>
+            ) : card.local_video_status === "queued" ||
+              card.local_video_status === "downloading" ? (
+              <Tag color="processing">下载中</Tag>
+            ) : card.local_video_status === "failed" ? (
+              <Tag color="red">下载失败</Tag>
+            ) : null
+          }
+        >
+          {card.local_video_url ? (
+            <video
+              data-testid="youtube-local-video-player"
+              src={card.local_video_url}
+              controls
+              style={{ width: "100%", maxHeight: 520, background: "#000" }}
+            />
+          ) : (
+            <Space direction="vertical" size="small">
+              <Button
+                onClick={() => void handleDownloadLocalVideo()}
+                loading={downloadingLocalVideo}
+                disabled={
+                  card.local_video_status === "queued" ||
+                  card.local_video_status === "downloading"
+                }
+              >
+                下载到 NAS
+              </Button>
+              {card.local_video_error && (
+                <Text type="danger">{card.local_video_error}</Text>
+              )}
+            </Space>
+          )}
         </Card>
 
         {card.source_traces?.length > 0 && (

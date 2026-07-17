@@ -99,6 +99,19 @@ export interface VideoSummaryCard {
   transcript: string | null;
   visual_frames: VideoFrameAnalysis[];
   source_traces: SourceTraceCandidate[];
+  local_video_status: string;
+  local_video_url: string | null;
+  local_video_size: number | null;
+  local_video_error: string | null;
+}
+
+export interface LocalVideoDownloadResponse {
+  video_id: string;
+  status: string;
+  task_job_id: string | null;
+  local_video_url: string | null;
+  local_video_size: number | null;
+  error: string | null;
 }
 
 export interface Subscription {
@@ -172,6 +185,13 @@ export function updateVisualFrameMindmap(
     method: "PUT",
     body: { tree },
   });
+}
+
+export function downloadLocalVideo(videoId: string): Promise<LocalVideoDownloadResponse> {
+  return apiRequest<LocalVideoDownloadResponse>(
+    `/youtube/videos/${encodeURIComponent(videoId)}/local-video/download`,
+    { method: "POST" },
+  );
 }
 
 export function importSummaryToKnowledgeBase(

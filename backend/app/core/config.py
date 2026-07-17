@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     youtube_frame_similarity_threshold: int = Field(
         default=6, alias="YOUTUBE_FRAME_SIMILARITY_THRESHOLD"
     )
+    youtube_local_video_dir: str = Field(
+        default="./storage/youtube_videos",
+        alias="YOUTUBE_LOCAL_VIDEO_DIR",
+    )
     ocr_base_url: str | None = Field(default=None, alias="OCR_BASE_URL")
     ocr_timeout_seconds: float = Field(default=60.0, alias="OCR_TIMEOUT_SECONDS")
 

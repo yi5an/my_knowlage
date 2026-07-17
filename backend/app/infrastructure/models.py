@@ -562,6 +562,17 @@ class Video(TimestampMixin, Base):
         server_default="pending",
     )
     error_message: Mapped[str | None] = mapped_column(Text())
+    local_video_status: Mapped[str] = mapped_column(
+        String(32),
+        default="not_downloaded",
+        server_default="not_downloaded",
+    )
+    local_video_path: Mapped[str | None] = mapped_column(Text())
+    local_video_size: Mapped[int | None] = mapped_column(BigInteger)
+    local_video_downloaded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    local_video_error: Mapped[str | None] = mapped_column(Text())
     metadata_: Mapped[JsonObject] = mapped_column("metadata", JsonType, default=dict)
 
 

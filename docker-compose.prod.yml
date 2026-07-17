@@ -45,10 +45,12 @@ services:
       GLM_ASR_MODEL: ${KNOWPILOT_PROD_ASR_MODEL:-fun-asr-nano}
       YOUTUBE_VISUAL_ANALYSIS_ENABLED: ${KNOWPILOT_PROD_YOUTUBE_VISUAL_ANALYSIS_ENABLED:-true}
       OCR_BASE_URL: ${KNOWPILOT_PROD_OCR_BASE_URL:-http://host.docker.internal:8126}
+      YOUTUBE_LOCAL_VIDEO_DIR: ${KNOWPILOT_PROD_YOUTUBE_LOCAL_VIDEO_DIR:-/mnt/knowpilot-nas/youtube}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - backend_storage:/app/storage
+      - /mnt/knowpilot-nas/youtube:/mnt/knowpilot-nas/youtube
     # Bind to loopback only for direct debugging; nginx reaches it via the
     # compose network using the service name.
     ports:
