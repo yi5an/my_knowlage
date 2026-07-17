@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
 
@@ -31,6 +31,29 @@ import {
 } from "../services/youtubeApi";
 
 const { Title, Text, Paragraph } = Typography;
+
+const HISTORY_THUMBNAIL_SHELL_STYLE: CSSProperties = {
+  width: "96px",
+  height: "54px",
+  flex: "0 0 96px",
+  borderRadius: 6,
+  overflow: "hidden",
+  background: "#f5f5f5",
+  color: "#8c8c8c",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  position: "relative",
+};
+
+const HISTORY_THUMBNAIL_IMAGE_STYLE: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+  display: "block",
+};
 
 export function YouTubeHubPage() {
   const navigate = useNavigate();
@@ -103,6 +126,28 @@ export function YouTubeHubPage() {
     if (item.failure_stage === "pending") return <Tag color="warning">待处理</Tag>;
     if (item.summary_status === "no_transcript") return <Tag color="orange">无字幕</Tag>;
     return <Tag color="processing">处理中</Tag>;
+  }
+
+  function historyThumbnail(item: SummaryListItem) {
+    return (
+      <div
+        data-testid="youtube-history-thumbnail-shell"
+        style={HISTORY_THUMBNAIL_SHELL_STYLE}
+      >
+        <YoutubeOutlined style={{ fontSize: 24 }} />
+        {item.thumbnail_url && (
+          <img
+            data-testid="youtube-history-thumbnail-image"
+            src={item.thumbnail_url}
+            alt=""
+            style={HISTORY_THUMBNAIL_IMAGE_STYLE}
+            onError={(event) => {
+              event.currentTarget.style.display = "none";
+            }}
+          />
+        )}
+      </div>
+    );
   }
 
   return (
@@ -179,17 +224,7 @@ export function YouTubeHubPage() {
                       }
                     >
                       <List.Item.Meta
-                        avatar={
-                          item.thumbnail_url ? (
-                            <img
-                              src={item.thumbnail_url}
-                              alt={item.title}
-                              style={{ width: 96, borderRadius: 6 }}
-                            />
-                          ) : (
-                            <YoutubeOutlined style={{ fontSize: 32 }} />
-                          )
-                        }
+                        avatar={historyThumbnail(item)}
                         title={
                           <Space size={6} wrap>
                             {item.is_unread && (

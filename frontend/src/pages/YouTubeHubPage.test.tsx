@@ -109,4 +109,45 @@ describe("YouTubeHubPage", () => {
     // No retry button for a permanently-blocked video.
     expect(screen.queryByRole("button", { name: "重新处理" })).not.toBeInTheDocument();
   });
+
+  it("keeps broken thumbnails from exposing long title text in the history layout", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/youtube/summaries?")) {
+          return Response.json([
+            {
+              document_id: "doc_thumb",
+              video_id: "thumb123",
+              title:
+                "台积电释放了什么信息？你的组合根本没有分散风险？跌麻了跌麻了，该听巴菲特讲课了！",
+              channel_name: "投资频道",
+              thumbnail_url: "https://i.ytimg.com/vi/thumb123/hqdefault.jpg",
+              duration_sec: null,
+              published_at: "2026-07-17T00:00:00Z",
+              tldr: "本期视频分析半导体与投资风险。",
+              tags: ["台积电"],
+              created_at: "2026-07-17T00:00:00Z",
+              is_unread: false,
+              summary_status: "completed",
+              error: null,
+              failure_stage: null,
+              retryable: false,
+            },
+          ]);
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText(/台积电释放了什么信息/)).toBeInTheDocument();
+    const shell = screen.getByTestId("youtube-history-thumbnail-shell");
+    const image = screen.getByTestId("youtube-history-thumbnail-image");
+
+    expect(shell.style.width).toBe("96px");
+    expect(shell.style.height).toBe("54px");
+    expect(image).toHaveAttribute("alt", "");
+  });
 });
