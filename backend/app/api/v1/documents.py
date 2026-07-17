@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.errors import AppError
 from app.infrastructure.database import get_db_session
 from app.infrastructure.file_storage import LocalFileStorage
 from app.infrastructure.models import Document
@@ -16,9 +17,16 @@ from app.schemas.documents import (
     DocumentVersionContent,
     UrlImportRequest,
 )
+from app.schemas.reading_companion import (
+    ReaderDocumentResponse,
+    ReadingAnalysisTriggerResponse,
+)
 from app.services.document_service import DocumentService
+from app.services.reading_companion import ReadingCompanionService
+from app.services.reading_companion_dependencies import get_reading_companion_service
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+ReadingCompanionDep = Annotated[ReadingCompanionService, Depends(get_reading_companion_service)]
 
 
 def get_document_service(session: Annotated[Session, Depends(get_db_session)]) -> DocumentService:
@@ -81,6 +89,31 @@ async def get_document(
     service: Annotated[DocumentService, Depends(get_document_service)],
 ) -> DocumentDetail:
     return _document_detail(service.get_document(doc_id))
+
+
+@router.get("/{doc_id}/reader", response_model=ReaderDocumentResponse)
+async def get_reader_document(
+    doc_id: str, companion: ReadingCompanionDep
+) -> ReaderDocumentResponse:
+    try:
+        return companion.get_reader_payload(doc_id)
+    except ValueError as exc:
+        raise AppError("document_not_found", str(exc), status_code=404) from exc
+
+
+@router.post("/{doc_id}/reading-analyses", response_model=ReadingAnalysisTriggerResponse)
+async def trigger_reading_analysis(
+    doc_id: str, companion: ReadingCompanionDep
+) -> ReadingAnalysisTriggerResponse:
+    try:
+        analysis, job = companion.create_or_reuse_analysis(doc_id)
+    except ValueError as exc:
+        raise AppError("document_not_found", str(exc), status_code=404) from exc
+    return ReadingAnalysisTriggerResponse(
+        analysis_id=analysis.id,
+        task_job_id=job.id,
+        status=analysis.status,
+    )
 
 
 @router.get("/{doc_id}/versions/{version_id}", response_model=DocumentVersionContent)

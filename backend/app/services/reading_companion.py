@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -17,9 +18,14 @@ from app.infrastructure.models import (
 )
 from app.schemas.reading_companion import (
     CorroborationVerdictSchema,
+    ReaderChunkResponse,
+    ReaderDocumentResponse,
+    ReadingAnalysisResponse,
     ReadingAnalysisStatus,
+    ReadingCorroborationResponse,
     ReadingInsightDraft,
     ReadingInsightExtractionSchema,
+    ReadingInsightResponse,
     ReadingInsightUpdateRequest,
 )
 from app.services.reading_companion_prompts import (
@@ -106,6 +112,55 @@ class ReadingCompanionService:
             insight.user_note = request.note
         self.session.commit()
         return insight
+
+    def get_reader_payload(self, document_id: str) -> ReaderDocumentResponse:
+        document, version = self._document_and_version(document_id)
+        chunks = list(
+            self.session.scalars(
+                select(DocumentChunk)
+                .where(DocumentChunk.version_id == version.id)
+                .order_by(DocumentChunk.chunk_index)
+            )
+        )
+        analysis = self.session.scalar(
+            select(ReadingAnalysis).where(
+                ReadingAnalysis.document_id == document.id,
+                ReadingAnalysis.version_id == version.id,
+            )
+        )
+        return ReaderDocumentResponse(
+            document_id=document.id,
+            workspace_id=document.workspace_id,
+            version_id=version.id,
+            title=document.title,
+            content_md=version.content_md,
+            chunks=[
+                ReaderChunkResponse(id=c.id, heading=c.heading, content=c.content,
+                                    start_offset=c.start_offset, end_offset=c.end_offset)
+                for c in chunks
+            ],
+            analysis=self.get_analysis(analysis.id) if analysis else None,
+        )
+
+    def get_analysis(self, analysis_id: str) -> ReadingAnalysisResponse:
+        analysis = self.session.get(ReadingAnalysis, analysis_id)
+        if analysis is None:
+            raise ValueError(f"reading analysis {analysis_id!r} not found")
+        insights = list(self.session.scalars(select(ReadingInsight).where(
+            ReadingInsight.analysis_id == analysis.id).order_by(ReadingInsight.priority.desc())))
+        return ReadingAnalysisResponse(
+            id=analysis.id,
+            workspace_id=analysis.workspace_id,
+            document_id=analysis.document_id,
+            version_id=analysis.version_id,
+            status=analysis.status,
+            task_job_id=analysis.task_job_id,
+            model_name=analysis.model_name,
+            prompt_version=analysis.prompt_version,
+            error_message=analysis.error_message,
+            completed_at=analysis.completed_at,
+            insights=[self._insight_response(item) for item in insights],
+        )
 
     def run_analysis(self, analysis_id: str) -> list[ReadingInsight]:
         analysis = self.session.get(ReadingAnalysis, analysis_id)
@@ -217,6 +272,27 @@ class ReadingCompanionService:
         elif stances:
             insight.evidence_state = "corroborated"
 
+    def _insight_response(self, insight: ReadingInsight) -> ReadingInsightResponse:
+        corroborations = list(self.session.scalars(select(ReadingCorroboration).where(
+            ReadingCorroboration.insight_id == insight.id)))
+        return ReadingInsightResponse(
+            id=insight.id, kind=insight.kind, headline=insight.headline,
+            explanation=insight.explanation, why_it_matters=insight.why_it_matters,
+            chunk_id=insight.chunk_id, start_offset=insight.start_offset,
+            end_offset=insight.end_offset, evidence_text=insight.evidence_text,
+            confidence=insight.confidence, priority=insight.priority,
+            evidence_state=insight.evidence_state,
+            status=insight.status,
+            user_note=insight.user_note,
+            theme_ids=list(insight.theme_ids or []),
+            macro_event_ids=list(insight.macro_event_ids or []),
+            entity_ids=list(insight.entity_ids or []),
+            corroborations=[
+                ReadingCorroborationResponse.model_validate(item)
+                for item in corroborations
+            ],
+        )
+
     def _document_and_version(self, document_id: str) -> tuple[Document, DocumentVersion]:
         document = self.session.get(Document, document_id)
         if document is None:
@@ -236,3 +312,38 @@ class ReadingCompanionService:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex}"
+
+
+class ReadingAnalysisJobHandler:
+    def handle(
+        self,
+        job: TaskJob,
+        session: Session,
+        llm_client: StructuredOutputClient,
+    ) -> dict[str, Any]:
+        analysis_id = str((job.input or {}).get("analysis_id") or job.target_id or "")
+        if not analysis_id:
+            raise ValueError("reading_analysis job requires analysis_id")
+        from app.services.rag_dependencies import get_rag_service
+
+        service = ReadingCompanionService(
+            session=session,
+            llm_client=llm_client,
+            evidence_adapter=ReadingEvidenceAdapter(session, get_rag_service(session)),
+        )
+        try:
+            insights = service.run_analysis(analysis_id)
+        except Exception as exc:
+            analysis = session.get(ReadingAnalysis, analysis_id)
+            if analysis is not None:
+                analysis.status = ReadingAnalysisStatus.failed.value
+                analysis.error_message = f"{type(exc).__name__}: {exc}"
+                session.commit()
+            raise
+        return {"analysis_id": analysis_id, "insights_created": len(insights)}
+
+
+def register() -> None:
+    from app.services import task_worker
+
+    task_worker._HANDLERS[READING_ANALYSIS_JOB_TYPE] = ReadingAnalysisJobHandler()

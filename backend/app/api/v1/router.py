@@ -5,6 +5,7 @@ from app.api.v1.documents import router as documents_router
 from app.api.v1.entities import router as entities_router
 from app.api.v1.graph import router as graph_router
 from app.api.v1.investment import router as investment_router
+from app.api.v1.reading_companion import router as reading_companion_router
 from app.api.v1.research import router as research_router
 from app.api.v1.search import router as search_router
 from app.api.v1.youtube import router as youtube_router
@@ -17,6 +18,7 @@ api_router.include_router(entities_router)
 api_router.include_router(graph_router)
 api_router.include_router(investment_router)
 api_router.include_router(research_router)
+api_router.include_router(reading_companion_router)
 api_router.include_router(search_router)
 api_router.include_router(youtube_router)
 
