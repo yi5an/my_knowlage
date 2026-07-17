@@ -36,6 +36,7 @@ import {
   importSummaryToKnowledgeBase,
   markSummaryRead,
   updateVisualFrameMindmap,
+  youtubeThumbnailUrl,
   youtubeTimestampUrl,
   type VideoFrameAnalysis,
   type SourceTraceCandidate,
@@ -134,12 +135,15 @@ export function VideoSummaryPage() {
 
         <Card>
           <Row gutter={16} align="middle">
-            {card.thumbnail_url && (
+            {card.thumbnail_url && youtubeThumbnailUrl(card.video_id) && (
               <Col>
                 <img
-                  src={card.thumbnail_url}
-                  alt={card.title}
-                  style={{ width: 160, borderRadius: 8 }}
+                  src={youtubeThumbnailUrl(card.video_id) ?? undefined}
+                  alt=""
+                  style={{ width: 160, height: 90, borderRadius: 8, objectFit: "cover" }}
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                  }}
                 />
               </Col>
             )}

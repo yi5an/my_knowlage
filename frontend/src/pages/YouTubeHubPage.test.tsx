@@ -149,5 +149,8 @@ describe("YouTubeHubPage", () => {
     expect(shell.style.width).toBe("96px");
     expect(shell.style.height).toBe("54px");
     expect(image).toHaveAttribute("alt", "");
+    expect(image.getAttribute("src")).toBe(
+      "/api/v1/youtube/videos/thumb123/thumbnail",
+    );
   });
 });

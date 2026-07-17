@@ -31,6 +31,7 @@ import {
   listSummaries,
   pollSummaryUntilDone,
   summarizeVideo,
+  youtubeThumbnailUrl,
   type DashboardStats,
   type SummaryListItem,
 } from "../services/youtubeApi";
@@ -181,11 +182,19 @@ export function DashboardPage() {
                     <List.Item key={item.document_id}>
                       <List.Item.Meta
                         avatar={
-                          item.thumbnail_url ? (
+                          item.thumbnail_url && youtubeThumbnailUrl(item.video_id) ? (
                             <img
-                              src={item.thumbnail_url}
-                              alt={item.title}
-                              style={{ width: 96, borderRadius: 6 }}
+                              src={youtubeThumbnailUrl(item.video_id) ?? undefined}
+                              alt=""
+                              style={{
+                                width: 96,
+                                height: 54,
+                                borderRadius: 6,
+                                objectFit: "cover",
+                              }}
+                              onError={(event) => {
+                                event.currentTarget.style.display = "none";
+                              }}
                             />
                           ) : (
                             <YoutubeOutlined style={{ fontSize: 32 }} />

@@ -1,4 +1,4 @@
-import { apiRequest } from "./client";
+import { apiRequest, apiUrl } from "./client";
 
 // --- Types matching backend app/schemas/youtube.py ---
 
@@ -142,6 +142,11 @@ export interface YouTubeAutoRetrySettings {
 
 export function youtubeTimestampUrl(videoId: string, timestamp: number): string {
   return `https://youtu.be/${videoId}?t=${Math.round(timestamp)}`;
+}
+
+export function youtubeThumbnailUrl(videoId: string | null | undefined): string | null {
+  if (!videoId) return null;
+  return apiUrl(`/youtube/videos/${encodeURIComponent(videoId)}/thumbnail`);
 }
 
 export function summarizeVideo(

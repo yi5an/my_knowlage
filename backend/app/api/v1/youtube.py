@@ -15,9 +15,11 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.error import URLError
+from urllib.request import ProxyHandler, Request, build_opener
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -184,6 +186,28 @@ def _ensure_summary_ready(document: Document) -> None:
     raise HTTPException(status_code=409, detail="总结尚未生成完成，请稍后刷新。")
 
 
+def _download_thumbnail(url: str, proxy_url: str | None) -> tuple[bytes, str]:
+    handlers = []
+    if proxy_url:
+        handlers.append(ProxyHandler({"http": proxy_url, "https": proxy_url}))
+    opener = build_opener(*handlers)
+    request = Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+            )
+        },
+    )
+    try:
+        with opener.open(request, timeout=15) as response:
+            media_type = response.headers.get_content_type() or "image/jpeg"
+            return response.read(), media_type
+    except URLError as exc:
+        raise HTTPException(status_code=502, detail=f"thumbnail fetch failed: {exc}") from exc
+
+
 # --- Workspace YouTube settings -------------------------------------------
 
 
@@ -347,6 +371,26 @@ async def import_summary_to_knowledge_base(
                 )
     session.refresh(document)
     return _summary_card_from_document(session, document)
+
+
+@router.get("/videos/{video_id}/thumbnail")
+async def get_video_thumbnail(
+    video_id: str,
+    session: SessionDep,
+) -> Response:
+    video = session.scalar(select(Video).where(Video.video_id == video_id))
+    if video is None or not video.thumbnail_url:
+        raise HTTPException(status_code=404, detail="thumbnail not found")
+
+    content, media_type = _download_thumbnail(
+        video.thumbnail_url,
+        get_settings().youtube_proxy_url,
+    )
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 def _summary_card_from_document(session: Session, document: Document) -> VideoSummaryCard:

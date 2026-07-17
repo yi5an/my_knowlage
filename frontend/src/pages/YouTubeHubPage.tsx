@@ -27,6 +27,7 @@ import {
   pollSummaryUntilDone,
   retryVideo,
   summarizeVideo,
+  youtubeThumbnailUrl,
   type SummaryListItem,
 } from "../services/youtubeApi";
 
@@ -129,16 +130,17 @@ export function YouTubeHubPage() {
   }
 
   function historyThumbnail(item: SummaryListItem) {
+    const thumbnailSrc = item.thumbnail_url ? youtubeThumbnailUrl(item.video_id) : null;
     return (
       <div
         data-testid="youtube-history-thumbnail-shell"
         style={HISTORY_THUMBNAIL_SHELL_STYLE}
       >
         <YoutubeOutlined style={{ fontSize: 24 }} />
-        {item.thumbnail_url && (
+        {thumbnailSrc && (
           <img
             data-testid="youtube-history-thumbnail-image"
-            src={item.thumbnail_url}
+            src={thumbnailSrc}
             alt=""
             style={HISTORY_THUMBNAIL_IMAGE_STYLE}
             onError={(event) => {

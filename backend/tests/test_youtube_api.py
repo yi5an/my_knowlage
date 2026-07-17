@@ -149,6 +149,7 @@ def client(
     # Background thread + pre-flight open their own SessionLocal(); route both
     # to independent sessions on the shared in-memory engine so fakes and rows
     # stay visible without concurrent use of one Session.
+    monkeypatch.setattr("app.infrastructure.database.SessionLocal", session_factory)
     monkeypatch.setattr("app.api.v1.youtube.SessionLocal", session_factory)
     app.dependency_overrides[get_db_session] = lambda: db_session
     app.dependency_overrides[get_youtube_fetcher] = lambda: fetcher
@@ -251,6 +252,48 @@ def test_summary_card_returns_visual_frames(
     assert frame["frame_type"] == "mindmap"
     assert frame["image_url"] == "/api/v1/youtube/visual-frames/vfa_1/image"
     assert frame["structured_notes"]["title"] == "行业轮动思维导图"
+
+
+def test_video_thumbnail_endpoint_proxies_stored_youtube_thumbnail(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_session.add(Workspace(id="thumb_ws", name="thumb_ws"))
+    db_session.add(
+        Video(
+            id="video_thumb",
+            workspace_id="thumb_ws",
+            video_id="thumb123",
+            title="Thumbnail video",
+            fetch_status="fetched",
+            thumbnail_url="https://i.ytimg.com/vi/thumb123/hqdefault.jpg",
+        )
+    )
+    db_session.commit()
+
+    captured: dict[str, str | None] = {}
+
+    def fake_download(url: str, proxy_url: str | None) -> tuple[bytes, str]:
+        captured["url"] = url
+        captured["proxy_url"] = proxy_url
+        return b"fake-jpeg", "image/jpeg"
+
+    class StubSettings:
+        youtube_proxy_url = "http://proxy.local:7892"
+
+    monkeypatch.setattr("app.api.v1.youtube.get_settings", lambda: StubSettings())
+    monkeypatch.setattr("app.api.v1.youtube._download_thumbnail", fake_download)
+
+    response = client.get("/api/v1/youtube/videos/thumb123/thumbnail")
+
+    assert response.status_code == 200
+    assert response.content == b"fake-jpeg"
+    assert response.headers["content-type"] == "image/jpeg"
+    assert captured == {
+        "url": "https://i.ytimg.com/vi/thumb123/hqdefault.jpg",
+        "proxy_url": "http://proxy.local:7892",
+    }
 
 
 def test_summary_card_returns_possible_source_traces(
