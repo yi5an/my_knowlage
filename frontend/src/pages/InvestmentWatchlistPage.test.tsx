@@ -207,4 +207,26 @@ describe("InvestmentWatchlistPage", () => {
 
     expect(await screen.findByRole("button", { name: "绑定已有信息源" })).toBeInTheDocument();
   });
+
+  it("creates an object, binds selected sources, and starts their first fetch", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith("/investment/watchlist") && init?.method === "POST") {
+        return Response.json({ id: "wl_nvda", workspace_id: "ws_default", name: "NVIDIA", watch_type: "stock", keywords: [], importance: "high", enabled: true });
+      }
+      if (u.includes("/watchlist/wl_nvda/sources/src_rss") && init?.method === "POST") return Response.json({ id: "src_rss" });
+      if (u.includes("/sources/src_rss/poll") && init?.method === "POST") return Response.json({ job_id: "job_rss", status: "pending" });
+      if (u.includes("/investment/watchlist/wl_nvda/sources")) return Response.json([]);
+      if (u.includes("/investment/items") || u.includes("/investment/signals") || u.includes("/investment/facts") || u.includes("/investment/theses")) return Response.json([]);
+      if (u.includes("/investment/watchlist")) return Response.json([]);
+      if (u.includes("/investment/sources")) return Response.json([{ id: "src_rss", workspace_id: "ws_default", source_type: "rss", name: "NVIDIA IR RSS", config: {}, default_info_layer: "news", default_watchlist_ids: [], poll_interval_seconds: 3600, enabled: true }]);
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "添加观察对象" }));
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "NVIDIA" } });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    expect(await screen.findByText("配置首批信息源")).toBeInTheDocument();
+  });
 });

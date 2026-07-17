@@ -42,6 +42,7 @@ export function InvestmentWatchlistPage() {
   const [error, setError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState<"details" | "sources">("details");
   const [bindSourceOpen, setBindSourceOpen] = useState(false);
   const [bindingSources, setBindingSources] = useState(false);
   const [pollingSourceIds, setPollingSourceIds] = useState<Record<string, boolean>>({});
@@ -119,8 +120,13 @@ export function InvestmentWatchlistPage() {
   }, [selectedWatchlistId]);
 
   const handleCreate = async () => {
+    if (onboardingStep === "details") {
+      await form.validateFields(["name", "watch_type", "ticker", "exchange", "importance", "keywords", "notes"]);
+      setOnboardingStep("sources");
+      return;
+    }
     const values = await form.validateFields();
-    await investmentApi.createWatchlist({
+    const created = await investmentApi.createWatchlist({
       name: values.name,
       watch_type: values.watch_type ?? "stock",
       ticker: values.ticker,
@@ -129,8 +135,21 @@ export function InvestmentWatchlistPage() {
       notes: values.notes,
       keywords: values.keywords ? String(values.keywords).split(",").map((s) => s.trim()) : [],
     });
+    const sourceIds = (values.existing_source_ids ?? []) as string[];
+    const bound = await Promise.allSettled(
+      sourceIds.map(async (sourceId) => {
+        await investmentApi.bindWatchlistSource(created.id, sourceId);
+        await investmentApi.pollSource(sourceId);
+      }),
+    );
+    const failed = bound.filter((result) => result.status === "rejected").length;
+    if (sourceIds.length > 0) {
+      message.success(failed === 0 ? "信息源已绑定并开始抓取" : `已开始抓取，${failed} 个信息源失败`);
+    }
     setOpen(false);
+    setOnboardingStep("details");
     form.resetFields();
+    setSelectedWatchlistId(created.id);
     void load();
   };
 
@@ -352,7 +371,7 @@ export function InvestmentWatchlistPage() {
       <PageHeader
         title="观察对象"
         description="管理你关注的股票 / 公司 / 宏观主题。"
-        extra={<Button type="primary" onClick={() => setOpen(true)}>添加观察对象</Button>}
+        extra={<Button type="primary" onClick={() => { setOnboardingStep("details"); setOpen(true); }}>添加观察对象</Button>}
       />
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} showIcon />}
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(280px, 360px) 1fr" }}>
@@ -446,13 +465,14 @@ export function InvestmentWatchlistPage() {
 
       <Modal
         open={open}
-        title="添加观察对象"
-        onCancel={() => setOpen(false)}
+        title={onboardingStep === "details" ? "添加观察对象" : "配置首批信息源"}
+        onCancel={() => { setOnboardingStep("details"); setOpen(false); }}
         onOk={handleCreate}
-        okText="创建"
+        okText={onboardingStep === "details" ? "下一步" : "完成并开始抓取"}
         cancelText="取消"
       >
         <Form form={form} layout="vertical">
+          {onboardingStep === "details" ? <>
           <Form.Item label="名称" name="name" rules={[{ required: true }]}>
             <Input placeholder="如：Apple" />
           </Form.Item>
@@ -487,6 +507,18 @@ export function InvestmentWatchlistPage() {
           <Form.Item label="备注" name="notes">
             <Input.TextArea rows={2} />
           </Form.Item>
+          </> : <>
+          <Typography.Paragraph type="secondary">
+            可绑定已有信息源；完成后会立即开始抓取。也可以跳过，稍后在对象详情中配置。
+          </Typography.Paragraph>
+          <Form.Item label="选择已有信息源" name="existing_source_ids">
+            <Select
+              mode="multiple"
+              placeholder="选择要归入此观察对象的信息源"
+              options={sources.map((source) => ({ value: source.id, label: source.name }))}
+            />
+          </Form.Item>
+          </>}
         </Form>
       </Modal>
 
