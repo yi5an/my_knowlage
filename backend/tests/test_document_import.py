@@ -36,7 +36,11 @@ def db_session() -> Generator[Session, None, None]:
 
 
 @pytest.fixture()
-def client(db_session: Session, tmp_path: Path) -> Generator[TestClient, None, None]:
+def client(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[TestClient, None, None]:
     def override_service() -> DocumentService:
         return DocumentService(
             session=db_session,
@@ -44,6 +48,10 @@ def client(db_session: Session, tmp_path: Path) -> Generator[TestClient, None, N
         )
 
     app.dependency_overrides[get_document_service] = override_service
+    monkeypatch.setattr(
+        "app.infrastructure.database.SessionLocal",
+        sessionmaker(bind=db_session.bind, expire_on_commit=False),
+    )
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

@@ -165,11 +165,18 @@ def wait_for_task_done(
 
 
 @pytest.fixture()
-def client(research_service: ResearchAgentService) -> Generator[TestClient, None, None]:
+def client(
+    research_service: ResearchAgentService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[TestClient, None, None]:
     def override_service() -> ResearchAgentService:
         return research_service
 
     app.dependency_overrides[get_research_agent_service] = override_service
+    monkeypatch.setattr(
+        "app.infrastructure.database.SessionLocal",
+        sessionmaker(bind=research_service.session.bind, expire_on_commit=False),
+    )
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

@@ -43,12 +43,19 @@ def rag_service(db_session: Session) -> RagService:
 
 
 @pytest.fixture()
-def client(rag_service: RagService) -> Generator[TestClient, None, None]:
+def client(
+    rag_service: RagService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[TestClient, None, None]:
     def override_service() -> RagService:
         return rag_service
 
     app.dependency_overrides[get_search_rag_service] = override_service
     app.dependency_overrides[get_chat_rag_service] = override_service
+    monkeypatch.setattr(
+        "app.infrastructure.database.SessionLocal",
+        sessionmaker(bind=rag_service.session.bind, expire_on_commit=False),
+    )
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

@@ -31,11 +31,18 @@ def db_session() -> Generator[Session, None, None]:
 
 
 @pytest.fixture()
-def client(db_session: Session) -> Generator[TestClient, None, None]:
+def client(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[TestClient, None, None]:
     def override_session() -> Generator[Session, None, None]:
         yield db_session
 
     app.dependency_overrides[get_db_session] = override_session
+    monkeypatch.setattr(
+        "app.infrastructure.database.SessionLocal",
+        sessionmaker(bind=db_session.bind, expire_on_commit=False),
+    )
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
