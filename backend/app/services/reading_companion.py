@@ -18,6 +18,9 @@ from app.infrastructure.models import (
 )
 from app.schemas.reading_companion import (
     CorroborationVerdictSchema,
+    EvidenceState,
+    InsightKind,
+    InsightReviewStatus,
     ReaderChunkResponse,
     ReaderDocumentResponse,
     ReadingAnalysisResponse,
@@ -153,7 +156,7 @@ class ReadingCompanionService:
             workspace_id=analysis.workspace_id,
             document_id=analysis.document_id,
             version_id=analysis.version_id,
-            status=analysis.status,
+            status=ReadingAnalysisStatus(analysis.status),
             task_job_id=analysis.task_job_id,
             model_name=analysis.model_name,
             prompt_version=analysis.prompt_version,
@@ -276,13 +279,13 @@ class ReadingCompanionService:
         corroborations = list(self.session.scalars(select(ReadingCorroboration).where(
             ReadingCorroboration.insight_id == insight.id)))
         return ReadingInsightResponse(
-            id=insight.id, kind=insight.kind, headline=insight.headline,
+            id=insight.id, kind=InsightKind(insight.kind), headline=insight.headline,
             explanation=insight.explanation, why_it_matters=insight.why_it_matters,
             chunk_id=insight.chunk_id, start_offset=insight.start_offset,
             end_offset=insight.end_offset, evidence_text=insight.evidence_text,
             confidence=insight.confidence, priority=insight.priority,
-            evidence_state=insight.evidence_state,
-            status=insight.status,
+            evidence_state=EvidenceState(insight.evidence_state),
+            status=InsightReviewStatus(insight.status),
             user_note=insight.user_note,
             theme_ids=list(insight.theme_ids or []),
             macro_event_ids=list(insight.macro_event_ids or []),

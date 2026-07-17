@@ -19,6 +19,7 @@ from app.schemas.documents import (
 )
 from app.schemas.reading_companion import (
     ReaderDocumentResponse,
+    ReadingAnalysisStatus,
     ReadingAnalysisTriggerResponse,
 )
 from app.services.document_service import DocumentService
@@ -112,7 +113,7 @@ async def trigger_reading_analysis(
     return ReadingAnalysisTriggerResponse(
         analysis_id=analysis.id,
         task_job_id=job.id,
-        status=analysis.status,
+        status=ReadingAnalysisStatus(analysis.status),
     )
 
 
