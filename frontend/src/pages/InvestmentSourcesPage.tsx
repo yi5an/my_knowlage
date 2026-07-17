@@ -18,6 +18,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
+import { buildSourcePayload, SOURCE_TYPE_LABEL } from "../components/investment/sourcePayload";
 import { ApiError } from "../services/client";
 import {
   investmentApi,
@@ -26,31 +27,6 @@ import {
   type XCollectorState,
   type SourceType,
 } from "../services/investmentApi";
-
-const TYPE_LABEL: Record<SourceType, string> = {
-  rss: "RSS",
-  x_rss: "X / RSSHub",
-  x_nitter: "X / Nitter",
-  x_brightdata: "X / Bright Data",
-  x_web: "X / 网页采集",
-  sec_edgar: "SEC EDGAR",
-  federal_reserve_rss: "美联储 RSS",
-  bls: "BLS",
-  fred: "FRED",
-  hkex: "港交所 HKEX",
-  cninfo: "巨潮 CNINFO",
-  manual: "手动",
-};
-
-/** Split a textarea (one series ID per line, also tolerates commas/spaces). */
-function _splitSeries(raw: unknown): string[] {
-  if (Array.isArray(raw)) return raw.filter(Boolean);
-  if (typeof raw !== "string") return [];
-  return raw
-    .split(/[\n,]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
 
 function fmtDate(s?: string | null): string {
   if (!s) return "—";
@@ -114,64 +90,12 @@ export function InvestmentSourcesPage() {
 
   const handleCreate = async () => {
     const values = await form.validateFields();
-    const sourceType = values.source_type as SourceType;
-    const isXSource = sourceType === "x_rss" || sourceType === "x_nitter" || sourceType === "x_brightdata";
-    const isXWeb = sourceType === "x_web";
-    const payload: Parameters<typeof investmentApi.createSource>[0] = {
-      source_type: sourceType,
-      name: values.name,
-      default_info_layer: values.default_info_layer ?? (isXSource || isXWeb ? "opinion" : "news"),
-      default_watchlist_ids: values.watchlist_ids ?? [],
-      poll_interval_seconds:
-        values.poll_interval_seconds ??
-        (sourceType === "x_brightdata" ? 21600 : isXWeb ? 900 : 3600),
-    };
-    // SEC needs a CIK in config; BLS/FRED need series IDs in config;
-    // rss/federal_reserve_rss/hkex/cninfo use url.
-    if (sourceType === "sec_edgar") {
-      payload.config = { cik: values.cik, forms: ["10-K", "10-Q", "8-K", "4"] };
-    } else if (sourceType === "bls") {
-      payload.config = {
-        series: _splitSeries(values.series),
-        years: values.years ?? 1,
-      };
-    } else if (sourceType === "fred") {
-      payload.config = {
-        series: _splitSeries(values.series),
-        limit: values.limit ?? 5,
-      };
-    } else if (sourceType === "x_brightdata") {
-      payload.config = {
-        profile_urls: _splitSeries(values.profile_urls).map((v) =>
-          v.startsWith("http") ? v : `https://x.com/${v.replace(/^@/, "")}`,
-        ),
-      };
-    } else if (isXWeb) {
-      const mode = values.x_web_mode === "keyword" ? "keyword" : "account";
-      payload.config =
-        mode === "keyword"
-          ? { mode, query: String(values.x_keyword || "").trim(), max_items_per_poll: 50 }
-          : {
-              mode,
-              username: String(values.x_username || "").trim().replace(/^@/, ""),
-              max_items_per_poll: 50,
-            };
-    } else if (isXSource) {
-      const target = String(values.x_target || "").trim();
-      if (/^https?:\/\//i.test(target)) {
-        payload.url = target;
-      } else {
-        payload.config = {
-          username: target.replace(/^@/, ""),
-          ...(sourceType === "x_rss"
-            ? { rsshub_base_url: values.x_base_url || "https://rsshub.app" }
-            : { nitter_base_url: values.x_base_url || "https://nitter.net" }),
-        };
-      }
-    } else {
-      payload.url = values.url;
-    }
     try {
+      const payload = buildSourcePayload({
+        ...values,
+        source_type: values.source_type as SourceType,
+        default_watchlist_ids: values.watchlist_ids ?? [],
+      });
       await investmentApi.createSource(payload);
       message.success("数据源已创建");
       setOpen(false);
@@ -236,7 +160,7 @@ export function InvestmentSourcesPage() {
       title: "类型",
       dataIndex: "source_type",
       key: "source_type",
-      render: (t: SourceType) => <Tag>{TYPE_LABEL[t] ?? t}</Tag>,
+      render: (t: SourceType) => <Tag>{SOURCE_TYPE_LABEL[t] ?? t}</Tag>,
     },
     { title: "默认层级", dataIndex: "default_info_layer", key: "default_info_layer", width: 110 },
     {
