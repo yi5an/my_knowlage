@@ -433,6 +433,71 @@ class TaskJob(TimestampMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ReadingAnalysis(UpdatedTimestampMixin, Base):
+    __tablename__ = "reading_analysis"
+    __table_args__ = (
+        UniqueConstraint("document_id", "version_id", name="uq_reading_analysis_version"),
+        Index("idx_reading_analysis_workspace_status", "workspace_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    document_id: Mapped[str] = mapped_column(ForeignKey("document.id"), nullable=False)
+    version_id: Mapped[str] = mapped_column(ForeignKey("document_version.id"), nullable=False)
+    task_job_id: Mapped[str | None] = mapped_column(ForeignKey("task_job.id"))
+    status: Mapped[str] = mapped_column(String(32), default="pending", server_default="pending")
+    model_name: Mapped[str | None] = mapped_column(String(128))
+    prompt_version: Mapped[str | None] = mapped_column(String(64))
+    error_message: Mapped[str | None] = mapped_column(Text())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReadingInsight(UpdatedTimestampMixin, Base):
+    __tablename__ = "reading_insight"
+    __table_args__ = (
+        Index("idx_reading_insight_analysis_priority", "analysis_id", "priority"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    analysis_id: Mapped[str] = mapped_column(ForeignKey("reading_analysis.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    headline: Mapped[str] = mapped_column(Text(), nullable=False)
+    explanation: Mapped[str] = mapped_column(Text(), nullable=False)
+    why_it_matters: Mapped[str] = mapped_column(Text(), nullable=False)
+    chunk_id: Mapped[str] = mapped_column(ForeignKey("document_chunk.id"), nullable=False)
+    start_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    evidence_text: Mapped[str] = mapped_column(Text(), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float(), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    evidence_state: Mapped[str] = mapped_column(
+        String(32), default="insufficient", server_default="insufficient"
+    )
+    status: Mapped[str] = mapped_column(String(32), default="active", server_default="active")
+    user_note: Mapped[str | None] = mapped_column(Text())
+    theme_ids: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    macro_event_ids: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    entity_ids: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+
+
+class ReadingCorroboration(TimestampMixin, Base):
+    __tablename__ = "reading_corroboration"
+    __table_args__ = (Index("idx_reading_corroboration_insight", "insight_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    insight_id: Mapped[str] = mapped_column(ForeignKey("reading_insight.id"), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("document.id"))
+    chunk_id: Mapped[str | None] = mapped_column(ForeignKey("document_chunk.id"))
+    stance: Mapped[str] = mapped_column(String(32), nullable=False)
+    excerpt: Mapped[str] = mapped_column(Text(), nullable=False)
+    source_title: Mapped[str] = mapped_column(Text(), nullable=False)
+    source_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confidence: Mapped[float] = mapped_column(Float(), nullable=False)
+    retrieval_score: Mapped[float] = mapped_column(Float(), nullable=False)
+
+
 class ResearchTask(UpdatedTimestampMixin, Base):
     __tablename__ = "research_task"
 
