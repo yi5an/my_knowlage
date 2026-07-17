@@ -187,4 +187,24 @@ describe("InvestmentWatchlistPage", () => {
     fireEvent.click(screen.getByText("相关假设"));
     expect(await screen.findByText("关税抬升通胀")).toBeInTheDocument();
   });
+
+  it("offers source management actions from the selected watchlist", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/investment/watchlist/wl_nvda/sources")) return Response.json([]);
+        if (u.includes("/investment/items") || u.includes("/investment/signals") || u.includes("/investment/facts") || u.includes("/investment/theses")) return Response.json([]);
+        if (u.includes("/investment/watchlist")) {
+          return Response.json([{ id: "wl_nvda", workspace_id: "ws_default", name: "NVIDIA", watch_type: "stock", keywords: [], importance: "high", enabled: true }]);
+        }
+        if (u.includes("/investment/sources")) return Response.json([]);
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "绑定已有信息源" })).toBeInTheDocument();
+  });
 });

@@ -42,7 +42,11 @@ export function InvestmentWatchlistPage() {
   const [error, setError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [bindSourceOpen, setBindSourceOpen] = useState(false);
+  const [bindingSources, setBindingSources] = useState(false);
+  const [pollingSourceIds, setPollingSourceIds] = useState<Record<string, boolean>>({});
   const [form] = Form.useForm();
+  const [bindSourceForm] = Form.useForm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -140,17 +144,72 @@ export function InvestmentWatchlistPage() {
     }
   };
 
+  const refreshDetailSources = async () => {
+    if (!selectedWatchlistId) return;
+    try {
+      setDetailSources(await investmentApi.listWatchlistSources(selectedWatchlistId));
+      void load();
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+
+  const handleBindSources = async () => {
+    if (!selectedWatchlistId) return;
+    const values = await bindSourceForm.validateFields();
+    const sourceIds = (values.source_ids ?? []) as string[];
+    setBindingSources(true);
+    try {
+      const results = await Promise.allSettled(
+        sourceIds.map((sourceId) => investmentApi.bindWatchlistSource(selectedWatchlistId, sourceId)),
+      );
+      const succeeded = results.filter((result) => result.status === "fulfilled").length;
+      const failed = results.find((result) => result.status === "rejected");
+      if (succeeded > 0) message.success(`已绑定 ${succeeded} 个信息源`);
+      if (failed?.status === "rejected") message.error(String(failed.reason));
+      setBindSourceOpen(false);
+      bindSourceForm.resetFields();
+      await refreshDetailSources();
+    } finally {
+      setBindingSources(false);
+    }
+  };
+
+  const handlePollSource = async (source: InvestmentSource) => {
+    setPollingSourceIds((current) => ({ ...current, [source.id]: true }));
+    try {
+      await investmentApi.pollSource(source.id);
+      message.success(`${source.name} 已加入抓取队列`);
+      await refreshDetailSources();
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setPollingSourceIds((current) => ({ ...current, [source.id]: false }));
+    }
+  };
+
   const selectedWatchlist =
     items.find((watchlist) => watchlist.id === selectedWatchlistId) ?? null;
 
-  const renderSourceList = () =>
-    detailSources.length === 0 ? (
-      <Empty description="暂无绑定信息源" />
-    ) : (
-      <List
-        dataSource={detailSources}
-        renderItem={(source) => (
-          <List.Item>
+  const renderSourceList = () => (
+    <Space direction="vertical" size={12} style={{ width: "100%" }}>
+      <Button onClick={() => setBindSourceOpen(true)}>绑定已有信息源</Button>
+      {detailSources.length === 0 ? (
+        <Empty description="暂无绑定信息源" />
+      ) : (
+        <List
+          dataSource={detailSources}
+          renderItem={(source) => (
+            <List.Item
+              actions={[
+                <Button key="poll" size="small" loading={!!pollingSourceIds[source.id]} onClick={() => void handlePollSource(source)}>
+                  立即抓取
+                </Button>,
+                <Button key="unbind" size="small" danger onClick={() => void handleUnbindSource(selectedWatchlistId!, source.id)}>
+                  解绑
+                </Button>,
+              ]}
+            >
             <List.Item.Meta
               title={
                 <Space>
@@ -161,12 +220,19 @@ export function InvestmentWatchlistPage() {
                   </Tag>
                 </Space>
               }
-              description={`轮询间隔 ${source.poll_interval_seconds}s`}
+              description={
+                <Space direction="vertical" size={0}>
+                  <span>轮询间隔 {source.poll_interval_seconds}s</span>
+                  {source.last_error && <Typography.Text type="danger">最近错误：{source.last_error}</Typography.Text>}
+                </Space>
+              }
             />
-          </List.Item>
-        )}
-      />
-    );
+            </List.Item>
+          )}
+        />
+      )}
+    </Space>
+  );
 
   const renderLatestItems = () =>
     detailItems.length === 0 ? (
@@ -420,6 +486,27 @@ export function InvestmentWatchlistPage() {
           </Form.Item>
           <Form.Item label="备注" name="notes">
             <Input.TextArea rows={2} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={bindSourceOpen}
+        title="绑定已有信息源"
+        onCancel={() => setBindSourceOpen(false)}
+        onOk={() => void handleBindSources()}
+        confirmLoading={bindingSources}
+        okText="绑定"
+        cancelText="取消"
+      >
+        <Form form={bindSourceForm} layout="vertical">
+          <Form.Item label="选择已有信息源" name="source_ids" rules={[{ required: true, message: "请选择至少一个信息源" }]}>
+            <Select
+              mode="multiple"
+              options={sources
+                .filter((source) => !detailSources.some((bound) => bound.id === source.id))
+                .map((source) => ({ value: source.id, label: source.name }))}
+            />
           </Form.Item>
         </Form>
       </Modal>
