@@ -135,6 +135,7 @@ export function App() {
             <Route path="/import" element={<ImportPage />} />
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/reader" element={<ReaderPage />} />
+            <Route path="/reader/:documentId" element={<ReaderPage />} />
             <Route path="/graph" element={<GraphPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/research" element={<ResearchPage />} />

@@ -1,55 +1,97 @@
-import { BulbOutlined, CommentOutlined, TagsOutlined } from "@ant-design/icons";
-import { Button, Card, Col, List, Row, Space, Tag, Typography } from "antd";
+import { useEffect, useState } from "react";
+import { BulbOutlined, CheckOutlined, CloseOutlined, SafetyOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Col, Empty, List, Row, Space, Spin, Tag, Typography } from "antd";
+import { useParams } from "react-router-dom";
 
 import { PageHeader } from "../components/PageHeader";
+import { readingCompanionApi } from "../services/readingCompanionApi";
+import type { ReadingInsight, ReaderDocument } from "../types/readingCompanion";
+
+const KIND_LABEL = { understanding: "理解", impact: "主题影响", risk: "风险" };
+const EVIDENCE_LABEL = { corroborated: "多源佐证", conflicted: "存在冲突", insufficient: "本地资料不足" };
 
 export function ReaderPage() {
+  const { documentId } = useParams<{ documentId: string }>();
+  const [reader, setReader] = useState<ReaderDocument | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(Boolean(documentId));
+
+  useEffect(() => {
+    if (!documentId) return;
+    let cancelled = false;
+    readingCompanionApi.getReader(documentId).then((value) => {
+      if (!cancelled) setReader(value);
+    }).catch((reason) => {
+      if (!cancelled) setError(String(reason));
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [documentId]);
+
+  const analysisId = reader?.analysis?.id;
+  const analysisStatus = reader?.analysis?.status;
+  useEffect(() => {
+    if (!analysisId || !analysisStatus || !["pending", "running"].includes(analysisStatus)) return;
+    const timer = window.setInterval(() => {
+      readingCompanionApi.getAnalysis(analysisId).then((fresh) => {
+        setReader((current) => current ? { ...current, analysis: fresh } : current);
+      }).catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [analysisId, analysisStatus]);
+
+  async function startAnalysis() {
+    if (!documentId) return;
+    const job = await readingCompanionApi.trigger(documentId);
+    const analysis = await readingCompanionApi.getAnalysis(job.analysis_id);
+    setReader((current) => current ? { ...current, analysis } : current);
+  }
+
+  async function review(insight: ReadingInsight, status: "confirmed" | "dismissed") {
+    await readingCompanionApi.updateInsight(insight.id, status);
+    if (!reader?.analysis) return;
+    setReader({
+      ...reader,
+      analysis: {
+        ...reader.analysis,
+        insights: reader.analysis.insights.map((item) => item.id === insight.id ? { ...item, status } : item),
+      },
+    });
+  }
+
+  if (!documentId) return <ReaderPicker />;
+  if (loading) return <main className="page"><Spin tip="正在加载阅读材料..." /></main>;
+  if (error || !reader) return <main className="page"><Alert type="error" message={error ?? "文档不存在"} /></main>;
+
+  const insights = reader.analysis?.insights.filter((item) => item.status !== "dismissed") ?? [];
   return (
     <main className="page reader-page">
-      <PageHeader
-        title="阅读"
-        description="三栏阅读：大纲、正文与 AI 笔记面板。"
-      />
+      <PageHeader title={reader.title} description="AI 主动标记重点，并用本地资料提供佐证或冲突信息。" />
       <Row gutter={[16, 16]}>
-        <Col xs={24} lg={5}>
-          <Card title="大纲" className="panel-card sticky-panel">
-            <List
-              size="small"
-              dataSource={["概览", "架构", "AI 流水线", "证据模型"]}
-              renderItem={(item) => <List.Item>{item}</List.Item>}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={12}>
-          <article className="reader-document">
-            <Typography.Title level={2}>AI Agent 本地知识库</Typography.Title>
-            <Typography.Paragraph>
-              KnowPilot 结合本地文档存储、结构化抽取、混合检索与知识图谱导航。
-            </Typography.Paragraph>
-            <Typography.Paragraph>
-              <mark>GraphRAG 将文档块与已验证的实体和关系连接起来。</mark>
-              每个 AI 生成的回答都必须保留证据与置信度字段。
-            </Typography.Paragraph>
-            <Typography.Paragraph>
-              阅读器为批注、引用与助手工作流预留空间，且不会触发后端业务逻辑。
-            </Typography.Paragraph>
-          </article>
-        </Col>
-        <Col xs={24} lg={7}>
-          <Card title="助手与笔记" className="panel-card sticky-panel">
-            <Space wrap>
-              <Button icon={<BulbOutlined />}>解释</Button>
-              <Button icon={<TagsOutlined />}>抽取</Button>
-              <Button icon={<CommentOutlined />}>笔记</Button>
-            </Space>
-            <div className="note-box">
-              <Tag color="gold">待处理</Tag>
-              <Typography.Text>审阅关系：GraphRAG 提升多跳检索能力。</Typography.Text>
-            </div>
-          </Card>
-        </Col>
+        <Col xs={24} lg={5}><Card title="大纲" className="panel-card sticky-panel"><List size="small" dataSource={reader.chunks} renderItem={(item) => <List.Item><a href={`#chunk-${item.id}`}>{item.heading ?? "正文"}</a></List.Item>} /></Card></Col>
+        <Col xs={24} lg={12}><article className="reader-document">{reader.chunks.map((chunk) => <section id={`chunk-${chunk.id}`} key={chunk.id}><Typography.Title level={3}>{chunk.heading}</Typography.Title><Typography.Paragraph>{chunk.content}</Typography.Paragraph></section>)}</article></Col>
+        <Col xs={24} lg={7}><Card title="AI 陪读" className="panel-card sticky-panel" extra={<BulbOutlined />}>
+          {!reader.analysis && <Button type="primary" onClick={() => void startAnalysis()}>开始分析</Button>}
+          {reader.analysis && ["pending", "running"].includes(reader.analysis.status) && <Spin tip="正在分析文档与本地证据..." />}
+          {reader.analysis?.status === "failed" && <Alert type="error" message={reader.analysis.error_message ?? "分析失败"} action={<Button size="small" onClick={() => void startAnalysis()}>重试</Button>} />}
+          {reader.analysis?.status === "completed" && <InsightList insights={insights} onReview={review} />}
+        </Card></Col>
       </Row>
     </main>
   );
 }
 
+function ReaderPicker() {
+  return <main className="page"><PageHeader title="阅读" description="选择文档后，AI 会主动解释重点、影响和风险。" /><Empty description="请从文档库打开一篇文档开始陪读。" /></main>;
+}
+
+function InsightList({ insights, onReview }: { insights: ReadingInsight[]; onReview: (insight: ReadingInsight, status: "confirmed" | "dismissed") => Promise<void> }) {
+  if (!insights.length) return <Empty description="尚未发现需要标记的内容。" />;
+  return <List dataSource={insights} renderItem={(insight) => <List.Item><Card size="small" style={{ width: "100%" }} title={<Space><Tag color={insight.kind === "risk" ? "error" : "processing"}>{KIND_LABEL[insight.kind]}</Tag>{insight.headline}</Space>}>
+    <Typography.Paragraph>{insight.explanation}</Typography.Paragraph><Typography.Text type="secondary">{insight.why_it_matters}</Typography.Text>
+    <div style={{ marginTop: 8 }}><Tag icon={<SafetyOutlined />} color={insight.evidence_state === "conflicted" ? "warning" : "default"}>{EVIDENCE_LABEL[insight.evidence_state]}</Tag></div>
+    {insight.corroborations.map((source) => <Typography.Paragraph key={source.id} style={{ marginTop: 8 }}><Tag>{source.stance}</Tag><b>{source.source_title}</b>：{source.excerpt}</Typography.Paragraph>)}
+    {insight.status === "active" && <Space><Button size="small" icon={<CheckOutlined />} onClick={() => void onReview(insight, "confirmed")}>确认</Button><Button size="small" icon={<CloseOutlined />} onClick={() => void onReview(insight, "dismissed")}>忽略</Button></Space>}
+  </Card></List.Item>} />;
+}
