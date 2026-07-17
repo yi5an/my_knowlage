@@ -254,22 +254,25 @@ export function VideoSummaryPage() {
               controls
               style={{ width: "100%", maxHeight: 520, background: "#000" }}
             />
-          ) : (
+          ) : card.local_video_status === "failed" ? (
             <Space direction="vertical" size="small">
               <Button
                 onClick={() => void handleDownloadLocalVideo()}
                 loading={downloadingLocalVideo}
-                disabled={
-                  card.local_video_status === "queued" ||
-                  card.local_video_status === "downloading"
-                }
               >
-                下载到 NAS
+                重新下载到 NAS
               </Button>
               {card.local_video_error && (
                 <Text type="danger">{card.local_video_error}</Text>
               )}
             </Space>
+          ) : (
+            <Text type="secondary">
+              {card.local_video_status === "queued" ||
+              card.local_video_status === "downloading"
+                ? "正在自动下载到 NAS"
+                : "等待自动下载到 NAS"}
+            </Text>
           )}
         </Card>
 

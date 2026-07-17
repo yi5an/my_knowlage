@@ -203,6 +203,20 @@ def _enqueue_unfinished_youtube_summaries() -> None:
         session.close()
 
 
+def _enqueue_missing_youtube_local_video_downloads() -> None:
+    """Backfill local-video jobs for completed YouTube summaries."""
+    from app.infrastructure.database import SessionLocal
+    from app.services.youtube.local_video import enqueue_missing_local_video_download_jobs
+
+    session = SessionLocal()
+    try:
+        count = enqueue_missing_local_video_download_jobs(session)
+        if count:
+            logger.warning("enqueued %d missing YouTube local video downloads", count)
+    finally:
+        session.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Register the investment fetch handler before the worker scheduler starts
@@ -216,6 +230,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     register_youtube_local_video_handler()
     _mark_interrupted_youtube_summaries()
     _enqueue_unfinished_youtube_summaries()
+    _enqueue_missing_youtube_local_video_downloads()
 
     scheduler = _build_polling_scheduler()
     if scheduler is not None:

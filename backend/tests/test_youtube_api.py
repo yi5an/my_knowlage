@@ -326,6 +326,91 @@ def test_enqueue_local_video_download_job(
     assert video.local_video_status == "queued"
 
 
+def test_enqueue_missing_local_video_download_jobs_backfills_completed_summaries(
+    db_session: Session,
+) -> None:
+    from app.services.youtube.local_video import enqueue_missing_local_video_download_jobs
+
+    db_session.add(Workspace(id="auto_download_ws", name="auto_download_ws"))
+    completed_video = Video(
+        id="video_auto_download",
+        workspace_id="auto_download_ws",
+        video_id="auto123",
+        title="Auto download",
+        fetch_status="fetched",
+        published_at=datetime(2026, 7, 17, tzinfo=UTC),
+    )
+    pending_video = Video(
+        id="video_still_processing",
+        workspace_id="auto_download_ws",
+        video_id="pending123",
+        title="Still processing",
+        fetch_status="fetched",
+    )
+    downloaded_video = Video(
+        id="video_already_downloaded",
+        workspace_id="auto_download_ws",
+        video_id="downloaded123",
+        title="Already downloaded",
+        fetch_status="fetched",
+        local_video_status="downloaded",
+        local_video_path="/mnt/knowpilot-nas/youtube/downloaded123/downloaded123.mp4",
+    )
+    db_session.add_all([completed_video, pending_video, downloaded_video])
+    db_session.add_all(
+        [
+            Document(
+                id="doc_auto_download",
+                workspace_id="auto_download_ws",
+                title="Auto download",
+                source_type="youtube",
+                source_uri="https://youtu.be/auto123",
+                status="ready",
+                parse_status="completed",
+                video_id=completed_video.id,
+            ),
+            Document(
+                id="doc_still_processing",
+                workspace_id="auto_download_ws",
+                title="Still processing",
+                source_type="youtube",
+                source_uri="https://youtu.be/pending123",
+                status="processing",
+                parse_status="processing",
+                video_id=pending_video.id,
+            ),
+            Document(
+                id="doc_already_downloaded",
+                workspace_id="auto_download_ws",
+                title="Already downloaded",
+                source_type="youtube",
+                source_uri="https://youtu.be/downloaded123",
+                status="ready",
+                parse_status="completed",
+                video_id=downloaded_video.id,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    count = enqueue_missing_local_video_download_jobs(db_session, workspace_id="auto_download_ws")
+
+    assert count == 1
+    db_session.refresh(completed_video)
+    db_session.refresh(pending_video)
+    db_session.refresh(downloaded_video)
+    assert completed_video.local_video_status == "queued"
+    assert pending_video.local_video_status == "not_downloaded"
+    assert downloaded_video.local_video_status == "downloaded"
+    job = (
+        db_session.query(TaskJob)
+        .filter_by(job_type="youtube_local_video_download", target_id=completed_video.id)
+        .one()
+    )
+    assert job.status == "pending"
+    assert job.input == {"video_id": "auto123"}
+
+
 def test_local_video_stream_supports_range_requests(
     client: TestClient,
     db_session: Session,

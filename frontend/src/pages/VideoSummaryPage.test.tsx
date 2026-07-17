@@ -158,10 +158,14 @@ describe("VideoSummaryPage", () => {
     );
   });
 
-  it("can enqueue a local video download from the summary page", async () => {
+  it("can re-enqueue a failed local video download from the summary page", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/youtube/summaries/doc_yt_1")) {
-        return Response.json(summaryCard);
+        return Response.json({
+          ...summaryCard,
+          local_video_status: "failed",
+          local_video_error: "yt-dlp failed",
+        });
       }
       if (url.endsWith("/youtube/summaries/doc_yt_1/mark-read")) {
         return new Response(null, { status: 204 });
@@ -185,7 +189,7 @@ describe("VideoSummaryPage", () => {
 
     renderPage();
 
-    const downloadButton = await screen.findByRole("button", { name: "下载到 NAS" });
+    const downloadButton = await screen.findByRole("button", { name: "重新下载到 NAS" });
     fireEvent.click(downloadButton);
 
     await waitFor(() => {
@@ -195,6 +199,24 @@ describe("VideoSummaryPage", () => {
       );
     });
     expect(await screen.findByText("下载已加入队列")).toBeInTheDocument();
+  });
+
+  it("shows automatic local video download status before the file is ready", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/youtube/summaries/doc_yt_1")) {
+        return Response.json(summaryCard);
+      }
+      if (url.endsWith("/youtube/summaries/doc_yt_1/mark-read")) {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByText("等待自动下载到 NAS")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "下载到 NAS" })).not.toBeInTheDocument();
   });
 
   it("renders the local video player when the video has been downloaded", async () => {

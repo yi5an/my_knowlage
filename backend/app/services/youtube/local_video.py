@@ -14,7 +14,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.infrastructure.models import TaskJob, Video
+from app.infrastructure.models import Document, TaskJob, Video
 from app.services.structured_output import StructuredOutputClient
 from app.services.task_worker import JobHandler
 
@@ -107,6 +107,37 @@ def enqueue_local_video_download_job(session: Session, video: Video) -> TaskJob:
     session.add(job)
     session.commit()
     return job
+
+
+def enqueue_missing_local_video_download_jobs(
+    session: Session,
+    *,
+    workspace_id: str | None = None,
+    limit: int = 100,
+) -> int:
+    """Queue local downloads for completed YouTube summaries missing video files."""
+    conditions = [
+        Video.platform == "youtube",
+        Video.local_video_status == "not_downloaded",
+        Document.source_type == "youtube",
+        Document.parse_status == "completed",
+    ]
+    if workspace_id is not None:
+        conditions.append(Video.workspace_id == workspace_id)
+    videos = list(
+        session.scalars(
+            select(Video)
+            .join(Document, Document.video_id == Video.id)
+            .where(*conditions)
+            .order_by(Video.published_at.desc().nullslast(), Video.created_at.desc())
+            .limit(limit)
+        )
+    )
+    count = 0
+    for video in videos:
+        enqueue_local_video_download_job(session, video)
+        count += 1
+    return count
 
 
 class YouTubeLocalVideoDownloadHandler(JobHandler):

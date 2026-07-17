@@ -280,12 +280,29 @@ class VideoSummaryOrchestrator:
                 exc,
             )
 
+        self._enqueue_local_video_download(video)
+
         return SummaryJobResult(
             video_id=meta.video_id,
             document_id=document.id,
             status="succeeded",
             summary=summary,
         )
+
+    def _enqueue_local_video_download(self, video: Video) -> None:
+        """Best-effort queue for local/NAS playback after a summary succeeds."""
+        if video.local_video_status == "downloaded" and video.local_video_path:
+            return
+        try:
+            from app.services.youtube.local_video import enqueue_local_video_download_job
+
+            enqueue_local_video_download_job(self.session, video)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "local video download enqueue failed for %s (summary kept): %s",
+                video.video_id,
+                exc,
+            )
 
     def _analyze_visual_frames(
         self,

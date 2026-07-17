@@ -150,6 +150,24 @@ def test_summarize_url_full_loop(session: Session) -> None:
     assert all(c.doc_id == document.id for c in chunks)
 
 
+def test_summarize_success_enqueues_local_video_download(session: Session) -> None:
+    fetcher = FakeYouTubeFetcher().add_video(_meta())
+    extractor = FakeTranscriptExtractor().with_transcript("dQw4w9WgXcQ", _transcript())
+    orch = _orchestrator(session, fetcher, extractor, _canned_summary())
+
+    result = orch.summarize_url("https://youtu.be/dQw4w9WgXcQ", workspace_id="ws_default")
+
+    assert result.succeeded
+    video = session.query(Video).one()
+    assert video.local_video_status == "queued"
+    job = session.query(TaskJob).filter_by(job_type="youtube_local_video_download").one()
+    assert job.job_type == "youtube_local_video_download"
+    assert job.target_type == "video"
+    assert job.target_id == video.id
+    assert job.status == "pending"
+    assert job.input == {"video_id": "dQw4w9WgXcQ"}
+
+
 def test_summarize_url_no_transcript(session: Session) -> None:
     fetcher = FakeYouTubeFetcher().add_video(_meta())
     extractor = FakeTranscriptExtractor()  # no canned transcript -> NoTranscript
