@@ -160,7 +160,46 @@ def client(
     app.dependency_overrides.clear()
 
 
-def test_manual_summary_endpoint(client: TestClient) -> None:
+def _run_pending_youtube_summary_job(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_pipeline: RecordingExtractionPipeline,
+) -> None:
+    from app.services.youtube.summary_job_handler import YouTubeSummaryJobHandler
+
+    def fake_job_orchestrator(
+        session: Session,
+        _llm_client: MockStructuredOutputClient,
+    ) -> VideoSummaryOrchestrator:
+        return VideoSummaryOrchestrator(
+            session=session,
+            fetcher=_fake_fetcher(),
+            transcript_extractor=_fake_extractor(),
+            summary_service=SummaryService(_mock_summary_client()),
+            extraction_pipeline=recording_pipeline,
+        )
+
+    monkeypatch.setattr(
+        "app.services.youtube.summary_job_handler.build_youtube_orchestrator_for_job",
+        fake_job_orchestrator,
+    )
+    job = db_session.scalar(
+        select(TaskJob).where(TaskJob.job_type == "youtube_summary", TaskJob.status == "pending")
+    )
+    assert job is not None
+    YouTubeSummaryJobHandler().handle(
+        job,
+        db_session,
+        llm_client=_mock_summary_client(),
+    )
+
+
+def test_manual_summary_endpoint(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_pipeline: RecordingExtractionPipeline,
+) -> None:
     response = client.post(
         "/api/v1/youtube/summarize",
         json={"url": f"https://youtu.be/{VIDEO_ID}", "workspace_id": "ws_default"},
@@ -170,17 +209,13 @@ def test_manual_summary_endpoint(client: TestClient) -> None:
     body = response.json()
     assert body["status"] == "processing"
     assert body["video_id"] == VIDEO_ID
-    document_id = ""
+    status = client.get(f"/api/v1/youtube/summaries/by-video/{VIDEO_ID}").json()
+    assert status["status"] == "processing"
 
-    # Poll the by-video status endpoint until the background job finishes.
-    for _ in range(50):
-        status = client.get(
-            f"/api/v1/youtube/summaries/by-video/{VIDEO_ID}"
-        ).json()
-        if status["status"] == "succeeded":
-            document_id = status["document_id"]
-            break
-        assert status["status"] in ("processing", "unknown"), status
+    _run_pending_youtube_summary_job(db_session, monkeypatch, recording_pipeline)
+    status = client.get(f"/api/v1/youtube/summaries/by-video/{VIDEO_ID}").json()
+    assert status["status"] == "succeeded"
+    document_id = status["document_id"]
     assert document_id, "background summary never reported succeeded"
 
     card = client.get(f"/api/v1/youtube/summaries/{document_id}").json()
@@ -190,6 +225,112 @@ def test_manual_summary_endpoint(client: TestClient) -> None:
     assert card["summary"]["key_points"][0]["timestamp_str"] == "00:10"
     assert card["mindmap"] is not None
     assert card["visual_frames"] == []
+
+
+def test_manual_summary_is_durable_and_visible_immediately(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    response = client.post(
+        "/api/v1/youtube/summarize",
+        json={"url": "https://youtu.be/lvfh8QoSSYY", "workspace_id": "ws_default"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "processing"
+    video = db_session.scalar(
+        select(Video).where(
+            Video.workspace_id == "ws_default",
+            Video.video_id == "lvfh8QoSSYY",
+        )
+    )
+    assert video is not None
+    assert video.fetch_status == "pending"
+    job = db_session.scalar(
+        select(TaskJob).where(
+            TaskJob.job_type == "youtube_summary",
+            TaskJob.target_id == video.id,
+        )
+    )
+    assert job is not None
+    assert job.status == "pending"
+    assert job.input == {
+        "video_id": "lvfh8QoSSYY",
+        "reason": "manual_submit",
+        "url": "https://youtu.be/lvfh8QoSSYY",
+    }
+    assert isinstance((video.metadata_ or {}).get("manual_submitted_at"), str)
+
+    history = client.get("/api/v1/youtube/summaries?workspace_id=ws_default")
+    assert history.status_code == 200
+    item = history.json()[0]
+    assert item["video_id"] == "lvfh8QoSSYY"
+    assert item["summary_status"] == "pending"
+    assert item["failure_stage"] == "pending"
+
+
+def test_manual_summary_updates_existing_pending_job_with_url(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="manual_resubmit_ws", name="manual_resubmit_ws"))
+    video = Video(
+        id="video_existing_manual_job",
+        workspace_id="manual_resubmit_ws",
+        platform="youtube",
+        video_id="lvfh8QoSSYY",
+        title="lvfh8QoSSYY",
+        fetch_status="pending",
+        created_at=datetime(2026, 7, 1, tzinfo=UTC),
+    )
+    newer_published_video = Video(
+        id="video_newer_published_than_old_pending",
+        workspace_id="manual_resubmit_ws",
+        platform="youtube",
+        video_id="newerpublished",
+        title="Newer published",
+        fetch_status="fetched",
+        published_at=datetime(2026, 7, 16, tzinfo=UTC),
+        created_at=datetime(2026, 7, 16, tzinfo=UTC),
+    )
+    job = TaskJob(
+        id="job_existing_manual",
+        workspace_id="manual_resubmit_ws",
+        job_type="youtube_summary",
+        target_type="video",
+        target_id=video.id,
+        status="pending",
+        input={"video_id": "lvfh8QoSSYY", "reason": "startup_recovery"},
+    )
+    db_session.add_all([video, newer_published_video, job])
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/youtube/summarize",
+        json={
+            "url": "https://youtu.be/lvfh8QoSSYY?si=BRXEq898HCffeLMt",
+            "workspace_id": "manual_resubmit_ws",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["task_job_id"] == "job_existing_manual"
+    db_session.refresh(job)
+    assert job.input == {
+        "video_id": "lvfh8QoSSYY",
+        "reason": "manual_submit",
+        "url": "https://youtu.be/lvfh8QoSSYY?si=BRXEq898HCffeLMt",
+    }
+    db_session.refresh(video)
+    assert video.created_at.replace(tzinfo=UTC) > datetime(2026, 7, 1, tzinfo=UTC)
+    assert isinstance((video.metadata_ or {}).get("manual_submitted_at"), str)
+    history = client.get("/api/v1/youtube/summaries?workspace_id=manual_resubmit_ws")
+    assert history.status_code == 200
+    assert [item["video_id"] for item in history.json()] == [
+        "lvfh8QoSSYY",
+        "newerpublished",
+    ]
 
 
 def test_summary_card_returns_visual_frames(
@@ -673,6 +814,7 @@ def test_update_visual_frame_mindmap_tree(
 def test_manual_import_summary_to_knowledge_base(
     client: TestClient,
     db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
     recording_pipeline: RecordingExtractionPipeline,
 ) -> None:
     response = client.post(
@@ -681,12 +823,10 @@ def test_manual_import_summary_to_knowledge_base(
     )
     assert response.status_code == 200
 
-    document_id = ""
-    for _ in range(50):
-        status = client.get(f"/api/v1/youtube/summaries/by-video/{VIDEO_ID}").json()
-        if status["status"] == "succeeded":
-            document_id = status["document_id"]
-            break
+    _run_pending_youtube_summary_job(db_session, monkeypatch, recording_pipeline)
+    status = client.get(f"/api/v1/youtube/summaries/by-video/{VIDEO_ID}").json()
+    assert status["status"] == "succeeded"
+    document_id = status["document_id"]
     assert document_id, "background summary never reported succeeded"
     assert recording_pipeline.calls == []
 
@@ -714,6 +854,7 @@ def test_summary_history_preserves_failed_video_records(
         video_id="completed123",
         title="Completed video",
         fetch_status="fetched",
+        published_at=datetime(2026, 7, 1, tzinfo=UTC),
     )
     failed_video = Video(
         id="video_failed",
@@ -1182,6 +1323,51 @@ def test_summary_history_orders_pending_videos_by_published_time(
 
     assert response.status_code == 200
     assert [item["video_id"] for item in response.json()] == ["newcompleted", "oldpending"]
+
+
+def test_summary_history_orders_manual_pending_without_publish_time_by_created_time(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="manual_order_ws", name="manual_order_ws"))
+    manual_video = Video(
+        id="video_manual_pending_no_publish_time",
+        workspace_id="manual_order_ws",
+        video_id="manualpend1",
+        title="Manual pending",
+        fetch_status="pending",
+        published_at=None,
+        created_at=datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+    )
+    published_video = Video(
+        id="video_recent_published",
+        workspace_id="manual_order_ws",
+        video_id="published1",
+        title="Published yesterday",
+        fetch_status="fetched",
+        published_at=datetime(2026, 7, 16, tzinfo=UTC),
+        created_at=datetime(2026, 7, 16, tzinfo=UTC),
+    )
+    db_session.add_all([manual_video, published_video])
+    db_session.add(
+        Document(
+            id="doc_recent_published",
+            workspace_id="manual_order_ws",
+            title="Published yesterday",
+            source_type="youtube",
+            source_uri="https://youtu.be/published1",
+            status="ready",
+            parse_status="completed",
+            video_id=published_video.id,
+            summary_json={"tldr": "Ready", "tags": []},
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/youtube/summaries?workspace_id=manual_order_ws")
+
+    assert response.status_code == 200
+    assert [item["video_id"] for item in response.json()] == ["manualpend1", "published1"]
 
 
 def test_manual_summary_rejects_channel_url(client: TestClient) -> None:

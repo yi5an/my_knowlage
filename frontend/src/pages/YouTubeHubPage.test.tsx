@@ -17,6 +17,64 @@ describe("YouTubeHubPage", () => {
     vi.unstubAllGlobals();
   });
 
+  it("submits manual summaries as durable background work and refreshes history", async () => {
+    let historyCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/youtube/summaries?")) {
+        historyCalls += 1;
+        return Response.json(
+          historyCalls === 1
+            ? []
+            : [
+                {
+                  document_id: "",
+                  video_id: "lvfh8QoSSYY",
+                  title: "lvfh8QoSSYY",
+                  channel_name: null,
+                  thumbnail_url: null,
+                  duration_sec: null,
+                  published_at: null,
+                  tldr: null,
+                  tags: [],
+                  created_at: "2026-07-17T00:00:00Z",
+                  is_unread: false,
+                  summary_status: "pending",
+                  error: null,
+                  failure_stage: "pending",
+                  retryable: true,
+                },
+              ],
+        );
+      }
+      if (url.endsWith("/youtube/summarize")) {
+        return Response.json({
+          video_id: "lvfh8QoSSYY",
+          document_id: "",
+          task_job_id: "job_yt_manual",
+          status: "processing",
+        });
+      }
+      if (url.includes("/youtube/summaries/by-video/")) {
+        throw new Error("manual submit should not wait for foreground polling");
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("https://www.youtube.com/watch?v=..."), {
+      target: { value: "https://youtu.be/lvfh8QoSSYY?si=BRXEq898HCffeLMt" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /总\s*结/ }));
+
+    expect(await screen.findByText("lvfh8QoSSYY")).toBeInTheDocument();
+    expect(screen.getByText("待处理")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("/youtube/summaries/by-video/"),
+    );
+  });
+
   it("keeps failed video records visible in history", async () => {
     vi.stubGlobal(
       "fetch",

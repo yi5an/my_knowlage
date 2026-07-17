@@ -26,6 +26,8 @@ def enqueue_youtube_summary_job(
     video: Video,
     *,
     reason: str,
+    url: str | None = None,
+    preferred_language: str | None = None,
 ) -> TaskJob:
     """Create or return an active durable summary job for one video."""
     existing = session.scalar(
@@ -37,7 +39,17 @@ def enqueue_youtube_summary_job(
             TaskJob.status.in_(("pending", "running")),
         )
     )
+    job_input: dict[str, Any] = {"video_id": video.video_id, "reason": reason}
+    if url is not None:
+        job_input["url"] = url
+    if preferred_language is not None:
+        job_input["preferred_language"] = preferred_language
     if existing is not None:
+        existing_input = dict(existing.input or {}) if isinstance(existing.input, dict) else {}
+        merged_input = {**existing_input, **job_input}
+        if merged_input != existing_input:
+            existing.input = merged_input
+            session.commit()
         return existing
 
     job = TaskJob(
@@ -48,7 +60,7 @@ def enqueue_youtube_summary_job(
         target_id=video.id,
         status="pending",
         progress=0,
-        input={"video_id": video.video_id, "reason": reason},
+        input=job_input,
     )
     session.add(job)
     session.commit()
@@ -156,11 +168,24 @@ class YouTubeSummaryJobHandler(JobHandler):
         session.commit()
 
         orchestrator = build_youtube_orchestrator_for_job(session, llm_client)
-        result = orchestrator.summarize_meta(
-            _video_meta_from_row(video),
-            workspace_id=video.workspace_id,
-            subscription_id=video.subscription_id,
-        )
+        job_input = job.input if isinstance(job.input, dict) else {}
+        if isinstance(job_input.get("url"), str):
+            result = orchestrator.summarize_url(
+                job_input["url"],
+                workspace_id=video.workspace_id,
+                subscription_id=video.subscription_id,
+                preferred_language=(
+                    job_input.get("preferred_language")
+                    if isinstance(job_input.get("preferred_language"), str)
+                    else None
+                ),
+            )
+        else:
+            result = orchestrator.summarize_meta(
+                _video_meta_from_row(video),
+                workspace_id=video.workspace_id,
+                subscription_id=video.subscription_id,
+            )
         output = {
             "video_id": result.video_id,
             "document_id": result.document_id,

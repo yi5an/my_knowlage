@@ -4,14 +4,12 @@ Dependency injection chooses between real and fake fetcher/extractor/LLM
 based on whether an API key is configured, so the whole stack runs in a
 no-key local mode (using canned/fake data) for development and tests.
 
-Manual summarization is **non-blocking**: the endpoint returns a task id
-immediately and runs the (potentially multi-minute, e.g. ASR) pipeline in
-a background thread on its own DB session. Callers poll the by-video
-status endpoint until the card is ready.
+Manual summarization is **non-blocking**: the endpoint persists a Video row,
+enqueues a durable task_job, and returns immediately. Callers can refresh the
+history list or poll the by-video status endpoint until the card is ready.
 """
 
 import logging
-import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -237,39 +235,6 @@ async def update_auto_retry_settings(
 # --- Manual summary --------------------------------------------------------
 
 
-def _run_summary_in_background(
-    url: str,
-    workspace_id: str,
-    preferred_language: str | None,
-    *,
-    task_job_id: str,
-) -> None:
-    """Run the full summary pipeline on a background thread.
-
-    Uses its own DB session (never the request-scoped one). Errors are
-    logged and surfaced via the Video row's ``error_message`` — the caller
-    polls by ``video_id`` to see progress, so nothing here needs to bubble
-    up synchronously.
-    """
-    session = SessionLocal()
-    try:
-        orch = build_orchestrator(session)
-        result = orch.summarize_url(
-            url, workspace_id=workspace_id, preferred_language=preferred_language
-        )
-        if not result.succeeded:
-            logger.warning(
-                "background summary %s finished non-success: %s (%s)",
-                task_job_id,
-                result.status,
-                result.error,
-            )
-    except Exception:  # noqa: BLE001
-        logger.exception("background summary %s crashed", task_job_id)
-    finally:
-        session.close()
-
-
 @router.post("/summarize", response_model=ManualSummaryResponse)
 async def summarize_video(
     request: ManualSummaryRequest,
@@ -277,10 +242,9 @@ async def summarize_video(
     """Submit a manual summary. Returns immediately with status=processing.
 
     The heavy pipeline (transcript fetch, optional ASR, translation,
-    Map-Reduce summary) runs in a background thread because it can take
-    several minutes for long videos without subtitles. Poll
-    ``/summaries/by-video/{video_id}`` to watch it transition to
-    succeeded/failed.
+    Map-Reduce summary) runs as a durable ``task_job`` because it can take
+    several minutes for long videos without subtitles. The history list shows
+    the pending Video immediately and survives page refreshes/backend restarts.
     """
     # Validate the URL synchronously so callers get an instant 400 on bad input.
     try:
@@ -294,28 +258,64 @@ async def summarize_video(
         )
     video_id = target.video_id
 
-    # Make sure the workspace exists before kicking off the background work.
-    pre_session = SessionLocal()
+    session = SessionLocal()
     try:
-        _ensure_workspace(pre_session, request.workspace_id)
-    finally:
-        pre_session.close()
+        _ensure_workspace(session, request.workspace_id)
+        submitted_at = datetime.now(UTC)
+        video = session.scalar(
+            select(Video).where(
+                Video.workspace_id == request.workspace_id,
+                Video.video_id == video_id,
+            )
+        )
+        if video is None:
+            from uuid import uuid4
 
-    task_job_id = f"yt_{video_id}_{threading.get_ident()}"
-    thread = threading.Thread(
-        target=_run_summary_in_background,
-        args=(request.url, request.workspace_id, request.preferred_language),
-        kwargs={"task_job_id": task_job_id},
-        name=f"yt-summary-{video_id}",
-        daemon=True,
-    )
-    thread.start()
-    logger.info("started background summary %s for video %s", task_job_id, video_id)
+            video = Video(
+                id=f"video_{uuid4().hex}",
+                workspace_id=request.workspace_id,
+                platform="youtube",
+                video_id=video_id,
+                title=video_id,
+                fetch_status="pending",
+                metadata_={"manual_submitted_at": submitted_at.isoformat()},
+            )
+            session.add(video)
+            session.commit()
+            session.refresh(video)
+        else:
+            video.fetch_status = "pending"
+            video.error_message = None
+            video.metadata_ = {
+                **(video.metadata_ or {}),
+                "manual_submitted_at": submitted_at.isoformat(),
+            }
+            # A manual submit is a fresh user action. Keep the pending card
+            # visible after refresh even when the Video row was discovered by
+            # an older subscription/recovery pass and has no published_at.
+            video.created_at = submitted_at
+            session.commit()
+        doc = session.scalar(select(Document).where(Document.video_id == video.id))
+        if doc is not None and doc.parse_status == "failed":
+            doc.parse_status = "processing"
+            doc.status = "processing"
+            doc.ai_summary = None
+            session.commit()
+        job = enqueue_youtube_summary_job(
+            session,
+            video,
+            reason="manual_submit",
+            url=request.url,
+            preferred_language=request.preferred_language,
+        )
+    finally:
+        session.close()
+    logger.info("enqueued durable manual summary %s for video %s", job.id, video_id)
 
     return ManualSummaryResponse(
         video_id=video_id,
-        document_id="",
-        task_job_id=task_job_id,
+        document_id=doc.id if doc is not None else "",
+        task_job_id=job.id,
         status="processing",
     )
 
@@ -772,14 +772,40 @@ async def list_summaries(
     Includes failed/pending ``Video`` rows that never reached Document creation
     so operators can see and retry transcript/ASR failures.
     """
-    rows = session.execute(
-        select(Video, Document)
-        .outerjoin(Document, Document.video_id == Video.id)
-        .where(Video.workspace_id == workspace_id)
-        .order_by(Video.published_at.desc().nullslast(), Video.created_at.desc())
-        .limit(limit)
-    ).all()
-    return [_summary_list_item(video, doc) for video, doc in rows]
+    rows = list(
+        session.execute(
+            select(Video, Document)
+            .outerjoin(Document, Document.video_id == Video.id)
+            .where(Video.workspace_id == workspace_id)
+        )
+        .all()
+    )
+    rows.sort(key=lambda row: _summary_list_sort_value(row[0]), reverse=True)
+    return [_summary_list_item(video, doc) for video, doc in rows[:limit]]
+
+
+def _summary_list_sort_value(video: Video) -> float:
+    manual_submitted_at = (video.metadata_ or {}).get("manual_submitted_at")
+    if isinstance(manual_submitted_at, str):
+        parsed = _parse_sort_datetime(manual_submitted_at)
+        if parsed is not None:
+            return parsed.timestamp()
+    sort_at = video.published_at or video.created_at
+    parsed = _parse_sort_datetime(sort_at)
+    return parsed.timestamp() if parsed is not None else 0
+
+
+def _parse_sort_datetime(value: datetime | str | None) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _summary_list_item(video: Video, doc: Document | None) -> SummaryListItem:
@@ -1071,7 +1097,7 @@ def _run_subscription_summaries_async(
     pairs: list[tuple[Subscription, list[VideoMeta]]],
 ) -> None:
     """Background worker: summarize each newly-discovered video on its own
-    DB session + orchestrator. Mirrors _run_summary_in_background."""
+    DB session + orchestrator."""
     session = SessionLocal()
     try:
         orch = build_orchestrator(session)

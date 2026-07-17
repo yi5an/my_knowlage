@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
 
   Button,
@@ -24,7 +24,6 @@ import {
 
 import {
   listSummaries,
-  pollSummaryUntilDone,
   retryVideo,
   summarizeVideo,
   youtubeThumbnailUrl,
@@ -57,7 +56,6 @@ const HISTORY_THUMBNAIL_IMAGE_STYLE: CSSProperties = {
 };
 
 export function YouTubeHubPage() {
-  const navigate = useNavigate();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [summaries, setSummaries] = useState<SummaryListItem[]>([]);
@@ -77,16 +75,11 @@ export function YouTubeHubPage() {
     if (!trimmed) return;
     setBusy(true);
     try {
-      // Non-blocking: backend returns immediately, runs pipeline in background.
-      const submitted = await summarizeVideo(trimmed);
-      message.info(
-        "已提交,正在后台处理(无字幕视频会先用语音识别转写,可能需要几分钟)…",
-      );
-      const documentId = await pollSummaryUntilDone(submitted.video_id);
-      message.success("总结完成！");
-      // Refresh the list so the new summary appears before navigating.
-      listSummaries("ws_default", 50).then(setSummaries).catch(() => {});
-      navigate(`/youtube/summary/${documentId}`);
+      await summarizeVideo(trimmed);
+      message.success("已加入后台总结队列，刷新页面也会保留。");
+      setUrl("");
+      const latest = await listSummaries("ws_default", 50);
+      setSummaries(latest);
     } catch (e) {
       const msg = String(e);
       if (msg.includes("no_transcript") || msg.includes("没有字幕")) {
