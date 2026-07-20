@@ -190,8 +190,8 @@ class FfmpegFrameExtractor:
 
 def perceptual_hash(image_path: Path) -> str:
     try:
-        import imagehash  # type: ignore[import-not-found]
-        from PIL import Image  # type: ignore[import-not-found]
+        import imagehash
+        from PIL import Image
 
         with Image.open(image_path) as image:
             return str(imagehash.phash(image))
