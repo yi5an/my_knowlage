@@ -448,13 +448,23 @@ class VideoVisualAnalysisService:
         self.frame_similarity_threshold = frame_similarity_threshold
         self.min_text_chars = min_text_chars
 
-    def analyze(self, video: Video, youtube_video_id: str) -> list[VideoFrameAnalysisResult]:
+    def analyze(
+        self,
+        video: Video,
+        youtube_video_id: str,
+        *,
+        replace_existing: bool = False,
+    ) -> list[VideoFrameAnalysisResult]:
+        if self.session is not None and not replace_existing:
+            existing = load_frame_results(self.session, video.id)
+            if existing:
+                return existing
         results = self.analyze_video_id(
             youtube_video_id,
             workspace_id=video.workspace_id,
             video_row_id=video.id,
         )
-        if self.session is not None:
+        if self.session is not None and results:
             self._persist(video, results)
         return results
 
@@ -506,6 +516,9 @@ class VideoVisualAnalysisService:
                     )
                 )
 
+            if not results:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return results
             if output_dir.exists():
                 shutil.rmtree(output_dir)
             temp_dir.rename(output_dir)

@@ -61,6 +61,15 @@ export interface VideoFrameAnalysis {
   confidence: number;
 }
 
+export interface VisualAnalysisRetryStatus {
+  id: string;
+  job_type: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+  progress: number;
+  output: Record<string, unknown>;
+  error_message: string | null;
+}
+
 export interface SourceTraceCandidate {
   source_item_id: string;
   source_title: string;
@@ -185,6 +194,19 @@ export function updateVisualFrameMindmap(
     method: "PUT",
     body: { tree },
   });
+}
+
+export function retryVisualAnalysis(videoId: string): Promise<VisualAnalysisRetryStatus> {
+  return apiRequest<VisualAnalysisRetryStatus>(
+    `/youtube/videos/${encodeURIComponent(videoId)}/visual-analysis/retry`,
+    { method: "POST" },
+  );
+}
+
+export function getVisualAnalysisStatus(videoId: string): Promise<VisualAnalysisRetryStatus | null> {
+  return apiRequest<VisualAnalysisRetryStatus | null>(
+    `/youtube/videos/${encodeURIComponent(videoId)}/visual-analysis/status`,
+  );
 }
 
 export function downloadLocalVideo(videoId: string): Promise<LocalVideoDownloadResponse> {

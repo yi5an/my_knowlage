@@ -140,6 +140,15 @@ class VisualMindmapUpdateRequest(BaseModel):
     tree: VisualMindmapTreeNode
 
 
+class VisualAnalysisRetryStatus(BaseModel):
+    id: str
+    job_type: str
+    status: str
+    progress: int
+    output: dict[str, Any] = Field(default_factory=dict)
+    error_message: str | None = None
+
+
 # --- Summary contract (the card data model) ---------------------------------
 
 

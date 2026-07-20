@@ -26,10 +26,27 @@ _COST_VIDEOS_LIST = 1
 _COST_PLAYLIST_ITEMS = 1
 _COST_CHANNELS_LIST = 1
 DEFAULT_DAILY_QUOTA = 10000
+_REST_RETRY_DELAYS = (0.5, 1.0)
+_TRANSIENT_REST_MARKERS = (
+    "unexpected_eof_while_reading",
+    "connection reset",
+    "connection aborted",
+    "timed out",
+    "timeout",
+    "temporary failure",
+)
 
 
 class FetcherError(Exception):
     """Base error for metadata fetching failures."""
+
+
+def is_transient_youtube_api_error(error: BaseException) -> bool:
+    status_code = getattr(error, "code", None)
+    if isinstance(status_code, int):
+        return status_code == 429 or 500 <= status_code <= 599
+    text = str(error).casefold()
+    return any(marker in text for marker in _TRANSIENT_REST_MARKERS)
 
 
 class QuotaExceededError(FetcherError):
@@ -39,14 +56,11 @@ class QuotaExceededError(FetcherError):
 class YouTubeFetcher(Protocol):
     def fetch_latest_videos(
         self, channel_id: str, *, since: datetime | None = None, limit: int = 15
-    ) -> list[VideoMeta]:
-        ...
+    ) -> list[VideoMeta]: ...
 
-    def fetch_video(self, video_id: str) -> VideoMeta:
-        ...
+    def fetch_video(self, video_id: str) -> VideoMeta: ...
 
-    def resolve_channel_id(self, handle_or_id: str) -> str:
-        ...
+    def resolve_channel_id(self, handle_or_id: str) -> str: ...
 
 
 def _iso8601_to_seconds(iso8601: str) -> int | None:
@@ -117,11 +131,7 @@ class YouTubeDataApiFetcher:
         self.quota.spend(_COST_CHANNELS_LIST)
         client = self._client()
         try:
-            resp = (
-                client.channels()
-                .list(part="id", forHandle=handle, maxResults=1)
-                .execute()
-            )
+            resp = client.channels().list(part="id", forHandle=handle, maxResults=1).execute()
         except Exception as exc:  # noqa: BLE001
             raise FetcherError(f"failed to resolve handle {handle_or_id!r}: {exc}") from exc
         items = resp.get("items") or []
@@ -264,23 +274,27 @@ class RestYouTubeFetcher:
 
         query = urllib.parse.urlencode({**params, "key": self.api_key})
         url = f"{self.BASE_URL}/{path}?{query}"
-        try:
-            request = urllib.request.Request(url)
-            if self.proxy_url:
-                opener = urllib.request.build_opener(
-                    urllib.request.ProxyHandler(
-                        {"http": self.proxy_url, "https": self.proxy_url}
+        for attempt in range(len(_REST_RETRY_DELAYS) + 1):
+            try:
+                request = urllib.request.Request(url)
+                if self.proxy_url:
+                    opener = urllib.request.build_opener(
+                        urllib.request.ProxyHandler(
+                            {"http": self.proxy_url, "https": self.proxy_url}
+                        )
                     )
-                )
-                response_context = opener.open(request, timeout=30)
-            else:
-                response_context = urllib.request.urlopen(request, timeout=30)  # noqa: S310
-            with response_context as resp:
-                import json
+                    response_context = opener.open(request, timeout=30)
+                else:
+                    response_context = urllib.request.urlopen(request, timeout=30)  # noqa: S310
+                with response_context as resp:
+                    import json
 
-                return json.loads(resp.read())
-        except Exception as exc:  # noqa: BLE001
-            raise FetcherError(f"REST call to {path} failed: {exc}") from exc
+                    return json.loads(resp.read())
+            except Exception as exc:  # noqa: BLE001
+                if attempt == len(_REST_RETRY_DELAYS) or not is_transient_youtube_api_error(exc):
+                    raise FetcherError(f"REST call to {path} failed: {exc}") from exc
+                time.sleep(_REST_RETRY_DELAYS[attempt])
+        raise AssertionError("unreachable")
 
     def resolve_channel_id(self, handle_or_id: str) -> str:
         from app.services.youtube.urls import CHANNEL_ID_RE

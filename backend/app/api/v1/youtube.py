@@ -29,6 +29,7 @@ from app.infrastructure.models import (
     Document,
     DocumentVersion,
     Subscription,
+    TaskJob,
     Video,
     VideoFrameAnalysis,
     Workspace,
@@ -44,6 +45,7 @@ from app.schemas.youtube import (
     VideoFrameAnalysisResponse,
     VideoMeta,
     VideoSummaryCard,
+    VisualAnalysisRetryStatus,
     VisualMindmapUpdateRequest,
     YouTubeAutoRetrySettings,
     YouTubeAutoRetrySettingsUpdate,
@@ -65,7 +67,11 @@ from app.services.youtube.fetcher import (
 from app.services.youtube.local_video import enqueue_local_video_download_job
 from app.services.youtube.orchestrator import VideoSummaryOrchestrator
 from app.services.youtube.summary import build_summary_service_from_settings
-from app.services.youtube.summary_job_handler import enqueue_youtube_summary_job
+from app.services.youtube.summary_job_handler import (
+    VISUAL_ANALYSIS_RETRY_JOB_TYPE,
+    enqueue_visual_analysis_retry_job,
+    enqueue_youtube_summary_job,
+)
 from app.services.youtube.transcript import TranscriptExtractor
 from app.services.youtube.translation import TranslationService
 from app.services.youtube.urls import UnparseableTargetError, parse_target
@@ -559,6 +565,51 @@ def _visual_frames_for_video(
         )
         for row in rows
     ]
+
+
+def _visual_retry_response(job: TaskJob) -> VisualAnalysisRetryStatus:
+    return VisualAnalysisRetryStatus(
+        id=job.id,
+        job_type=job.job_type,
+        status=job.status,
+        progress=job.progress,
+        output=job.output if isinstance(job.output, dict) else {},
+        error_message=job.error_message,
+    )
+
+
+@router.post(
+    "/videos/{video_id}/visual-analysis/retry",
+    response_model=VisualAnalysisRetryStatus,
+    status_code=202,
+)
+async def retry_visual_analysis(video_id: str, session: SessionDep) -> VisualAnalysisRetryStatus:
+    video = session.scalar(select(Video).where(Video.video_id == video_id))
+    if video is None:
+        raise HTTPException(status_code=404, detail="video not found")
+    return _visual_retry_response(enqueue_visual_analysis_retry_job(session, video))
+
+
+@router.get(
+    "/videos/{video_id}/visual-analysis/status",
+    response_model=VisualAnalysisRetryStatus | None,
+)
+async def get_visual_analysis_status(
+    video_id: str,
+    session: SessionDep,
+) -> VisualAnalysisRetryStatus | None:
+    video = session.scalar(select(Video).where(Video.video_id == video_id))
+    if video is None:
+        raise HTTPException(status_code=404, detail="video not found")
+    job = session.scalar(
+        select(TaskJob)
+        .where(
+            TaskJob.job_type == VISUAL_ANALYSIS_RETRY_JOB_TYPE,
+            TaskJob.target_id == video.id,
+        )
+        .order_by(TaskJob.created_at.desc())
+    )
+    return _visual_retry_response(job) if job is not None else None
 
 
 @router.get("/visual-frames/{frame_id}/image")

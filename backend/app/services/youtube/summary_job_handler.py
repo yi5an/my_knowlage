@@ -18,6 +18,7 @@ from app.services.youtube.orchestrator import VideoSummaryOrchestrator
 logger = logging.getLogger(__name__)
 
 YOUTUBE_SUMMARY_JOB_TYPE = "youtube_summary"
+VISUAL_ANALYSIS_RETRY_JOB_TYPE = "visual_analysis_retry"
 INTERRUPTED_MESSAGE = "summary interrupted by backend restart; please retry processing"
 
 
@@ -61,6 +62,33 @@ def enqueue_youtube_summary_job(
         status="pending",
         progress=0,
         input=job_input,
+    )
+    session.add(job)
+    session.commit()
+    return job
+
+
+def enqueue_visual_analysis_retry_job(session: Session, video: Video) -> TaskJob:
+    existing = session.scalar(
+        select(TaskJob).where(
+            TaskJob.workspace_id == video.workspace_id,
+            TaskJob.job_type == VISUAL_ANALYSIS_RETRY_JOB_TYPE,
+            TaskJob.target_type == "video",
+            TaskJob.target_id == video.id,
+            TaskJob.status.in_(("pending", "running")),
+        )
+    )
+    if existing is not None:
+        return existing
+    job = TaskJob(
+        id=f"job_visual_{uuid4().hex}",
+        workspace_id=video.workspace_id,
+        job_type=VISUAL_ANALYSIS_RETRY_JOB_TYPE,
+        target_type="video",
+        target_id=video.id,
+        status="pending",
+        progress=0,
+        input={"video_id": video.video_id, "reason": "manual_visual_retry"},
     )
     session.add(job)
     session.commit()
@@ -202,6 +230,32 @@ class YouTubeSummaryJobHandler(JobHandler):
         return output
 
 
+class VisualAnalysisRetryJobHandler(JobHandler):
+    """Regenerate visual evidence without touching transcript or summary data."""
+
+    def handle(
+        self,
+        job: TaskJob,
+        session: Session,
+        _llm_client: StructuredOutputClient,
+    ) -> dict[str, Any]:
+        from app.core.config import get_settings
+        from app.services.youtube.visual_analysis import build_visual_analysis_service_from_settings
+
+        video = session.get(Video, job.target_id) if job.target_id else None
+        if video is None:
+            raise ValueError(f"video not found for task job {job.id}")
+        service = build_visual_analysis_service_from_settings(get_settings(), session)
+        if service is None:
+            raise RuntimeError("visual analysis is not configured")
+        frames = service.analyze(video, video.video_id, replace_existing=True)
+        if not frames:
+            raise RuntimeError(
+                "visual retry produced no usable frames; existing evidence was preserved"
+            )
+        return {"video_id": video.id, "frame_count": len(frames)}
+
+
 def build_youtube_orchestrator_for_job(
     session: Session,
     llm_client: StructuredOutputClient,
@@ -263,3 +317,4 @@ def register() -> None:
     from app.services import task_worker
 
     task_worker._HANDLERS[YOUTUBE_SUMMARY_JOB_TYPE] = YouTubeSummaryJobHandler()
+    task_worker._HANDLERS[VISUAL_ANALYSIS_RETRY_JOB_TYPE] = VisualAnalysisRetryJobHandler()

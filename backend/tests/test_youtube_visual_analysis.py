@@ -230,3 +230,20 @@ def test_visual_analysis_keeps_existing_frames_when_refresh_fails(tmp_path: Path
 
     assert existing_frame.read_bytes() == b"old image"
     assert list(existing_dir.glob("partial.jpg")) == []
+
+
+def test_visual_analysis_keeps_existing_images_when_refresh_is_empty(tmp_path: Path) -> None:
+    existing_dir = tmp_path / "youtube_frames" / "abc123"
+    existing_dir.mkdir(parents=True)
+    existing_frame = existing_dir / "frame_0001.jpg"
+    existing_frame.write_bytes(b"old image")
+    service = VideoVisualAnalysisService(
+        frame_extractor=FakeFrameExtractor([]),
+        ocr_client=FakeOcrClient([]),
+        storage_dir=tmp_path,
+    )
+
+    results = service.analyze_video_id("abc123", workspace_id="ws_default", video_row_id="video_1")
+
+    assert results == []
+    assert existing_frame.read_bytes() == b"old image"

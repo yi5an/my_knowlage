@@ -35,7 +35,9 @@ import {
   downloadLocalVideo,
   getSummaryCard,
   importSummaryToKnowledgeBase,
+  getVisualAnalysisStatus,
   markSummaryRead,
+  retryVisualAnalysis,
   updateVisualFrameMindmap,
   youtubeThumbnailUrl,
   youtubeTimestampUrl,
@@ -43,6 +45,7 @@ import {
   type SourceTraceCandidate,
   type VisualMindmapTreeNode,
   type VideoSummaryCard,
+  type VisualAnalysisRetryStatus,
 } from "../services/youtubeApi";
 import { investmentApi } from "../services/investmentApi";
 import { MindmapView } from "../components/MindmapView";
@@ -359,11 +362,11 @@ export function VideoSummaryPage() {
             {
               key: "visual",
               label: "视觉资料",
-              children: card.visual_frames?.length ? (
-                <VisualEvidenceList frames={card.visual_frames} videoId={card.video_id} />
-              ) : (
-                <Empty description="暂无视觉资料" />
-              ),
+              children: <VisualEvidenceSection
+                frames={card.visual_frames ?? []}
+                videoId={card.video_id}
+                onRefresh={() => documentId ? getSummaryCard(documentId).then(setCard) : Promise.resolve()}
+              />,
             },
             {
               key: "transcript",
@@ -531,18 +534,48 @@ function buildVisualMindmapNodes(lines: string[]): VisualMindmapTreeNode[] {
   return nodes.filter((node) => node.title !== "核心摘要" || node.children.length > 0);
 }
 
-function VisualEvidenceList({
+function VisualEvidenceSection({
   frames,
   videoId,
+  onRefresh,
 }: {
   frames: VideoFrameAnalysis[];
   videoId: string;
+  onRefresh: () => Promise<void>;
 }) {
+  const [retry, setRetry] = useState<VisualAnalysisRetryStatus | null>(null);
+  const running = retry?.status === "pending" || retry?.status === "running";
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => {
+      getVisualAnalysisStatus(videoId).then((status) => {
+        setRetry(status);
+        if (status?.status === "succeeded") {
+          onRefresh().then(() => message.success("新视觉资料已更新"));
+        }
+      }).catch(() => {});
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [onRefresh, running, videoId]);
+
+  const startRetry = async () => {
+    try {
+      setRetry(await retryVisualAnalysis(videoId));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "视觉资料重试失败");
+    }
+  };
+
   return (
-    <List
-      dataSource={frames}
-      renderItem={(frame) => <VisualFrameItem frame={frame} videoId={videoId} />}
-    />
+    <Space direction="vertical" style={{ width: "100%" }}>
+      <Space>
+        <Button loading={running} onClick={startRetry}>重试生成</Button>
+        {running ? <Text type="secondary">视觉资料生成中</Text> : null}
+        {retry?.status === "failed" ? <Text type="danger">旧视觉资料已保留：{retry.error_message}</Text> : null}
+      </Space>
+      {frames.length ? <List dataSource={frames} renderItem={(frame) => <VisualFrameItem frame={frame} videoId={videoId} />} /> : <Empty description="暂无视觉资料" />}
+    </Space>
   );
 }
 
