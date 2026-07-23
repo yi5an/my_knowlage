@@ -76,16 +76,16 @@ def _iso8601_to_seconds(iso8601: str) -> int | None:
 def _parse_published_at(value: str | None) -> datetime | None:
     if not value:
         return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _live_broadcast_content(value: object) -> Literal["none", "live", "upcoming"]:
     if value in ("live", "upcoming"):
         return value
     return "none"
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 @dataclass
