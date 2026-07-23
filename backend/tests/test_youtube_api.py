@@ -986,6 +986,34 @@ def test_summary_history_includes_failed_and_pending_video_rows_without_document
     assert by_video["pendingnodoc"]["retryable"] is True
 
 
+def test_summary_history_excludes_ignored_live_video_and_refuses_retry(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="live_history_ws", name="live_history_ws"))
+    db_session.add(
+        Video(
+            id="video_ignored_live",
+            workspace_id="live_history_ws",
+            video_id="liveignore1",
+            title="Live broadcast",
+            fetch_status="ignored_live",
+            error_message="ignored live broadcast",
+        )
+    )
+    db_session.commit()
+
+    history = client.get("/api/v1/youtube/summaries?workspace_id=live_history_ws")
+    retry = client.post(
+        "/api/v1/youtube/videos/liveignore1/retry?workspace_id=live_history_ws"
+    )
+
+    assert history.status_code == 200
+    assert "liveignore1" not in {item["video_id"] for item in history.json()}
+    assert retry.status_code == 409
+    assert db_session.query(TaskJob).count() == 0
+
+
 def test_startup_marks_interrupted_youtube_processing_as_failed(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
