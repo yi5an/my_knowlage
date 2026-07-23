@@ -1,7 +1,7 @@
 """add global AI companion persistence
 
 Revision ID: 202607230002
-Revises: 202607170003
+Revises: 202607230001
 Create Date: 2026-07-23
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "202607230002"
-down_revision = "202607170003"
+down_revision = "202607230001"
 branch_labels = None
 depends_on = None
 
