@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.errors import AppError
 from app.schemas.companion import (
+    CompanionInsightTriggerResponse,
     CompanionMessageCreate,
     CompanionMessageResponse,
     CompanionSessionCreate,
@@ -56,3 +57,19 @@ def submit_message(
         return service.submit_message(session_id, request.content)
     except (CompanionContextError, ValueError) as exc:
         raise AppError("companion_request_invalid", str(exc), 404) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/insights",
+    response_model=CompanionInsightTriggerResponse,
+    status_code=202,
+)
+def trigger_insights(
+    session_id: str,
+    service: ServiceDep,
+) -> CompanionInsightTriggerResponse:
+    try:
+        job = service.create_insight_job(session_id)
+    except ValueError as exc:
+        raise AppError("companion_session_not_found", str(exc), 404) from exc
+    return CompanionInsightTriggerResponse(task_job_id=job.id, status=job.status)

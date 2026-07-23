@@ -7,9 +7,11 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.infrastructure.models import CompanionMessage, CompanionSession
+from app.infrastructure.models import CompanionInsight, CompanionMessage, CompanionSession, TaskJob
 from app.schemas.companion import (
     CompanionCitation,
+    CompanionInsightExtractionSchema,
+    CompanionInsightResponse,
     CompanionMessageResponse,
     CompanionReplyDraft,
     CompanionSessionDetailResponse,
@@ -100,10 +102,82 @@ class CompanionService:
                 .order_by(CompanionMessage.created_at)
             )
         )
+        insights = list(
+            self.session.scalars(
+                select(CompanionInsight)
+                .where(
+                    CompanionInsight.session_id == companion_session.id,
+                    CompanionInsight.status == "active",
+                )
+                .order_by(CompanionInsight.created_at.desc())
+            )
+        )
         return CompanionSessionDetailResponse(
             **_session_response(companion_session).model_dump(),
             messages=[_message_response(message) for message in messages],
+            insights=[_insight_response(insight) for insight in insights],
         )
+
+    def create_insight_job(self, session_id: str) -> TaskJob:
+        companion_session = self._session(session_id)
+        active_job = self.session.scalar(
+            select(TaskJob).where(
+                TaskJob.workspace_id == companion_session.workspace_id,
+                TaskJob.job_type == "companion_insights",
+                TaskJob.target_type == "companion_session",
+                TaskJob.target_id == companion_session.id,
+                TaskJob.status.in_(("pending", "running")),
+            )
+        )
+        if active_job is not None:
+            return active_job
+        job = TaskJob(
+            id=_new_id("task"),
+            workspace_id=companion_session.workspace_id,
+            job_type="companion_insights",
+            target_type="companion_session",
+            target_id=companion_session.id,
+            input={"companion_session_id": companion_session.id},
+        )
+        self.session.add(job)
+        self.session.commit()
+        return job
+
+    def run_insight_job(self, session_id: str, task_job_id: str) -> list[CompanionInsight]:
+        companion_session = self._session(session_id)
+        context = self.context_service.load(
+            companion_session.workspace_id,
+            companion_session.subject_type,  # type: ignore[arg-type]
+            companion_session.subject_id,
+        )
+        context = self.context_service.with_related_evidence(
+            context,
+            companion_session.workspace_id,
+            "投资重点、待验证问题、风险与机会",
+        )
+        result = self.llm_client.generate(
+            _insight_prompt(context),
+            CompanionInsightExtractionSchema,
+        )
+        persisted: list[CompanionInsight] = []
+        for draft in result.insights:
+            insight = CompanionInsight(
+                id=_new_id("companion_insight"),
+                session_id=companion_session.id,
+                task_job_id=task_job_id,
+                kind=draft.kind,
+                headline=draft.headline,
+                content=draft.content,
+                citations=[
+                    citation.model_dump()
+                    for citation in _safe_citations(context, draft.cited_source_ids)
+                ],
+                confidence=draft.confidence,
+            )
+            self.session.add(insight)
+            persisted.append(insight)
+        self.session.commit()
+        return persisted
 
     def _session(self, session_id: str) -> CompanionSession:
         companion_session = self.session.get(CompanionSession, session_id)
@@ -140,6 +214,19 @@ def _reply_prompt(context: CompanionContext, question: str) -> str:
     )
 
 
+def _insight_prompt(context: CompanionContext) -> str:
+    evidence = "\n".join(
+        f"- [{citation.source_id}] {citation.source_title}: {citation.excerpt}"
+        for citation in context.citations
+    )
+    return (
+        "你是投资情报分析助手。仅基于给定站内证据，输出最多四条主动陪读提示，"
+        "覆盖重点、待验证问题、风险、机会中有证据支持的部分。"
+        "每条必须说明不确定性，并且 cited_source_ids 只能选择证据列表中的 ID。\n\n"
+        f"当前对象：{context.title}\n证据：\n{evidence}"
+    )
+
+
 def _message_response(message: CompanionMessage) -> CompanionMessageResponse:
     return CompanionMessageResponse(
         id=message.id,
@@ -158,6 +245,18 @@ def _session_response(session: CompanionSession) -> CompanionSessionResponse:
         subject_id=session.subject_id,
         title=session.title,
         status=session.status,
+    )
+
+
+def _insight_response(insight: CompanionInsight) -> CompanionInsightResponse:
+    return CompanionInsightResponse(
+        id=insight.id,
+        kind=insight.kind,  # type: ignore[arg-type]
+        headline=insight.headline,
+        content=insight.content,
+        citations=[CompanionCitation.model_validate(item) for item in insight.citations or []],
+        confidence=insight.confidence,
+        status=insight.status,
     )
 
 

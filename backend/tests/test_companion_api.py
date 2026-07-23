@@ -66,3 +66,16 @@ def test_companion_message_persists_for_document_subject(client: TestClient) -> 
 
     assert reply.status_code == 200
     assert reply.json()["citations"][0]["source_id"] == "chunk"
+
+
+def test_companion_insight_trigger_creates_async_job(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/companion/sessions",
+        json={"workspace_id": "ws", "subject_type": "document", "subject_id": "doc"},
+    )
+
+    response = client.post(f"/api/v1/companion/sessions/{created.json()['id']}/insights")
+
+    assert response.status_code == 202
+    assert response.json()["task_job_id"].startswith("task_")
+    assert response.json()["status"] == "pending"
