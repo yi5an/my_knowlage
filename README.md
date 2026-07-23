@@ -113,3 +113,7 @@ node dist/cli.js install
 # Model management
 
 Use **设置 → 模型管理** to save provider addresses, models, default capability routes and API Keys for LLM, Embedding, ASR and OCR. API Keys are Fernet-encrypted in the database and are never returned by the API. Set a stable `MODEL_ENCRYPTION_KEY` in the deployment environment before saving a key; existing LLM/Embedding/ASR/OCR environment variables remain a first-deployment fallback when no database route is selected.
+
+## YouTube 直播
+
+预约中和正在直播的 YouTube 视频会被忽略，不会创建历史记录或总结任务；已结束的直播回放会按普通视频处理。

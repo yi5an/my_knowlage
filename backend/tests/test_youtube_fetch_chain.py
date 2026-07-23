@@ -9,7 +9,7 @@ import pytest
 
 from app.schemas.youtube import Chapter, Transcript, TranscriptSegment, VideoMeta
 from app.services.youtube.chunker import ChunkerConfig, chunk_transcript
-from app.services.youtube.fetcher import FakeYouTubeFetcher, FetcherError
+from app.services.youtube.fetcher import FakeYouTubeFetcher, FetcherError, RestYouTubeFetcher
 from app.services.youtube.transcript import (
     FakeTranscriptExtractor,
     NoTranscriptError,
@@ -90,6 +90,32 @@ def test_fake_fetcher_channel_and_video() -> None:
     assert fetcher.fetch_video("vid1").title == "First"
     with pytest.raises(FetcherError):
         fetcher.fetch_video("missing")
+
+
+def test_rest_fetcher_maps_live_broadcast_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    fetcher = RestYouTubeFetcher(api_key="test-key")
+    monkeypatch.setattr(
+        fetcher,
+        "_get",
+        lambda _path, _params: {
+            "items": [
+                {
+                    "id": "upcoming123",
+                    "snippet": {
+                        "title": "Upcoming stream",
+                        "liveBroadcastContent": "upcoming",
+                        "thumbnails": {},
+                    },
+                    "contentDetails": {"duration": "PT0S"},
+                }
+            ]
+        },
+    )
+
+    meta = fetcher.fetch_video("upcoming123")
+
+    assert meta.live_broadcast_content == "upcoming"
+    assert meta.is_live_broadcast is True
 
 
 # --- FakeTranscriptExtractor -----------------------------------------------

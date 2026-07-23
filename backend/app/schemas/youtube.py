@@ -65,6 +65,9 @@ class VideoChunk(BaseModel):
 # --- Fetcher metadata -------------------------------------------------------
 
 
+LiveBroadcastContent = Literal["none", "live", "upcoming"]
+
+
 class VideoMeta(BaseModel):
     """Metadata for a video returned by YouTubeFetcher (Data API v3)."""
 
@@ -77,6 +80,11 @@ class VideoMeta(BaseModel):
     thumbnail_url: str | None = None
     description: str | None = None
     chapters: list[Chapter] = Field(default_factory=list)
+    live_broadcast_content: LiveBroadcastContent = "none"
+
+    @property
+    def is_live_broadcast(self) -> bool:
+        return self.live_broadcast_content in ("live", "upcoming")
 
 
 # --- Visual frame analysis --------------------------------------------------

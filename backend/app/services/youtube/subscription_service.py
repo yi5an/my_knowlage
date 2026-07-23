@@ -101,7 +101,7 @@ class SubscriptionService:
                 logger.warning("discover failed for channel %s: %s", sub.channel_id, exc)
                 self._record_failure(sub, str(exc))
                 continue
-            new_metas = self._filter_new(sub, metas)
+            new_metas = self._filter_new(sub, self._without_live_broadcasts(metas))
             self._stage_discovered_videos(sub, new_metas)
             # Record the poll as done immediately (timestamps + last_video_id).
             # The actual summaries happen async; the orchestrator's upsert is
@@ -148,7 +148,7 @@ class SubscriptionService:
 
         # Only summarize videos we have not seen before. Track the newest id
         # so the next cycle resumes after it.
-        new_metas = self._filter_new(sub, metas)
+        new_metas = self._filter_new(sub, self._without_live_broadcasts(metas))
         summarized = 0
         skipped = 0
         failed = 0
@@ -201,6 +201,11 @@ class SubscriptionService:
             ).all()
         )
         return [m for m in metas if m.video_id not in existing_ids]
+
+    @staticmethod
+    def _without_live_broadcasts(metas: list[VideoMeta]) -> list[VideoMeta]:
+        """Drop scheduled and in-progress broadcasts before persistence."""
+        return [meta for meta in metas if not meta.is_live_broadcast]
 
     def _stage_discovered_videos(
         self,

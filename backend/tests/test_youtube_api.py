@@ -227,6 +227,32 @@ def test_manual_summary_endpoint(
     assert card["visual_frames"] == []
 
 
+def test_manual_upcoming_live_video_is_ignored(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    video_id = "upcoming123"
+    fetcher = FakeYouTubeFetcher().add_video(
+        VideoMeta(
+            video_id=video_id,
+            title="Scheduled stream",
+            live_broadcast_content="upcoming",
+        )
+    )
+    app.dependency_overrides[get_youtube_fetcher] = lambda: fetcher
+
+    response = client.post(
+        "/api/v1/youtube/summarize",
+        json={"workspace_id": "ws_default", "url": f"https://youtu.be/{video_id}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored_live"
+    assert response.json()["task_job_id"] == ""
+    assert db_session.query(Video).filter_by(video_id=video_id).count() == 0
+    assert db_session.query(TaskJob).count() == 0
+
+
 def test_manual_summary_is_durable_and_visible_immediately(
     client: TestClient,
     db_session: Session,
@@ -958,6 +984,34 @@ def test_summary_history_includes_failed_and_pending_video_rows_without_document
     assert by_video["pendingnodoc"]["summary_status"] == "pending"
     assert by_video["pendingnodoc"]["failure_stage"] == "pending"
     assert by_video["pendingnodoc"]["retryable"] is True
+
+
+def test_summary_history_excludes_ignored_live_video_and_refuses_retry(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    db_session.add(Workspace(id="live_history_ws", name="live_history_ws"))
+    db_session.add(
+        Video(
+            id="video_ignored_live",
+            workspace_id="live_history_ws",
+            video_id="liveignore1",
+            title="Live broadcast",
+            fetch_status="ignored_live",
+            error_message="ignored live broadcast",
+        )
+    )
+    db_session.commit()
+
+    history = client.get("/api/v1/youtube/summaries?workspace_id=live_history_ws")
+    retry = client.post(
+        "/api/v1/youtube/videos/liveignore1/retry?workspace_id=live_history_ws"
+    )
+
+    assert history.status_code == 200
+    assert "liveignore1" not in {item["video_id"] for item in history.json()}
+    assert retry.status_code == 409
+    assert db_session.query(TaskJob).count() == 0
 
 
 def test_startup_marks_interrupted_youtube_processing_as_failed(

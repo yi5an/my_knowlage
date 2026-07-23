@@ -114,6 +114,22 @@ def test_failed_video_scanner_retries_and_clears_metadata_on_success(
     assert AUTO_RETRY_NEXT_AT_KEY not in (video.metadata_ or {})
 
 
+def test_failed_video_scanner_skips_ignored_live_video(session: Session) -> None:
+    _failed_video(session, video_id="live_ignored", status="ignored_live")
+    orchestrator = _RecordingOrchestrator(status="succeeded")
+    scanner = FailedVideoRetryScanner(
+        session=session,
+        orchestrator=orchestrator,
+        settings=_settings(),
+        now=datetime(2026, 7, 6, 1, tzinfo=UTC),
+    )
+
+    report = scanner.scan()
+
+    assert report.retried == 0
+    assert orchestrator.calls == []
+
+
 def test_failed_video_scanner_prioritizes_newest_published_video(
     session: Session,
 ) -> None:

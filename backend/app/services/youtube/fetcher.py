@@ -13,7 +13,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from app.schemas.youtube import VideoMeta
 from app.services.youtube.chapters import parse_chapters
@@ -80,6 +80,12 @@ def _parse_published_at(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _live_broadcast_content(value: object) -> Literal["none", "live", "upcoming"]:
+    if value in ("live", "upcoming"):
+        return value
+    return "none"
 
 
 @dataclass
@@ -207,6 +213,9 @@ class YouTubeDataApiFetcher:
                     thumbnail_url=thumb.get("url"),
                     description=description,
                     chapters=parse_chapters(description),
+                    live_broadcast_content=_live_broadcast_content(
+                        snippet.get("liveBroadcastContent")
+                    ),
                 )
             )
         return metas
@@ -368,6 +377,9 @@ class RestYouTubeFetcher:
                     thumbnail_url=thumb.get("url"),
                     description=description,
                     chapters=parse_chapters(description),
+                    live_broadcast_content=_live_broadcast_content(
+                        snippet.get("liveBroadcastContent")
+                    ),
                 )
             )
         return metas

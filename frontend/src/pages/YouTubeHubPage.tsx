@@ -204,7 +204,12 @@ export function YouTubeHubPage() {
     if (!trimmed) return;
     setBusy(true);
     try {
-      await summarizeVideo(trimmed);
+      const result = await summarizeVideo(trimmed);
+      if (result.status === "ignored_live") {
+        message.info("已忽略直播或预约直播，不会创建总结任务。");
+        setUrl("");
+        return;
+      }
       message.success("已加入后台总结队列，刷新页面也会保留。");
       setUrl("");
       const latest = await listSummaries("ws_default", 50);
