@@ -240,6 +240,7 @@ async def update_auto_retry_settings(
 @router.post("/summarize", response_model=ManualSummaryResponse)
 async def summarize_video(
     request: ManualSummaryRequest,
+    fetcher: Annotated[YouTubeFetcher, Depends(get_youtube_fetcher)],
 ) -> ManualSummaryResponse:
     """Submit a manual summary. Returns immediately with status=processing.
 
@@ -259,6 +260,21 @@ async def summarize_video(
             detail="仅支持视频链接或视频 ID，不支持频道链接。",
         )
     video_id = target.video_id
+
+    try:
+        meta = fetcher.fetch_video(video_id)
+    except FetcherError:
+        # Preserve the durable worker path when a transient metadata lookup
+        # cannot determine whether the submitted URL is a live broadcast.
+        pass
+    else:
+        if meta.is_live_broadcast:
+            return ManualSummaryResponse(
+                video_id=video_id,
+                document_id="",
+                task_job_id="",
+                status="ignored_live",
+            )
 
     session = SessionLocal()
     try:

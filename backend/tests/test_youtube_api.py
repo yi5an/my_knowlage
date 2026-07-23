@@ -227,6 +227,32 @@ def test_manual_summary_endpoint(
     assert card["visual_frames"] == []
 
 
+def test_manual_upcoming_live_video_is_ignored(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    video_id = "upcoming123"
+    fetcher = FakeYouTubeFetcher().add_video(
+        VideoMeta(
+            video_id=video_id,
+            title="Scheduled stream",
+            live_broadcast_content="upcoming",
+        )
+    )
+    app.dependency_overrides[get_youtube_fetcher] = lambda: fetcher
+
+    response = client.post(
+        "/api/v1/youtube/summarize",
+        json={"workspace_id": "ws_default", "url": f"https://youtu.be/{video_id}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored_live"
+    assert response.json()["task_job_id"] == ""
+    assert db_session.query(Video).filter_by(video_id=video_id).count() == 0
+    assert db_session.query(TaskJob).count() == 0
+
+
 def test_manual_summary_is_durable_and_visible_immediately(
     client: TestClient,
     db_session: Session,

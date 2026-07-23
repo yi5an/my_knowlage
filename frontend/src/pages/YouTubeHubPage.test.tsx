@@ -216,6 +216,36 @@ describe("YouTubeHubPage", () => {
     );
   });
 
+  it("reports an ignored scheduled livestream without refreshing history", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/youtube/summaries?")) return Response.json([]);
+      if (url.endsWith("/youtube/summarize")) {
+        return Response.json({
+          video_id: "upcoming123",
+          document_id: "",
+          task_job_id: "",
+          status: "ignored_live",
+        });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("https://www.youtube.com/watch?v=..."), {
+      target: { value: "https://youtu.be/upcoming123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /总\s*结/ }));
+
+    expect(
+      await screen.findByText("已忽略直播或预约直播，不会创建总结任务。"),
+    ).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/youtube/summaries?"))).toHaveLength(
+      1,
+    );
+  });
+
   it("keeps failed video records visible in history", async () => {
     vi.stubGlobal(
       "fetch",
