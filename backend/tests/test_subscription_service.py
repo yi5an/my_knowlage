@@ -7,11 +7,11 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.infrastructure.database import Base
-from app.infrastructure.models import Document, Subscription, Video, Workspace
+from app.infrastructure.models import Document, Subscription, TaskJob, Video, Workspace
 from app.schemas.youtube import (
     KeyPoint,
     SummaryResult,
@@ -62,7 +62,9 @@ def _sub(
     return sub
 
 
-def _meta(video_id: str = "dQw4w9WgXcQ") -> VideoMeta:
+def _meta(
+    video_id: str = "dQw4w9WgXcQ", *, live_broadcast_content: str = "none"
+) -> VideoMeta:
     return VideoMeta(
         video_id=video_id,
         title="Some video",
@@ -70,6 +72,7 @@ def _meta(video_id: str = "dQw4w9WgXcQ") -> VideoMeta:
         channel_name="AI Channel",
         duration_sec=60,
         published_at=NOW,
+        live_broadcast_content=live_broadcast_content,
     )
 
 
@@ -214,6 +217,22 @@ def test_discovery_force_polls_not_due_subscriptions(session: Session) -> None:
     assert [(s.id, [m.video_id for m in metas]) for s, metas in forced] == [
         (sub.id, ["dQw4w9WgXcQ"])
     ]
+
+
+def test_discovery_ignores_scheduled_and_live_broadcasts(session: Session) -> None:
+    sub = _sub(session, next_poll_at=NOW - timedelta(minutes=5))
+    fetcher = FakeYouTubeFetcher()
+    fetcher.add_video(_meta("upcoming", live_broadcast_content="upcoming"))
+    fetcher.add_video(_meta("live-now", live_broadcast_content="live"))
+    fetcher.add_video(_meta("replay"))
+    fetcher.add_channel(sub.channel_id, ["upcoming", "live-now", "replay"])
+    service = _service(session, fetcher, FakeTranscriptExtractor())
+
+    discovered = service.discover_new_videos(workspace_id="ws_default", force=True)
+
+    assert [meta.video_id for _, metas in discovered for meta in metas] == ["replay"]
+    assert session.scalars(select(Video.video_id)).all() == ["replay"]
+    assert session.query(TaskJob).count() == 1
 
 
 def test_no_transcript_video_counted_as_skipped(session: Session) -> None:
