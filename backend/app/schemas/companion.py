@@ -29,3 +29,11 @@ class CompanionMessageResponse(BaseModel):
     content: str
     citations: list[CompanionCitation] = Field(default_factory=list)
     confidence: float | None = None
+
+
+class CompanionReplyDraft(BaseModel):
+    """The bounded structured output used for one companion reply."""
+
+    content: str = ""
+    cited_source_ids: list[str] = Field(default_factory=list, max_length=4)
+    confidence: float = Field(default=0, ge=0, le=1)
