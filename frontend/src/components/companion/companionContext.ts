@@ -18,3 +18,7 @@ export function useCompanion() {
   if (!value) throw new Error("useCompanion must be used inside CompanionProvider");
   return value;
 }
+
+export function useOptionalCompanion() {
+  return useContext(CompanionContext);
+}

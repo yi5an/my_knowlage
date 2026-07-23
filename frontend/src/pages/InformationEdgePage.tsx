@@ -4,8 +4,9 @@ import { useSearchParams } from "react-router-dom";
 
 import { InformationEdgeCard } from "../components/investment/InformationEdgeCard";
 import { PageHeader } from "../components/PageHeader";
+import { useOptionalCompanion } from "../components/companion/companionContext";
 import { ApiError } from "../services/client";
-import { investmentApi, type InformationEdgeDigest } from "../services/investmentApi";
+import { investmentApi, type InformationEdgeDigest, type InvestmentSignal } from "../services/investmentApi";
 
 const EMPTY_DIGEST: InformationEdgeDigest = {
   generated_at: "",
@@ -17,8 +18,12 @@ const EMPTY_DIGEST: InformationEdgeDigest = {
 
 export function InformationEdgePage() {
   const [searchParams] = useSearchParams();
+  const companion = useOptionalCompanion();
+  const setCompanionContext = companion?.setContext;
+  const clearCompanionContext = companion?.clearContext;
   const themeId = searchParams.get("theme_id") ?? undefined;
   const [digest, setDigest] = useState<InformationEdgeDigest>(EMPTY_DIGEST);
+  const [selectedSignal, setSelectedSignal] = useState<InvestmentSignal | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +42,17 @@ export function InformationEdgePage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!selectedSignal || !setCompanionContext) return;
+    setCompanionContext({
+      workspaceId: selectedSignal.workspace_id,
+      subjectType: "information_edge",
+      subjectId: selectedSignal.id,
+      title: selectedSignal.title,
+    });
+    return () => clearCompanionContext?.(selectedSignal.id);
+  }, [clearCompanionContext, selectedSignal, setCompanionContext]);
 
   return (
     <main className="page">
@@ -76,7 +92,7 @@ export function InformationEdgePage() {
               dataSource={digest.top_signals}
               renderItem={(signal) => (
                 <List.Item>
-                  <InformationEdgeCard signal={signal} />
+                  <InformationEdgeCard signal={signal} onSelect={setSelectedSignal} />
                 </List.Item>
               )}
             />

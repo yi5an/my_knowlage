@@ -1,12 +1,20 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { InformationEdgePage } from "./InformationEdgePage";
 
+const companionMocks = vi.hoisted(() => ({ setContext: vi.fn(), clearContext: vi.fn() }));
+
+vi.mock("../components/companion/companionContext", () => ({
+  useOptionalCompanion: () => companionMocks,
+}));
+
 describe("InformationEdgePage", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    companionMocks.setContext.mockReset();
+    companionMocks.clearContext.mockReset();
   });
 
   it("shows scored early signals and source traces", async () => {
@@ -108,6 +116,32 @@ describe("InformationEdgePage", () => {
         expect.stringContaining("theme_id=theme_ai"),
         expect.anything(),
       );
+    });
+  });
+
+  it("sets the selected signal as companion context", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (!String(url).includes("/investment/information-edge")) return new Response("not found", { status: 404 });
+      return Response.json({
+        generated_at: "2026-07-15T00:00:00Z",
+        top_signals: [{
+          id: "sig_ai", workspace_id: "ws_default", title: "NVDA / capex_signal",
+          summary: "多源重复出现 AI capex 扩张信号。", signal_type: "capex_signal",
+          first_seen_at: "2026-07-15T00:00:00Z", last_seen_at: "2026-07-15T02:00:00Z",
+          source_count: 2, fact_ids: [], item_ids: [], confidence: 0.8, status: "tracking",
+        }],
+        source_traces: [], unvalidated_signals: [], stale_or_noise: [],
+      });
+    }));
+
+    render(<MemoryRouter><InformationEdgePage /></MemoryRouter>);
+
+    fireEvent.click(await screen.findByText("NVDA / capex_signal"));
+    expect(companionMocks.setContext).toHaveBeenCalledWith({
+      workspaceId: "ws_default",
+      subjectType: "information_edge",
+      subjectId: "sig_ai",
+      title: "NVDA / capex_signal",
     });
   });
 });

@@ -49,17 +49,23 @@ import {
 } from "../services/youtubeApi";
 import { investmentApi } from "../services/investmentApi";
 import { MindmapView } from "../components/MindmapView";
+import { useOptionalCompanion } from "../components/companion/companionContext";
 
 const { Title, Paragraph, Text } = Typography;
 
 export function VideoSummaryPage() {
   const { documentId } = useParams<{ documentId: string }>();
+  const companion = useOptionalCompanion();
+  const setCompanionContext = companion?.setContext;
+  const clearCompanionContext = companion?.clearContext;
   const [card, setCard] = useState<VideoSummaryCard | null>(null);
   const [loading, setLoading] = useState(true);
   const [creatingClaim, setCreatingClaim] = useState(false);
   const [importingToKnowledgeBase, setImportingToKnowledgeBase] = useState(false);
   const [downloadingLocalVideo, setDownloadingLocalVideo] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const companionVideoId = card?.video_id;
+  const companionTitle = card?.title;
 
   useEffect(() => {
     if (!documentId) return;
@@ -76,6 +82,17 @@ export function VideoSummaryPage() {
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, [documentId]);
+
+  useEffect(() => {
+    if (!companionVideoId || !companionTitle || !setCompanionContext) return;
+    setCompanionContext({
+      workspaceId: "ws_default",
+      subjectType: "youtube_video",
+      subjectId: companionVideoId,
+      title: companionTitle,
+    });
+    return () => clearCompanionContext?.(companionVideoId);
+  }, [clearCompanionContext, companionTitle, companionVideoId, setCompanionContext]);
 
   if (loading) {
     return (
