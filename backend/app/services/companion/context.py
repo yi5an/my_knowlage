@@ -36,6 +36,13 @@ class CompanionContextService:
             return self._signal(workspace_id, subject_id)
         if subject_type == "youtube_video":
             video = self.session.get(Video, subject_id)
+            if video is None:
+                video = self.session.scalar(
+                    select(Video).where(
+                        Video.workspace_id == workspace_id,
+                        Video.video_id == subject_id,
+                    )
+                )
             if video is None or video.workspace_id != workspace_id:
                 raise CompanionContextError("video subject not found")
             document = self.session.scalar(select(Document).where(Document.video_id == video.id))
