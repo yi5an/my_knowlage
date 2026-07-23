@@ -58,6 +58,11 @@ class CompanionService:
             companion_session.subject_type,  # type: ignore[arg-type]
             companion_session.subject_id,
         )
+        context = self.context_service.with_related_evidence(
+            context,
+            companion_session.workspace_id,
+            content,
+        )
         self.session.add(
             CompanionMessage(
                 id=_new_id("companion_message"),
