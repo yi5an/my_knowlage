@@ -4,6 +4,7 @@ import { Alert, Button, Card, Col, Empty, List, Row, Space, Spin, Tag, Typograph
 import { useParams } from "react-router-dom";
 
 import { PageHeader } from "../components/PageHeader";
+import { useOptionalCompanion } from "../components/companion/companionContext";
 import { readingCompanionApi } from "../services/readingCompanionApi";
 import type { ReadingInsight, ReaderDocument } from "../types/readingCompanion";
 
@@ -12,9 +13,15 @@ const EVIDENCE_LABEL = { corroborated: "多源佐证", conflicted: "存在冲突
 
 export function ReaderPage() {
   const { documentId } = useParams<{ documentId: string }>();
+  const companion = useOptionalCompanion();
+  const setCompanionContext = companion?.setContext;
+  const clearCompanionContext = companion?.clearContext;
   const [reader, setReader] = useState<ReaderDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(documentId));
+  const companionDocumentId = reader?.document_id;
+  const companionWorkspaceId = reader?.workspace_id;
+  const companionTitle = reader?.title;
 
   useEffect(() => {
     if (!documentId) return;
@@ -39,6 +46,23 @@ export function ReaderPage() {
     });
     return () => { cancelled = true; };
   }, [documentId, reader]);
+
+  useEffect(() => {
+    if (!companionDocumentId || !companionWorkspaceId || !companionTitle || !setCompanionContext) return;
+    setCompanionContext({
+      workspaceId: companionWorkspaceId,
+      subjectType: "document",
+      subjectId: companionDocumentId,
+      title: companionTitle,
+    });
+    return () => clearCompanionContext?.(companionDocumentId);
+  }, [
+    clearCompanionContext,
+    companionDocumentId,
+    companionTitle,
+    companionWorkspaceId,
+    setCompanionContext,
+  ]);
 
   const analysisId = reader?.analysis?.id;
   const analysisStatus = reader?.analysis?.status;

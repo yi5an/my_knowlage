@@ -99,9 +99,7 @@ class Tag(TimestampMixin, Base):
 
 class DocumentFile(TimestampMixin, Base):
     __tablename__ = "document_file"
-    __table_args__ = (
-        Index("idx_document_file_sha", "workspace_id", "sha256", unique=True),
-    )
+    __table_args__ = (Index("idx_document_file_sha", "workspace_id", "sha256", unique=True),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
@@ -173,9 +171,7 @@ class Document(UpdatedTimestampMixin, Base):
     # Unread indicator: a summary is "unread" (shows a star/badge) until the
     # user opens its card. Set to True when a summary is first produced, and
     # flipped to False by the mark-read endpoint when the card page loads.
-    is_unread: Mapped[bool] = mapped_column(
-        Boolean, default=True, server_default="1"
-    )
+    is_unread: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
 
 
 class DocumentTag(Base):
@@ -433,6 +429,50 @@ class TaskJob(TimestampMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CompanionSession(UpdatedTimestampMixin, Base):
+    __tablename__ = "companion_session"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "subject_type", "subject_id", name="uq_companion_session_subject"
+        ),
+        Index("idx_companion_session_workspace_subject", "workspace_id", "subject_type"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    subject_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(Text(), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="active", server_default="active")
+
+
+class CompanionMessage(TimestampMixin, Base):
+    __tablename__ = "companion_message"
+    __table_args__ = (Index("idx_companion_message_session", "session_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("companion_session.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text(), nullable=False)
+    citations: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    confidence: Mapped[float | None] = mapped_column(Float())
+
+
+class CompanionInsight(UpdatedTimestampMixin, Base):
+    __tablename__ = "companion_insight"
+    __table_args__ = (Index("idx_companion_insight_session_status", "session_id", "status"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("companion_session.id"), nullable=False)
+    task_job_id: Mapped[str | None] = mapped_column(ForeignKey("task_job.id"))
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    headline: Mapped[str] = mapped_column(Text(), nullable=False)
+    content: Mapped[str] = mapped_column(Text(), nullable=False)
+    citations: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    confidence: Mapped[float] = mapped_column(Float(), default=0, server_default="0")
+    status: Mapped[str] = mapped_column(String(32), default="active", server_default="active")
+
+
 class ReadingAnalysis(UpdatedTimestampMixin, Base):
     __tablename__ = "reading_analysis"
     __table_args__ = (
@@ -454,9 +494,7 @@ class ReadingAnalysis(UpdatedTimestampMixin, Base):
 
 class ReadingInsight(UpdatedTimestampMixin, Base):
     __tablename__ = "reading_insight"
-    __table_args__ = (
-        Index("idx_reading_insight_analysis_priority", "analysis_id", "priority"),
-    )
+    __table_args__ = (Index("idx_reading_insight_analysis_priority", "analysis_id", "priority"),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     analysis_id: Mapped[str] = mapped_column(ForeignKey("reading_analysis.id"), nullable=False)
@@ -651,9 +689,7 @@ class Video(TimestampMixin, Base):
     )
     local_video_path: Mapped[str | None] = mapped_column(Text())
     local_video_size: Mapped[int | None] = mapped_column(BigInteger)
-    local_video_downloaded_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    local_video_downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     local_video_error: Mapped[str | None] = mapped_column(Text())
     metadata_: Mapped[JsonObject] = mapped_column("metadata", JsonType, default=dict)
 
@@ -713,9 +749,7 @@ class InvestmentTheme(UpdatedTimestampMixin, Base):
     """A durable research theme that owns sources, people, signals, and evidence."""
 
     __tablename__ = "investment_theme"
-    __table_args__ = (
-        Index("idx_investment_theme_workspace", "workspace_id", "enabled"),
-    )
+    __table_args__ = (Index("idx_investment_theme_workspace", "workspace_id", "enabled"),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
@@ -905,9 +939,7 @@ class InvestmentClaim(UpdatedTimestampMixin, Base):
     """A claim/claim-to-verify, possibly sourced from an opinion-layer item."""
 
     __tablename__ = "investment_claim"
-    __table_args__ = (
-        Index("idx_investment_claim_status", "workspace_id", "verification_status"),
-    )
+    __table_args__ = (Index("idx_investment_claim_status", "workspace_id", "verification_status"),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)

@@ -4,9 +4,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReaderPage } from "./ReaderPage";
 
+const companionMocks = vi.hoisted(() => ({ setContext: vi.fn(), clearContext: vi.fn() }));
+
+vi.mock("../components/companion/companionContext", () => ({
+  useOptionalCompanion: () => companionMocks,
+}));
 
 describe("ReaderPage", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    companionMocks.setContext.mockReset();
+    companionMocks.clearContext.mockReset();
+  });
 
   it("shows a document picker when no document is selected", () => {
     render(<MemoryRouter><ReaderPage /></MemoryRouter>);
@@ -37,5 +46,25 @@ describe("ReaderPage", () => {
       "/api/v1/documents/doc_1/reading-analyses",
       expect.objectContaining({ method: "POST" }),
     ));
+  });
+
+  it("sets document context for the global companion", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/documents/doc_1/reader")) {
+        return Response.json({
+          document_id: "doc_1", workspace_id: "ws", version_id: "ver_1", title: "测试文档",
+          content_md: "正文", chunks: [{ id: "chunk_1", heading: "概览", content: "原文内容" }],
+          analysis: { id: "ra_1", workspace_id: "ws", document_id: "doc_1", version_id: "ver_1", status: "completed", insights: [] },
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    }));
+
+    render(<MemoryRouter initialEntries={["/reader/doc_1"]}><Routes><Route path="/reader/:documentId" element={<ReaderPage />} /></Routes></MemoryRouter>);
+
+    await screen.findByText("测试文档");
+    expect(companionMocks.setContext).toHaveBeenCalledWith({
+      workspaceId: "ws", subjectType: "document", subjectId: "doc_1", title: "测试文档",
+    });
   });
 });

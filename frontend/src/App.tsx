@@ -20,6 +20,8 @@ import zhCN from "antd/locale/zh_CN";
 import { ConfigProvider } from "antd";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
 
+import { CompanionDrawer } from "./components/companion/CompanionDrawer";
+import { CompanionProvider } from "./components/companion/CompanionProvider";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EntityPage } from "./pages/EntityPage";
 import { GraphPage } from "./pages/GraphPage";
@@ -93,6 +95,7 @@ export function App() {
 
   return (
     <ConfigProvider locale={zhCN}>
+    <CompanionProvider>
     <Layout className="app-shell">
       <Sider className="app-sidebar" width={248} breakpoint="lg" collapsedWidth={0}>
         <Link to="/" className="brand">
@@ -159,6 +162,8 @@ export function App() {
         </Content>
       </Layout>
     </Layout>
+    <CompanionDrawer />
+    </CompanionProvider>
     </ConfigProvider>
   );
 }

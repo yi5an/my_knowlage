@@ -4,6 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { VideoSummaryPage } from "./VideoSummaryPage";
 
+const companionMocks = vi.hoisted(() => ({ setContext: vi.fn(), clearContext: vi.fn() }));
+
+vi.mock("../components/companion/companionContext", () => ({
+  useOptionalCompanion: () => companionMocks,
+}));
+
 const summaryCard = {
   document_id: "doc_yt_1",
   video_id: "dQw4w9WgXcQ",
@@ -43,6 +49,26 @@ function renderPage() {
 describe("VideoSummaryPage", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    companionMocks.setContext.mockReset();
+    companionMocks.clearContext.mockReset();
+  });
+
+  it("sets video context when a video summary is loaded", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/youtube/summaries/doc_yt_1")) return Response.json(summaryCard);
+      if (url.endsWith("/youtube/summaries/doc_yt_1/mark-read")) return new Response(null, { status: 204 });
+      throw new Error(`unexpected request: ${url}`);
+    }));
+
+    renderPage();
+
+    await screen.findByText("GPT-5 Deep Dive");
+    expect(companionMocks.setContext).toHaveBeenCalledWith({
+      workspaceId: "ws_default",
+      subjectType: "youtube_video",
+      subjectId: "dQw4w9WgXcQ",
+      title: "GPT-5 Deep Dive",
+    });
   });
 
   it("lets the user manually import a summary into the knowledge base", async () => {

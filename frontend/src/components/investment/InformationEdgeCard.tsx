@@ -16,10 +16,16 @@ function actionLabel(actionability?: string): string {
   return "弱信号";
 }
 
-export function InformationEdgeCard({ signal }: { signal: InvestmentSignal }) {
+export function InformationEdgeCard({
+  signal,
+  onSelect,
+}: {
+  signal: InvestmentSignal;
+  onSelect?: (signal: InvestmentSignal) => void;
+}) {
   const score = Math.round((signal.information_edge_score ?? 0) * 100);
   return (
-    <Card size="small">
+    <Card size="small" hoverable={Boolean(onSelect)} onClick={() => onSelect?.(signal)}>
       <Space direction="vertical" size={8} style={{ width: "100%" }}>
         <Space wrap>
           <Typography.Text strong>{signal.title}</Typography.Text>
