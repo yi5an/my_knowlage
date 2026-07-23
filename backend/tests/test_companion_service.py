@@ -46,3 +46,50 @@ def test_submit_message_persists_grounded_assistant_reply() -> None:
             )
         )
         assert [message.role for message in messages] == ["user", "assistant"]
+
+
+def test_submit_message_includes_matching_workspace_evidence() -> None:
+    engine = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as session:
+        session.add_all(
+            [
+                Workspace(id="ws", name="Workspace"),
+                Document(
+                    id="doc",
+                    workspace_id="ws",
+                    title="GPU 研究",
+                    source_type="file",
+                ),
+                DocumentChunk(
+                    id="primary_chunk",
+                    doc_id="doc",
+                    version_id="ver",
+                    chunk_index=0,
+                    content="GPU 需求仍受数据中心资本开支支撑。",
+                ),
+                Document(
+                    id="other_doc",
+                    workspace_id="ws",
+                    title="云厂商财报",
+                    source_type="file",
+                ),
+                DocumentChunk(
+                    id="other_chunk",
+                    doc_id="other_doc",
+                    version_id="other_ver",
+                    chunk_index=0,
+                    content="云厂商披露数据中心 GPU 采购继续增加。",
+                ),
+            ]
+        )
+        session.commit()
+        service = CompanionService(session, MockStructuredOutputClient())
+
+        companion_session = service.create_or_reuse_session("ws", "document", "doc")
+        reply = service.submit_message(companion_session.id, "有什么站内佐证？")
+
+        assert any(
+            citation.source_id == "other_chunk" and citation.relation == "corroborates"
+            for citation in reply.citations
+        )

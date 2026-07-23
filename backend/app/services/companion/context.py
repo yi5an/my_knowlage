@@ -1,6 +1,7 @@
 """Resolve page subjects into evidence-safe companion context."""
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -41,6 +42,42 @@ class CompanionContextService:
             return self._document(workspace_id, document, "youtube_video", subject_id, video.title)
         document = self.session.get(Document, subject_id)
         return self._document(workspace_id, document, "document", subject_id, None)
+
+    def with_related_evidence(
+        self, context: CompanionContext, workspace_id: str, question: str
+    ) -> CompanionContext:
+        """Attach only matching material from the same workspace.
+
+        The relation means lexical corroboration candidate, not a verified fact;
+        the answer prompt instructs the model to state uncertainty explicitly.
+        """
+        primary_ids = {citation.source_id for citation in context.citations}
+        terms = _terms(f"{context.title} {context.primary_text} {question}")
+        if not terms:
+            return context
+        candidates: list[tuple[float, DocumentChunk, Document]] = []
+        for chunk, document in self.session.execute(
+            select(DocumentChunk, Document)
+            .join(Document, Document.id == DocumentChunk.doc_id)
+            .where(Document.workspace_id == workspace_id)
+        ):
+            if chunk.id in primary_ids:
+                continue
+            score = _match_score(terms, f"{document.title} {chunk.content}")
+            if score > 0:
+                candidates.append((score, chunk, document))
+        ranked = sorted(candidates, reverse=True, key=lambda item: item[0])[:4]
+        related = [
+            CompanionCitation(
+                source_id=chunk.id,
+                source_title=document.title,
+                excerpt=chunk.content[:320],
+                relation="corroborates",
+                confidence=min(0.8, max(0.4, score)),
+            )
+            for score, chunk, document in ranked
+        ]
+        return replace(context, citations=[*context.citations, *related])
 
     def _document(
         self,
@@ -92,3 +129,16 @@ class CompanionContextService:
                 )
             ],
         )
+
+
+_TERM_RE = re.compile(r"[a-zA-Z0-9]{2,}|[\u4e00-\u9fff]{2,}")
+
+
+def _terms(value: str) -> set[str]:
+    return {term.casefold() for term in _TERM_RE.findall(value)}
+
+
+def _match_score(terms: set[str], value: str) -> float:
+    lowered = value.casefold()
+    matches = sum(term in lowered for term in terms)
+    return matches / len(terms)
