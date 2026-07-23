@@ -113,3 +113,9 @@ node dist/cli.js install
 # Model management
 
 Use **设置 → 模型管理** to save provider addresses, models, default capability routes and API Keys for LLM, Embedding, ASR and OCR. API Keys are Fernet-encrypted in the database and are never returned by the API. Set a stable `MODEL_ENCRYPTION_KEY` in the deployment environment before saving a key; existing LLM/Embedding/ASR/OCR environment variables remain a first-deployment fallback when no database route is selected.
+
+## 全局 AI 陪读
+
+点击页面右下角的 **AI 陪读** 可在不离开当前页面的情况下提问。阅读页、YouTube 总结详情页会自动绑定当前资料；在信息差系统中点击一条信号后，会绑定该信号。
+
+对话按内容对象持久保存；点击 **新一轮** 会写入一个轮次分界，方便围绕同一资料重新开始讨论。回答和主动提示均附带当前内容的原始证据，并会检索同一工作区内匹配的资料作为平台内佐证；没有证据时，助手会明确说明资料不足，而不会把推测当作结论。
