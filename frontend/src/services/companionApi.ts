@@ -26,6 +26,11 @@ export const companionApi = {
       body: { content },
     });
   },
+  startNewRound(sessionId: string) {
+    return apiRequest<CompanionMessage>(`/companion/sessions/${sessionId}/rounds`, {
+      method: "POST",
+    });
+  },
   triggerInsights(sessionId: string) {
     return apiRequest<{ task_job_id: string; status: string }>(
       `/companion/sessions/${sessionId}/insights`,

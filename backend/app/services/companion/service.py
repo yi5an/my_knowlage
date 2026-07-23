@@ -118,6 +118,19 @@ class CompanionService:
             insights=[_insight_response(insight) for insight in insights],
         )
 
+    def start_new_round(self, session_id: str) -> CompanionMessageResponse:
+        companion_session = self._session(session_id)
+        boundary = CompanionMessage(
+            id=_new_id("companion_message"),
+            session_id=companion_session.id,
+            role="system",
+            content="开始新一轮陪读",
+            citations=[],
+        )
+        self.session.add(boundary)
+        self.session.commit()
+        return _message_response(boundary)
+
     def create_insight_job(self, session_id: str) -> TaskJob:
         companion_session = self._session(session_id)
         active_job = self.session.scalar(

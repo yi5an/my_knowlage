@@ -79,3 +79,15 @@ def test_companion_insight_trigger_creates_async_job(client: TestClient) -> None
     assert response.status_code == 202
     assert response.json()["task_job_id"].startswith("task_")
     assert response.json()["status"] == "pending"
+
+
+def test_companion_new_round_persists_a_boundary(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/companion/sessions",
+        json={"workspace_id": "ws", "subject_type": "document", "subject_id": "doc"},
+    )
+
+    response = client.post(f"/api/v1/companion/sessions/{created.json()['id']}/rounds")
+
+    assert response.status_code == 200
+    assert response.json()["role"] == "system"

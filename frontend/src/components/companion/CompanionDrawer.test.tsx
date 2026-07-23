@@ -47,6 +47,20 @@ describe("CompanionDrawer", () => {
             ),
           );
         }
+        if (url.endsWith("/rounds") && init?.method === "POST") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                id: "round_2",
+                role: "system",
+                content: "开始新一轮陪读",
+                citations: [],
+                confidence: null,
+              }),
+              { status: 200 },
+            ),
+          );
+        }
         if (url.endsWith("/session_1")) {
           return Promise.resolve(
             new Response(
@@ -93,5 +107,20 @@ describe("CompanionDrawer", () => {
     expect(await screen.findByText("平台内佐证显示该判断仍需复核。"))
       .toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalled());
+  });
+
+  it("starts a persisted new round", async () => {
+    render(
+      <CompanionProvider
+        initialContext={{ workspaceId: "ws", subjectType: "document", subjectId: "doc", title: "笔记" }}
+      >
+        <CompanionDrawer />
+      </CompanionProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "AI 陪读" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新一轮" }));
+
+    expect(await screen.findByText("开始新一轮陪读")).toBeInTheDocument();
   });
 });

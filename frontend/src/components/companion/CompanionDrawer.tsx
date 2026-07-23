@@ -18,6 +18,7 @@ export function CompanionDrawer() {
   const [detail, setDetail] = useState<CompanionSessionDetail | null>(null);
   const [question, setQuestion] = useState("");
   const [sending, setSending] = useState(false);
+  const [startingRound, setStartingRound] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -62,6 +63,19 @@ export function CompanionDrawer() {
     }
   }
 
+  async function startNewRound() {
+    if (!detail || startingRound) return;
+    setStartingRound(true);
+    try {
+      const boundary = await companionApi.startNewRound(detail.id);
+      setDetail((current) => current ? { ...current, messages: [...current.messages, boundary] } : current);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setStartingRound(false);
+    }
+  }
+
   return (
     <>
       <Button
@@ -74,7 +88,14 @@ export function CompanionDrawer() {
       >
         AI 陪读
       </Button>
-      <Drawer title="AI 陪读" open={isOpen} onClose={close} width={440} destroyOnClose={false}>
+      <Drawer
+        title="AI 陪读"
+        extra={<Button disabled={!detail} loading={startingRound} onClick={() => void startNewRound()}>新一轮</Button>}
+        open={isOpen}
+        onClose={close}
+        width={440}
+        destroyOnClose={false}
+      >
         {!activeContext ? (
           <Empty description="打开文档、视频或信息差信号后即可开始陪读。" />
         ) : (

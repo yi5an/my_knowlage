@@ -93,3 +93,23 @@ def test_submit_message_includes_matching_workspace_evidence() -> None:
             citation.source_id == "other_chunk" and citation.relation == "corroborates"
             for citation in reply.citations
         )
+
+
+def test_start_new_round_persists_a_session_boundary() -> None:
+    engine = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as session:
+        session.add_all(
+            [
+                Workspace(id="ws", name="Workspace"),
+                Document(id="doc", workspace_id="ws", title="GPU 研究", source_type="file"),
+            ]
+        )
+        session.commit()
+        service = CompanionService(session, MockStructuredOutputClient())
+        companion_session = service.create_or_reuse_session("ws", "document", "doc")
+
+        boundary = service.start_new_round(companion_session.id)
+
+        assert boundary.role == "system"
+        assert boundary.content == "开始新一轮陪读"

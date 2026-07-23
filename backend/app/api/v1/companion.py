@@ -44,6 +44,14 @@ def get_session(session_id: str, service: ServiceDep) -> CompanionSessionDetailR
         raise AppError("companion_session_not_found", str(exc), 404) from exc
 
 
+@router.post("/sessions/{session_id}/rounds", response_model=CompanionMessageResponse)
+def start_new_round(session_id: str, service: ServiceDep) -> CompanionMessageResponse:
+    try:
+        return service.start_new_round(session_id)
+    except ValueError as exc:
+        raise AppError("companion_session_not_found", str(exc), 404) from exc
+
+
 @router.post(
     "/sessions/{session_id}/messages",
     response_model=CompanionMessageResponse,
