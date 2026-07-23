@@ -31,6 +31,19 @@ class CompanionMessageResponse(BaseModel):
     confidence: float | None = None
 
 
+class CompanionSessionResponse(BaseModel):
+    id: str
+    workspace_id: str
+    subject_type: CompanionSubjectType
+    subject_id: str
+    title: str
+    status: str
+
+
+class CompanionSessionDetailResponse(CompanionSessionResponse):
+    messages: list[CompanionMessageResponse] = Field(default_factory=list)
+
+
 class CompanionReplyDraft(BaseModel):
     """The bounded structured output used for one companion reply."""
 

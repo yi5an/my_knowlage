@@ -12,6 +12,8 @@ from app.schemas.companion import (
     CompanionCitation,
     CompanionMessageResponse,
     CompanionReplyDraft,
+    CompanionSessionDetailResponse,
+    CompanionSessionResponse,
     CompanionSubjectType,
 )
 from app.services.companion.context import CompanionContext, CompanionContextService
@@ -89,6 +91,20 @@ class CompanionService:
         self.session.commit()
         return _message_response(assistant)
 
+    def get_session(self, session_id: str) -> CompanionSessionDetailResponse:
+        companion_session = self._session(session_id)
+        messages = list(
+            self.session.scalars(
+                select(CompanionMessage)
+                .where(CompanionMessage.session_id == companion_session.id)
+                .order_by(CompanionMessage.created_at)
+            )
+        )
+        return CompanionSessionDetailResponse(
+            **_session_response(companion_session).model_dump(),
+            messages=[_message_response(message) for message in messages],
+        )
+
     def _session(self, session_id: str) -> CompanionSession:
         companion_session = self.session.get(CompanionSession, session_id)
         if companion_session is None:
@@ -131,6 +147,17 @@ def _message_response(message: CompanionMessage) -> CompanionMessageResponse:
         content=message.content,
         citations=[CompanionCitation.model_validate(item) for item in message.citations or []],
         confidence=message.confidence,
+    )
+
+
+def _session_response(session: CompanionSession) -> CompanionSessionResponse:
+    return CompanionSessionResponse(
+        id=session.id,
+        workspace_id=session.workspace_id,
+        subject_type=session.subject_type,  # type: ignore[arg-type]
+        subject_id=session.subject_id,
+        title=session.title,
+        status=session.status,
     )
 
 
