@@ -53,6 +53,17 @@ def test_store_rejects_cookie_text_without_youtube_domain(tmp_path: Path) -> Non
         )
 
 
+def test_store_accepts_http_only_youtube_cookie_rows(tmp_path: Path) -> None:
+    store = YouTubeCookieStore(tmp_path / "youtube-cookies.txt")
+
+    status = store.save(
+        "# Netscape HTTP Cookie File\n"
+        "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret-cookie-value\n"
+    )
+
+    assert status.configured is True
+
+
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
     monkeypatch.setattr("app.main._mark_interrupted_youtube_summaries", lambda: None)

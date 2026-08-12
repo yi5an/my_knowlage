@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
 
-import { Alert, Button, Card, Col, Form, Input, InputNumber, Row, Select, Space, Switch } from "antd";
+import { Alert, Button, Card, Col, Form, Input, InputNumber, Popconfirm, Row, Select, Space, Switch, Tag } from "antd";
 
 import { PageHeader } from "../components/PageHeader";
 import {
   getAutoRetrySettings,
+  deleteYouTubeCookies,
+  getYouTubeCookieStatus,
+  saveYouTubeCookies,
+  testYouTubeCookies,
   updateAutoRetrySettings,
+  type YouTubeCookieStatus,
   type YouTubeAutoRetrySettings,
 } from "../services/youtubeApi";
 
@@ -25,6 +30,12 @@ export function SettingsPage() {
   const [savingRetrySettings, setSavingRetrySettings] = useState(false);
   const [retrySaveStatus, setRetrySaveStatus] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [cookieStatus, setCookieStatus] = useState<YouTubeCookieStatus | null>(null);
+  const [cookiesText, setCookiesText] = useState("");
+  const [editingCookies, setEditingCookies] = useState(false);
+  const [savingCookies, setSavingCookies] = useState(false);
+  const [cookieError, setCookieError] = useState<string | null>(null);
+  const [cookieTestStatus, setCookieTestStatus] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -47,6 +58,14 @@ export function SettingsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    getYouTubeCookieStatus()
+      .then((status) => { if (alive) setCookieStatus(status); })
+      .catch((error: Error) => { if (alive) setCookieError(error.message); });
+    return () => { alive = false; };
+  }, []);
+
   const saveRetrySettings = async () => {
     setSavingRetrySettings(true);
     setRetrySaveStatus(null);
@@ -64,6 +83,44 @@ export function SettingsPage() {
       setRetryError(error instanceof Error ? error.message : "保存失败");
     } finally {
       setSavingRetrySettings(false);
+    }
+  };
+
+  const saveCookies = async () => {
+    setSavingCookies(true);
+    setCookieError(null);
+    setCookieTestStatus(null);
+    try {
+      const status = await saveYouTubeCookies(cookiesText);
+      setCookieStatus(status);
+      setCookiesText("");
+      setEditingCookies(false);
+    } catch (error) {
+      setCookieError(error instanceof Error ? error.message : "Cookie 保存失败");
+    } finally {
+      setSavingCookies(false);
+    }
+  };
+
+  const removeCookies = async () => {
+    setCookieError(null);
+    try {
+      setCookieStatus(await deleteYouTubeCookies());
+      setCookiesText("");
+      setEditingCookies(false);
+      setCookieTestStatus(null);
+    } catch (error) {
+      setCookieError(error instanceof Error ? error.message : "Cookie 移除失败");
+    }
+  };
+
+  const testCookies = async () => {
+    setCookieError(null);
+    try {
+      const result = await testYouTubeCookies();
+      setCookieTestStatus(result.message);
+    } catch (error) {
+      setCookieError(error instanceof Error ? error.message : "Cookie 测试失败");
     }
   };
 
@@ -162,6 +219,48 @@ export function SettingsPage() {
                 {retrySaveStatus ? <span>{retrySaveStatus}</span> : null}
               </Space>
             </Form>
+          </Card>
+        </Col>
+        <Col xs={24} lg={12}>
+          <Card title="YouTube 访问 Cookie" className="panel-card">
+            <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+              <div>
+                <Tag color={cookieStatus?.configured ? "success" : "default"}>
+                  {cookieStatus?.configured ? "Cookie 已配置" : "未配置 Cookie"}
+                </Tag>
+                {cookieStatus?.updated_at ? <span> 更新于 {new Date(cookieStatus.updated_at).toLocaleString("zh-CN")}</span> : null}
+              </div>
+              <Alert
+                type="info"
+                showIcon
+                message="仅粘贴 youtube.com 的 Netscape Cookie 文本"
+                description="Cookie 只保存到后端专用卷，页面不会回显、不会存入浏览器或数据库。请使用专用账号、无痕窗口，并与服务器使用同一代理出口。"
+              />
+              {editingCookies ? <>
+                <Form.Item label="YouTube Cookie 文本">
+                  <Input.TextArea
+                    aria-label="YouTube Cookie 文本"
+                    autoComplete="off"
+                    value={cookiesText}
+                    onChange={(event) => setCookiesText(event.target.value)}
+                    rows={8}
+                    placeholder="# Netscape HTTP Cookie File"
+                  />
+                </Form.Item>
+                <Space>
+                  <Button type="primary" loading={savingCookies} disabled={!cookiesText} onClick={() => void saveCookies()}>保存并校验</Button>
+                  <Button onClick={() => { setCookiesText(""); setEditingCookies(false); }}>取消</Button>
+                </Space>
+              </> : <Space wrap>
+                <Button onClick={() => setEditingCookies(true)}>替换 Cookie</Button>
+                <Button disabled={!cookieStatus?.configured} onClick={() => void testCookies()}>测试当前 Cookie</Button>
+                <Popconfirm title="确认移除当前 YouTube Cookie？" onConfirm={() => void removeCookies()}>
+                  <Button danger disabled={!cookieStatus?.configured}>移除 Cookie</Button>
+                </Popconfirm>
+              </Space>}
+              {cookieError ? <Alert type="error" showIcon message={cookieError} /> : null}
+              {cookieTestStatus ? <Alert type="info" showIcon message={cookieTestStatus} /> : null}
+            </Space>
           </Card>
         </Col>
       </Row>

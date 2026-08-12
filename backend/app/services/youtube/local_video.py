@@ -170,7 +170,9 @@ class YouTubeLocalVideoDownloadHandler(JobHandler):
                 video_id=video.video_id,
                 target_root=Path(settings.youtube_local_video_dir),
                 proxy_url=settings.youtube_proxy_url,
-                cookies_file=YouTubeCookieStore(settings.youtube_cookies_file).cookiefile(),
+                cookies_file=YouTubeCookieStore(
+                    getattr(settings, "youtube_cookies_file", None)
+                ).cookiefile(),
             )
         except Exception as exc:
             video.local_video_status = "failed"

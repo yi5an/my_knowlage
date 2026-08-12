@@ -129,9 +129,14 @@ def _validate_cookie_text(cookies_text: str) -> None:
     if not lines or lines[0].strip() not in _NETSCAPE_HEADERS:
         raise YouTubeCookieValidationError("Cookie text must use Netscape HTTP Cookie File format")
     domains = [
-        line.split("\t", maxsplit=1)[0].lstrip(".").casefold()
+        line.removeprefix("#HttpOnly_")
+        .split("\t", maxsplit=1)[0]
+        .lstrip(".")
+        .casefold()
         for line in lines[1:]
-        if line and not line.startswith("#") and "\t" in line
+        if line
+        and "\t" in line
+        and (not line.startswith("#") or line.startswith("#HttpOnly_"))
     ]
     if not any(domain == "youtube.com" or domain.endswith(".youtube.com") for domain in domains):
         raise YouTubeCookieValidationError("Cookie text must include a youtube.com domain")

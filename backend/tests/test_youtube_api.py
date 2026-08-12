@@ -656,10 +656,18 @@ def test_local_video_download_handler_updates_video_row(
         youtube_proxy_url = "http://proxy.local:7892"
 
     class FakeDownloader:
-        def download(self, *, video_id: str, target_root: Path, proxy_url: str | None):
+        def download(
+            self,
+            *,
+            video_id: str,
+            target_root: Path,
+            proxy_url: str | None,
+            cookies_file: str | None,
+        ):
             assert video_id == "handler123"
             assert target_root == tmp_path
             assert proxy_url == "http://proxy.local:7892"
+            assert cookies_file is None
             return LocalVideoDownloadResult(path=str(output_file), size=output_file.stat().st_size)
 
     monkeypatch.setattr("app.core.config.get_settings", lambda: StubSettings())

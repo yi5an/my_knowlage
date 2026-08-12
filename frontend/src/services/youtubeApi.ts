@@ -160,6 +160,19 @@ export interface YouTubeAutoRetrySettings {
   batch_size: number;
 }
 
+export interface YouTubeCookieStatus {
+  configured: boolean;
+  updated_at: string | null;
+  file_size: number | null;
+  validation_status: "valid" | "not_configured";
+}
+
+export interface YouTubeCookieTestResponse {
+  success: boolean;
+  status: "ok" | "not_configured" | "test_failed";
+  message: string;
+}
+
 // --- API calls ---
 
 export function youtubeTimestampUrl(videoId: string, timestamp: number): string {
@@ -330,6 +343,25 @@ export function updateAutoRetrySettings(
     `/youtube/auto-retry-settings?workspace_id=${workspaceId}`,
     { method: "PUT", body: settings },
   );
+}
+
+export function getYouTubeCookieStatus(): Promise<YouTubeCookieStatus> {
+  return apiRequest<YouTubeCookieStatus>("/youtube/cookies");
+}
+
+export function saveYouTubeCookies(cookiesText: string): Promise<YouTubeCookieStatus> {
+  return apiRequest<YouTubeCookieStatus>("/youtube/cookies", {
+    method: "PUT",
+    body: { cookies_text: cookiesText },
+  });
+}
+
+export function deleteYouTubeCookies(): Promise<YouTubeCookieStatus> {
+  return apiRequest<YouTubeCookieStatus>("/youtube/cookies", { method: "DELETE" });
+}
+
+export function testYouTubeCookies(): Promise<YouTubeCookieTestResponse> {
+  return apiRequest<YouTubeCookieTestResponse>("/youtube/cookies/test", { method: "POST" });
 }
 
 export interface DashboardStats {
