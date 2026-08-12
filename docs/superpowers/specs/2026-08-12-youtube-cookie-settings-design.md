@@ -34,8 +34,9 @@ API、页面、日志、数据库或 Git 返回、保存或输出。
 ### 安全存储
 
 新增 `YouTubeCookieStore` 基础设施服务，存储位置由
-`YOUTUBE_COOKIES_FILE` 配置决定。生产 Compose 将主机受限文件以只读卷挂载到
-后端容器；容器内默认路径为 `/run/secrets/youtube-cookies.txt`。
+`YOUTUBE_COOKIES_FILE` 配置决定。生产 Compose 提供仅挂载给后端的命名持久化卷，
+容器内默认路径为 `/app/private/youtube-cookies.txt`。前端、ASR、OCR 等容器均不
+挂载该卷。
 
 设置 API 写入时：
 
@@ -100,6 +101,6 @@ Cookie 正文不进入 `workspace_setting`。若需要展示更新时间，则�
 
 ## 部署与操作
 
-生产环境创建 `/home/yi5an/knowpilot/secrets/youtube-cookies.txt`，目录权限 `0700`、文件
-权限 `0600`，并在 Compose 中仅挂载该单个文件。首次部署后管理员从页面粘贴 Cookie；
-不再需要将 Cookie 通过 SSH 或 Git 传输。
+生产 Compose 创建 `backend_private` 命名卷并仅挂载到后端。首次保存时后端创建目录和
+Cookie 文件，Cookie 文件权限为 `0600`。首次部署后管理员从页面粘贴 Cookie；不再需要
+将 Cookie 通过 SSH 或 Git 传输。

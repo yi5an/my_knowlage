@@ -22,7 +22,7 @@
 - Modify `backend/app/services/youtube/local_video.py`: passes CLI `--cookies` arguments to NAS downloads.
 - Modify `backend/app/services/youtube/*` factories: resolve credentials from settings at job execution time.
 - Modify `backend/tests/test_youtube_cookie_settings.py`: validation, storage, API secrecy, and yt-dlp options.
-- Modify `backend/tests/test_asr_fallback.py`, `backend/tests/test_deploy_compose.py`: regression coverage for ASR and production volume mapping.
+- Modify `backend/tests/test_asr_fallback.py`, `backend/tests/test_deploy_compose.py`: regression coverage for ASR and backend-only private volume mapping.
 - Modify `frontend/src/services/youtubeApi.ts`: Cookie status/save/test/remove requests.
 - Modify `frontend/src/pages/SettingsPage.tsx`: safe paste-only YouTube Cookie card.
 - Modify `frontend/src/pages/SettingsPage.test.tsx`: page behavior tests.
@@ -202,13 +202,13 @@ def test_asr_passes_cookiefile_to_python_yt_dlp(monkeypatch: pytest.MonkeyPatch,
         def download(self, _urls: list[str]) -> None: (tmp_path / "audio.m4a").touch()
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", FakeYoutubeDL)
-    service = GlmAsrService(api_key="key", workspace=str(tmp_path), cookies_file="/run/secrets/youtube-cookies.txt")
+    service = GlmAsrService(api_key="key", workspace=str(tmp_path), cookies_file="/app/private/youtube-cookies.txt")
     service._download_audio("video", str(tmp_path))
 
-    assert captured["cookiefile"] == "/run/secrets/youtube-cookies.txt"
+    assert captured["cookiefile"] == "/app/private/youtube-cookies.txt"
 ```
 
-Add analogous command-capture tests asserting `--cookies /run/secrets/youtube-cookies.txt` for `FfmpegFrameExtractor` and `YtDlpLocalVideoDownloader`, plus a subtitle `YoutubeDL` options test.
+Add analogous command-capture tests asserting `--cookies /app/private/youtube-cookies.txt` for `FfmpegFrameExtractor` and `YtDlpLocalVideoDownloader`, plus a subtitle `YoutubeDL` options test.
 
 - [ ] **Step 2: Run propagation tests and confirm RED**
 
@@ -308,7 +308,7 @@ git add frontend/src/services/youtubeApi.ts frontend/src/pages/SettingsPage.tsx 
 git commit -m "feat: add YouTube cookie settings UI"
 ```
 
-### Task 5: Production secret mount and documentation
+### Task 5: Backend-only private volume and documentation
 
 **Files:**
 - Modify: `docker-compose.prod.yml`
@@ -319,29 +319,28 @@ git commit -m "feat: add YouTube cookie settings UI"
 - [ ] **Step 1: Write failing Compose assertions**
 
 ```python
-def test_production_backend_mounts_youtube_cookie_file_read_only() -> None:
+def test_production_backend_mounts_private_cookie_volume() -> None:
     backend = _production_backend()
 
-    assert backend["environment"]["YOUTUBE_COOKIES_FILE"] == "/run/secrets/youtube-cookies.txt"
-    assert "${KNOWPILOT_PROD_YOUTUBE_COOKIES_FILE:-/home/yi5an/knowpilot/secrets/youtube-cookies.txt}:/run/secrets/youtube-cookies.txt:ro" in backend["volumes"]
+    assert backend["environment"]["YOUTUBE_COOKIES_FILE"] == "/app/private/youtube-cookies.txt"
+    assert "backend_private:/app/private" in backend["volumes"]
+    assert "backend_private" in compose["volumes"]
 ```
 
 - [ ] **Step 2: Run the focused test and confirm RED**
 
-Run: `cd backend && pytest tests/test_deploy_compose.py::test_production_backend_mounts_youtube_cookie_file_read_only -q`
+Run: `cd backend && pytest tests/test_deploy_compose.py::test_production_backend_mounts_private_cookie_volume -q`
 
-Expected: FAIL because the production file mount does not exist.
+Expected: FAIL because the backend-only private volume does not exist.
 
 - [ ] **Step 3: Implement deployment safeguards and documentation**
 
-Add the read-only single-file Compose mount and `YOUTUBE_COOKIES_FILE` container setting. `.env.example` may document the file path variable but must not include any Cookie value. Document these exact host preparation commands:
-
-```bash
-install -d -m 700 /home/yi5an/knowpilot/secrets
-install -m 600 /dev/null /home/yi5an/knowpilot/secrets/youtube-cookies.txt
-```
-
-Then paste Cookie through Settings; refresh it from a dedicated account and same proxy exit; never commit or send it via chat.
+Add the `backend_private` named volume only to the backend service and set
+`YOUTUBE_COOKIES_FILE=/app/private/youtube-cookies.txt`. `.env.example` may document the
+container path but must not include any Cookie value. Document that Docker creates and
+retains the private volume, while the backend creates the Cookie file at mode `0600` when
+the user saves through Settings. Refresh the Cookie from a dedicated account and the same
+proxy exit; never commit or send it via chat.
 
 - [ ] **Step 4: Run focused and full verification**
 
