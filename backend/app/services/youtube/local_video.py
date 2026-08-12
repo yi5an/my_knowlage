@@ -38,6 +38,7 @@ class YtDlpLocalVideoDownloader:
         video_id: str,
         target_root: Path,
         proxy_url: str | None,
+        cookies_file: str | None = None,
     ) -> LocalVideoDownloadResult:
         target_dir = target_root / video_id
         temp_dir = target_root / f".{video_id}.{uuid4().hex}.tmp"
@@ -58,6 +59,8 @@ class YtDlpLocalVideoDownloader:
         ]
         if proxy_url:
             cmd[1:1] = ["--proxy", proxy_url]
+        if cookies_file:
+            cmd[1:1] = ["--cookies", cookies_file]
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60 * 60)
             mp4_files = sorted(temp_dir.glob("*.mp4"))
@@ -157,6 +160,7 @@ class YouTubeLocalVideoDownloadHandler(JobHandler):
             raise ValueError(f"video not found for task job {job.id}")
 
         settings = get_settings()
+        from app.services.youtube.cookies import YouTubeCookieStore
         video.local_video_status = "downloading"
         video.local_video_error = None
         session.commit()
@@ -166,6 +170,7 @@ class YouTubeLocalVideoDownloadHandler(JobHandler):
                 video_id=video.video_id,
                 target_root=Path(settings.youtube_local_video_dir),
                 proxy_url=settings.youtube_proxy_url,
+                cookies_file=YouTubeCookieStore(settings.youtube_cookies_file).cookiefile(),
             )
         except Exception as exc:
             video.local_video_status = "failed"

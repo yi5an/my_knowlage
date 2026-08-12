@@ -112,9 +112,15 @@ class OcrClient:
 class FfmpegFrameExtractor:
     """Download a low-resolution video stream and sample frames with ffmpeg."""
 
-    def __init__(self, interval_sec: int = 45, max_count: int = 24) -> None:
+    def __init__(
+        self,
+        interval_sec: int = 45,
+        max_count: int = 24,
+        cookies_file: str | None = None,
+    ) -> None:
         self.interval_sec = interval_sec
         self.max_count = max_count
+        self.cookies_file = cookies_file
 
     def extract(
         self,
@@ -125,10 +131,17 @@ class FfmpegFrameExtractor:
     ) -> list[ExtractedFrame]:
         output_dir.mkdir(parents=True, exist_ok=True)
         video_path = output_dir / f"{video_id}.mp4"
-        self._download(video_id, video_path, proxy_url=proxy_url)
+        self._download(video_id, video_path, proxy_url=proxy_url, cookies_file=self.cookies_file)
         return self._sample(video_path, output_dir)
 
-    def _download(self, video_id: str, video_path: Path, *, proxy_url: str | None) -> None:
+    def _download(
+        self,
+        video_id: str,
+        video_path: Path,
+        *,
+        proxy_url: str | None,
+        cookies_file: str | None = None,
+    ) -> None:
         cmd = [
             "yt-dlp",
             "--no-playlist",
@@ -141,6 +154,8 @@ class FfmpegFrameExtractor:
         ]
         if proxy_url:
             cmd.extend(["--proxy", proxy_url])
+        if cookies_file:
+            cmd[1:1] = ["--cookies", cookies_file]
         cmd.append(f"https://www.youtube.com/watch?v={video_id}")
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
@@ -567,11 +582,16 @@ def build_visual_analysis_service_from_settings(
     if not ocr_base_url:
         logger.warning("visual analysis enabled but OCR_BASE_URL is not configured")
         return None
+    from app.services.youtube.cookies import YouTubeCookieStore
+
     return VideoVisualAnalysisService(
         session=session,
         frame_extractor=FfmpegFrameExtractor(
             interval_sec=getattr(settings, "youtube_frame_interval_sec", 45),
             max_count=getattr(settings, "youtube_frame_max_count", 24),
+            cookies_file=YouTubeCookieStore(
+                getattr(settings, "youtube_cookies_file", None)
+            ).cookiefile(),
         ),
         ocr_client=OcrClient(
             base_url=ocr_base_url,

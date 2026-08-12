@@ -11,6 +11,9 @@ from app.services.youtube.cookies import (
     YouTubeCookieStore,
     YouTubeCookieValidationError,
 )
+from app.services.youtube.local_video import YtDlpLocalVideoDownloader
+from app.services.youtube.transcript import NoTranscriptError, YtDlpTranscriptExtractor
+from app.services.youtube.visual_analysis import FfmpegFrameExtractor
 
 YOUTUBE_COOKIE_TEXT = (
     "# Netscape HTTP Cookie File\n"
@@ -105,3 +108,73 @@ def test_cookie_api_test_uses_configured_file_without_exposing_path(
     }
     assert captured["cookiefile"]
     assert "youtube-cookies.txt" not in response.text
+
+
+def test_local_video_download_passes_cookie_file_to_yt_dlp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[str] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> None:
+        captured.extend(command)
+        target_dir = Path(command[command.index("-o") + 1]).parent
+        (target_dir / "video.mp4").touch()
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    YtDlpLocalVideoDownloader().download(
+        video_id="abc123",
+        target_root=tmp_path,
+        proxy_url=None,
+        cookies_file="/app/private/youtube-cookies.txt",
+    )
+
+    assert ["--cookies", "/app/private/youtube-cookies.txt"] == captured[1:3]
+
+
+def test_frame_download_passes_cookie_file_to_yt_dlp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[str] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> None:
+        captured.extend(command)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    FfmpegFrameExtractor()._download(
+        "abc123",
+        tmp_path / "video.mp4",
+        proxy_url=None,
+        cookies_file="/app/private/youtube-cookies.txt",
+    )
+
+    assert ["--cookies", "/app/private/youtube-cookies.txt"] == captured[1:3]
+
+
+def test_subtitle_download_passes_cookie_file_to_python_yt_dlp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeYoutubeDL:
+        def __init__(self, options: dict[str, object]) -> None:
+            captured.update(options)
+
+        def __enter__(self) -> "FakeYoutubeDL":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def download(self, _urls: list[str]) -> None:
+            return None
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", FakeYoutubeDL)
+
+    with pytest.raises(NoTranscriptError):
+        YtDlpTranscriptExtractor(
+            cookies_file="/app/private/youtube-cookies.txt"
+        ).extract("abc123")
+
+    assert captured["cookiefile"] == "/app/private/youtube-cookies.txt"
