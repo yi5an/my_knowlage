@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     youtube_preferred_language: str | None = Field(default=None, alias="YOUTUBE_PREFERRED_LANGUAGE")
     youtube_default_poll_interval: int = Field(default=3600, alias="YOUTUBE_DEFAULT_POLL_INTERVAL")
     youtube_proxy_url: str | None = Field(default=None, alias="YOUTUBE_PROXY_URL")
+    youtube_cookies_file: str | None = Field(default=None, alias="YOUTUBE_COOKIES_FILE")
     youtube_visual_analysis_enabled: bool = Field(
         default=False, alias="YOUTUBE_VISUAL_ANALYSIS_ENABLED"
     )
