@@ -49,6 +49,9 @@ from app.schemas.youtube import (
     VisualMindmapUpdateRequest,
     YouTubeAutoRetrySettings,
     YouTubeAutoRetrySettingsUpdate,
+    YouTubeCookieStatus,
+    YouTubeCookieTestResponse,
+    YouTubeCookieUpdate,
 )
 from app.services.document_visibility import (
     KNOWLEDGE_BASE_IMPORTED_KEY,
@@ -60,6 +63,7 @@ from app.services.structured_output import (
 )
 from app.services.workspace_settings import WorkspaceSettingsService
 from app.services.youtube.asr import build_asr_service_from_settings
+from app.services.youtube.cookies import YouTubeCookieStore, YouTubeCookieValidationError
 from app.services.youtube.fetcher import (
     FetcherError,
     YouTubeFetcher,
@@ -163,6 +167,13 @@ OrchestratorDep = Annotated[VideoSummaryOrchestrator, Depends(get_orchestrator)]
 SessionDep = Annotated[Session, Depends(get_db_session)]
 
 
+def get_youtube_cookie_store() -> YouTubeCookieStore:
+    return YouTubeCookieStore(get_settings().youtube_cookies_file)
+
+
+CookieStoreDep = Annotated[YouTubeCookieStore, Depends(get_youtube_cookie_store)]
+
+
 def _subscription_response(sub: Subscription) -> SubscriptionResponse:
     return SubscriptionResponse(
         id=sub.id,
@@ -232,6 +243,34 @@ async def update_auto_retry_settings(
         workspace_id,
         payload,
     )
+
+
+@router.get("/cookies", response_model=YouTubeCookieStatus)
+async def get_youtube_cookies(store: CookieStoreDep) -> YouTubeCookieStatus:
+    return store.status()
+
+
+@router.put("/cookies", response_model=YouTubeCookieStatus)
+async def save_youtube_cookies(
+    payload: YouTubeCookieUpdate,
+    store: CookieStoreDep,
+) -> YouTubeCookieStatus:
+    try:
+        return store.save(payload.cookies_text)
+    except YouTubeCookieValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail="Unable to store YouTube Cookie") from exc
+
+
+@router.delete("/cookies", response_model=YouTubeCookieStatus)
+async def delete_youtube_cookies(store: CookieStoreDep) -> YouTubeCookieStatus:
+    return store.delete()
+
+
+@router.post("/cookies/test", response_model=YouTubeCookieTestResponse)
+async def test_youtube_cookies(store: CookieStoreDep) -> YouTubeCookieTestResponse:
+    return store.test_current_cookie()
 
 
 # --- Manual summary --------------------------------------------------------

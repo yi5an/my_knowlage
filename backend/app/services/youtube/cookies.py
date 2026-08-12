@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from app.schemas.youtube import YouTubeCookieStatus
+from app.schemas.youtube import YouTubeCookieStatus, YouTubeCookieTestResponse
 
 MAX_COOKIE_BYTES = 1024 * 1024
 _NETSCAPE_HEADERS = ("# HTTP Cookie File", "# Netscape HTTP Cookie File")
@@ -83,6 +83,42 @@ class YouTubeCookieStore:
 
     def credentials(self) -> YouTubeYtDlpCredentials:
         return YouTubeYtDlpCredentials(cookiefile=self.cookiefile())
+
+    def test_current_cookie(self) -> YouTubeCookieTestResponse:
+        cookiefile = self.cookiefile()
+        if cookiefile is None:
+            return YouTubeCookieTestResponse(
+                success=False,
+                status="not_configured",
+                message="未配置 YouTube Cookie。",
+            )
+        from yt_dlp import YoutubeDL  # type: ignore[import-untyped]
+
+        try:
+            with YoutubeDL(
+                {
+                    "skip_download": True,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "noplaylist": True,
+                    "cookiefile": cookiefile,
+                }
+            ) as ydl:
+                ydl.extract_info(
+                    "https://www.youtube.com/watch?v=BaW_jenozKc",
+                    download=False,
+                )
+        except Exception:  # noqa: BLE001 - never expose upstream paths or headers
+            return YouTubeCookieTestResponse(
+                success=False,
+                status="test_failed",
+                message="YouTube 拒绝了当前 Cookie，请重新导出后再试。",
+            )
+        return YouTubeCookieTestResponse(
+            success=True,
+            status="ok",
+            message="Cookie 可用于 YouTube。",
+        )
 
 
 def _validate_cookie_text(cookies_text: str) -> None:
