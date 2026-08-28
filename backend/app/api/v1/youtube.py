@@ -53,6 +53,7 @@ from app.schemas.youtube import (
     YouTubeCookieTestResponse,
     YouTubeCookieUpdate,
 )
+from app.schemas.youtube_timeline import TimelinePage
 from app.services.document_visibility import (
     KNOWLEDGE_BASE_IMPORTED_KEY,
     is_imported_to_knowledge_base,
@@ -78,6 +79,7 @@ from app.services.youtube.summary_job_handler import (
 )
 from app.services.youtube.transcript import TranscriptExtractor
 from app.services.youtube.translation import TranslationService
+from app.services.youtube.timeline import TimelineQueryError, query_timeline
 from app.services.youtube.urls import UnparseableTargetError, parse_target
 from app.services.youtube.visual_analysis import build_visual_analysis_service_from_settings
 
@@ -825,6 +827,31 @@ async def get_summary_status_by_video(
 
 
 # --- Summary list + dashboard stats ----------------------------------------
+
+
+@router.get("/timeline", response_model=TimelinePage)
+async def get_youtube_timeline(
+    session: SessionDep,
+    workspace_id: Annotated[str, Query()] = "ws_default",
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+    channel_id: Annotated[str | None, Query()] = None,
+    status: Annotated[str | None, Query()] = None,
+    year_month: Annotated[str | None, Query()] = None,
+) -> TimelinePage:
+    """Return cursor-paginated YouTube history grouped by timeline metadata."""
+    try:
+        return query_timeline(
+            session,
+            workspace_id,
+            limit=limit,
+            cursor=cursor,
+            channel_id=channel_id,
+            status=status,
+            year_month=year_month,
+        )
+    except TimelineQueryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 class SummaryListItem(BaseModel):

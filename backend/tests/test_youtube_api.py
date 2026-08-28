@@ -164,7 +164,7 @@ def _run_pending_youtube_summary_job(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
     recording_pipeline: RecordingExtractionPipeline,
-) -> None:
+    ) -> None:
     from app.services.youtube.summary_job_handler import YouTubeSummaryJobHandler
 
     def fake_job_orchestrator(
@@ -1593,3 +1593,43 @@ def test_retry_video_enqueues_durable_youtube_summary_job(
     assert job.job_type == "youtube_summary"
     assert job.target_id == video.id
     assert job.status == "pending"
+
+
+def test_timeline_endpoint_returns_cursor_and_excludes_live(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    published_at = datetime(2026, 8, 28, tzinfo=UTC)
+    for video_id, fetch_status in (("timeline_a", "fetched"), ("timeline_live", "ignored_live")):
+        db_session.add(
+            Video(
+                id=f"db_{video_id}",
+                workspace_id="ws_default",
+                video_id=video_id,
+                title=video_id,
+                channel_id="channel_timeline",
+                channel_name="时间轴博主",
+                published_at=published_at,
+                created_at=published_at,
+                fetch_status=fetch_status,
+            )
+        )
+    db_session.commit()
+
+    response = client.get("/api/v1/youtube/timeline?workspace_id=ws_default&limit=1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["video_id"] for item in body["items"]] == ["timeline_a"]
+    assert body["next_cursor"] is None
+    assert body["channels"][0]["channel_name"] == "时间轴博主"
+    assert body["status_counts"]["fetched"] == 1
+
+
+def test_timeline_endpoint_rejects_malformed_cursor(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/youtube/timeline?cursor=invalid")
+
+    assert response.status_code == 400
+    assert "invalid timeline cursor" in response.text
