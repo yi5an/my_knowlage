@@ -35,7 +35,14 @@ def decode_cursor(token: str) -> tuple[datetime, str]:
         timestamp_raw = payload["effective_time"]
         video_id = payload["video_id"]
         timestamp = datetime.fromisoformat(timestamp_raw)
-    except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        binascii.Error,
+    ) as exc:
         raise ValueError("invalid timeline cursor") from exc
     if timestamp.tzinfo is None or not isinstance(video_id, str) or not video_id:
         raise ValueError("invalid timeline cursor")

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.infrastructure.database import Base
-from app.infrastructure.models import Document, Video
+from app.infrastructure.models import Video
 from app.schemas.youtube_timeline import decode_cursor, encode_cursor
 from app.services.youtube.timeline import query_timeline
 

@@ -77,9 +77,9 @@ from app.services.youtube.summary_job_handler import (
     enqueue_visual_analysis_retry_job,
     enqueue_youtube_summary_job,
 )
+from app.services.youtube.timeline import TimelineQueryError, query_timeline
 from app.services.youtube.transcript import TranscriptExtractor
 from app.services.youtube.translation import TranslationService
-from app.services.youtube.timeline import TimelineQueryError, query_timeline
 from app.services.youtube.urls import UnparseableTargetError, parse_target
 from app.services.youtube.visual_analysis import build_visual_analysis_service_from_settings
 
