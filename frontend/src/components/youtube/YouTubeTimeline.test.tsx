@@ -1,0 +1,109 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { YouTubeTimeline } from "./YouTubeTimeline";
+import { getYouTubeTimeline, retryVideo, type TimelinePage } from "../../services/youtubeApi";
+
+vi.mock("../../services/youtubeApi", async () => {
+  const actual = await vi.importActual<typeof import("../../services/youtubeApi")>(
+    "../../services/youtubeApi",
+  );
+  return { ...actual, getYouTubeTimeline: vi.fn(), retryVideo: vi.fn() };
+});
+
+const timelinePage: TimelinePage = {
+  items: [
+    {
+      document_id: "doc_done",
+      video_id: "done",
+      title: "已完成视频",
+      channel_id: "channel_a",
+      channel_name: "博主 A",
+      thumbnail_url: null,
+      duration_sec: 60,
+      published_at: "2026-08-28T00:00:00Z",
+      effective_time: "2026-08-28T00:00:00Z",
+      time_source: "published_at",
+      tldr: "已完成摘要",
+      tags: ["AI"],
+      created_at: "2026-08-28T00:00:00Z",
+      is_unread: false,
+      summary_status: "completed",
+      error: null,
+      failure_stage: null,
+      retryable: false,
+    },
+    {
+      document_id: "",
+      video_id: "failed",
+      title: "转写失败视频",
+      channel_id: "channel_b",
+      channel_name: "博主 B",
+      thumbnail_url: null,
+      duration_sec: null,
+      published_at: "2026-08-27T00:00:00Z",
+      effective_time: "2026-08-27T00:00:00Z",
+      time_source: "published_at",
+      tldr: null,
+      tags: [],
+      created_at: "2026-08-27T00:00:00Z",
+      is_unread: false,
+      summary_status: "failed",
+      error: "asr: failed",
+      failure_stage: "transcript",
+      retryable: true,
+    },
+  ],
+  next_cursor: null,
+  channels: [
+    { channel_id: "channel_a", channel_name: "博主 A", latest_effective_time: "2026-08-28T00:00:00Z", item_count: 1 },
+    { channel_id: "channel_b", channel_name: "博主 B", latest_effective_time: "2026-08-27T00:00:00Z", item_count: 1 },
+  ],
+  months: [{ year_month: "2026-08", item_count: 2 }],
+  total: 2,
+  status_counts: { completed: 1, failed: 1 },
+};
+
+describe("YouTubeTimeline", () => {
+  beforeEach(() => {
+    vi.mocked(getYouTubeTimeline).mockResolvedValue(timelinePage);
+    vi.mocked(retryVideo).mockResolvedValue({
+      video_id: "failed",
+      document_id: "",
+      task_job_id: "job_retry",
+      status: "processing",
+    });
+  });
+
+  it("renders blogger lanes and all statuses", async () => {
+    render(<YouTubeTimeline />, { wrapper: MemoryRouter });
+
+    expect(await screen.findByText("博主 A")).toBeInTheDocument();
+    expect(screen.getByText("博主 B")).toBeInTheDocument();
+    expect(screen.getByText("已完成视频")).toBeInTheDocument();
+    expect(screen.getByText("转写失败视频")).toBeInTheDocument();
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+    expect(screen.getByText("转写失败")).toBeInTheDocument();
+  });
+
+  it("retries a failed card", async () => {
+    render(<YouTubeTimeline />, { wrapper: MemoryRouter });
+    fireEvent.click(await screen.findByRole("button", { name: "重新处理" }));
+
+    await waitFor(() => expect(retryVideo).toHaveBeenCalledWith("failed", "ws_default"));
+  });
+
+  it("reloads the first page when a filter changes", async () => {
+    render(<YouTubeTimeline />, { wrapper: MemoryRouter });
+    await screen.findByText("已完成视频");
+    fireEvent.mouseDown(screen.getByText("全部月份"));
+    fireEvent.click(await screen.findByText("2026-08 (2)"));
+
+    await waitFor(() =>
+      expect(getYouTubeTimeline).toHaveBeenLastCalledWith(
+        expect.objectContaining({ yearMonth: "2026-08", cursor: null }),
+      ),
+    );
+  });
+});

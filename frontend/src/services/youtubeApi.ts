@@ -393,6 +393,34 @@ export interface SummaryListItem {
   retryable?: boolean;
 }
 
+export interface TimelineItem extends SummaryListItem {
+  channel_id: string | null;
+  channel_name: string;
+  effective_time: string;
+  time_source: "published_at" | "created_at";
+}
+
+export interface TimelineChannel {
+  channel_id: string | null;
+  channel_name: string;
+  latest_effective_time: string | null;
+  item_count: number;
+}
+
+export interface TimelineMonth {
+  year_month: string;
+  item_count: number;
+}
+
+export interface TimelinePage {
+  items: TimelineItem[];
+  next_cursor: string | null;
+  channels: TimelineChannel[];
+  months: TimelineMonth[];
+  total: number;
+  status_counts: Record<string, number>;
+}
+
 export function getDashboardStats(workspaceId = "ws_default"): Promise<DashboardStats> {
   return apiRequest<DashboardStats>(`/youtube/stats?workspace_id=${workspaceId}`);
 }
@@ -404,6 +432,24 @@ export function listSummaries(
   return apiRequest<SummaryListItem[]>(
     `/youtube/summaries?workspace_id=${workspaceId}&limit=${limit}`,
   );
+}
+
+export function getYouTubeTimeline(params: {
+  workspaceId?: string;
+  limit?: number;
+  cursor?: string | null;
+  channelId?: string | null;
+  status?: string | null;
+  yearMonth?: string | null;
+} = {}): Promise<TimelinePage> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspaceId ?? "ws_default");
+  query.set("limit", String(params.limit ?? 50));
+  if (params.cursor) query.set("cursor", params.cursor);
+  if (params.channelId) query.set("channel_id", params.channelId);
+  if (params.status) query.set("status", params.status);
+  if (params.yearMonth) query.set("year_month", params.yearMonth);
+  return apiRequest<TimelinePage>(`/youtube/timeline?${query.toString()}`);
 }
 
 export function retryVideo(
