@@ -1,4 +1,5 @@
 import stat
+import subprocess
 from collections.abc import Generator
 from pathlib import Path
 
@@ -70,7 +71,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[TestCli
     monkeypatch.setattr("app.main._enqueue_unfinished_youtube_summaries", lambda: None)
     monkeypatch.setattr("app.main._enqueue_missing_youtube_local_video_downloads", lambda: None)
     app.dependency_overrides[get_youtube_cookie_store] = lambda: YouTubeCookieStore(
-        tmp_path / "youtube-cookies.txt"
+        tmp_path / "youtube-cookies.txt",
+        proxy_url="http://proxy.example:8080",
     )
     with TestClient(app) as test_client:
         yield test_client
@@ -105,6 +107,7 @@ def test_cookie_api_test_uses_configured_file_without_exposing_path(
 
         def extract_info(self, _url: str, download: bool) -> dict[str, bool]:
             assert download is False
+            captured["url"] = _url
             return {"ok": True}
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", FakeYoutubeDL)
@@ -118,6 +121,10 @@ def test_cookie_api_test_uses_configured_file_without_exposing_path(
         "message": "Cookie 可用于 YouTube。",
     }
     assert captured["cookiefile"]
+    assert captured["extract_flat"] is True
+    assert captured["playlistend"] == 1
+    assert captured["proxy"] == "http://proxy.example:8080"
+    assert captured["url"] == "https://www.youtube.com/playlist?list=WL"
     assert "youtube-cookies.txt" not in response.text
 
 
@@ -141,6 +148,29 @@ def test_local_video_download_passes_cookie_file_to_yt_dlp(
     )
 
     assert ["--cookies", "/app/private/youtube-cookies.txt"] == captured[1:3]
+    assert captured[3:5] == ["-t", "sleep"]
+
+
+def test_local_video_download_reports_expired_cookie_action(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_run(command: list[str], **_kwargs: object) -> None:
+        raise subprocess.CalledProcessError(
+            1,
+            command,
+            stderr="Sign in to confirm you’re not a bot. Use --cookies for authentication.",
+        )
+
+    monkeypatch.setattr("subprocess.run", fail_run)
+
+    with pytest.raises(RuntimeError, match="Cookie 已失效"):
+        YtDlpLocalVideoDownloader().download(
+            video_id="abc123",
+            target_root=tmp_path,
+            proxy_url=None,
+            cookies_file="/app/private/youtube-cookies.txt",
+        )
 
 
 def test_frame_download_passes_cookie_file_to_yt_dlp(

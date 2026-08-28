@@ -170,7 +170,11 @@ SessionDep = Annotated[Session, Depends(get_db_session)]
 
 
 def get_youtube_cookie_store() -> YouTubeCookieStore:
-    return YouTubeCookieStore(get_settings().youtube_cookies_file)
+    settings = get_settings()
+    return YouTubeCookieStore(
+        settings.youtube_cookies_file,
+        proxy_url=settings.youtube_proxy_url,
+    )
 
 
 CookieStoreDep = Annotated[YouTubeCookieStore, Depends(get_youtube_cookie_store)]

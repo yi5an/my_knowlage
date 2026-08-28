@@ -48,6 +48,8 @@ class YtDlpLocalVideoDownloader:
         output_template = str(temp_dir / "%(id)s.%(ext)s")
         cmd = [
             "yt-dlp",
+            "-t",
+            "sleep",
             "--no-playlist",
             "--merge-output-format",
             "mp4",
@@ -76,6 +78,11 @@ class YtDlpLocalVideoDownloader:
             )
         except subprocess.CalledProcessError as exc:
             detail = (exc.stderr or exc.stdout or str(exc)).strip()
+            if "sign in to confirm" in detail.casefold():
+                raise RuntimeError(
+                    "YouTube Cookie 已失效或未包含登录会话，请在设置中重新导出 Cookie，"
+                    "通过 Cookie 测试后再重试下载。"
+                ) from exc
             raise RuntimeError(f"yt-dlp failed: {detail}") from exc
         finally:
             if temp_dir.exists():

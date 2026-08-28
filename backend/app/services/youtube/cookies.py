@@ -30,8 +30,9 @@ class YouTubeYtDlpCredentials:
 
 
 class YouTubeCookieStore:
-    def __init__(self, path: Path | str | None) -> None:
+    def __init__(self, path: Path | str | None, *, proxy_url: str | None = None) -> None:
         self.path = Path(path) if path else None
+        self.proxy_url = proxy_url
 
     def status(self) -> YouTubeCookieStatus:
         if self.path is None or not self.path.is_file():
@@ -98,14 +99,16 @@ class YouTubeCookieStore:
             with YoutubeDL(
                 {
                     "skip_download": True,
+                    "extract_flat": True,
+                    "playlistend": 1,
                     "quiet": True,
                     "no_warnings": True,
-                    "noplaylist": True,
                     "cookiefile": cookiefile,
+                    "proxy": self.proxy_url,
                 }
             ) as ydl:
                 ydl.extract_info(
-                    "https://www.youtube.com/watch?v=BaW_jenozKc",
+                    "https://www.youtube.com/playlist?list=WL",
                     download=False,
                 )
         except Exception:  # noqa: BLE001 - never expose upstream paths or headers
