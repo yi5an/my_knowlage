@@ -190,7 +190,7 @@ Expected: PASS; Alembic reports revision `202609030001`.
 - Create: `backend/app/services/provenance/evidence.py`
 - Create: `backend/tests/test_provenance_evidence.py`
 
-- [ ] Write failing tests for exact quote validation, chunk workspace isolation, PDF/page and media bounds, idempotent creation, stale detection, and re-anchoring without modifying the original row.
+- [x] Write failing tests for exact quote validation, chunk workspace isolation, PDF/page and media bounds, idempotent creation, stale detection, and re-anchoring without modifying the original row.
 
 ```python
 def test_text_anchor_must_match_chunk_content(session: Session) -> None:
@@ -211,13 +211,13 @@ def test_text_anchor_must_match_chunk_content(session: Session) -> None:
     assert exc.value.code == "evidence_anchor_mismatch"
 ```
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_evidence.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_evidence.py -q`
 
 Expected: FAIL because the service is missing.
 
-- [ ] Implement `EvidenceAnchorService.create`, `mark_stale_for_version`, and `reanchor`. Resolve the owning document from the referenced version/chunk instead of trusting request IDs.
+- [x] Implement `EvidenceAnchorService.create`, `mark_stale_for_version`, and `reanchor`. Resolve the owning document from the referenced version/chunk instead of trusting request IDs.
 
-- [ ] Generate deterministic anchor IDs from workspace, immutable source version, canonical locator JSON, and quote hash. Return the existing row for an exact replay.
+- [x] Generate deterministic anchor IDs from workspace, immutable source version, canonical locator JSON, and quote hash. Return the existing row for an exact replay.
 
 ```python
 def _anchor_id(workspace_id: str, version_id: str, locator: EvidenceLocator, quote: str) -> str:
@@ -226,13 +226,13 @@ def _anchor_id(workspace_id: str, version_id: str, locator: EvidenceLocator, quo
     return f"evidence_{digest[:32]}"
 ```
 
-- [ ] Reject mutation of locator/quote and create a new anchor with `supersedes_anchor_id` when re-anchoring.
+- [x] Reject mutation of locator/quote and create a new anchor with `supersedes_anchor_id` when re-anchoring.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_evidence.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_evidence.py -q`
 
 Expected: PASS.
 
-- [ ] Commit: `git add backend/app/services/provenance backend/tests/test_provenance_evidence.py && git commit -m "feat: validate immutable evidence anchors"`
+- [x] Commit: `git add backend/app/services/provenance backend/tests/test_provenance_evidence.py && git commit -m "feat: validate immutable evidence anchors"`
 
 ## Task 4: Register stable nodes and create versioned links
 
