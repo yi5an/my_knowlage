@@ -121,7 +121,7 @@ Expected: PASS.
 - Create: `frontend/src/components/provenance/useProvenanceLayout.ts`
 - Create: `frontend/src/components/provenance/layout.test.ts`
 
-- [ ] Write failing pure tests for stable coordinates, distinct seeds, fixed Y planes, finite positions, clustered spread, and unchanged positions when response ordering changes.
+- [x] Write failing pure tests for stable coordinates, distinct seeds, fixed Y planes, finite positions, clustered spread, and unchanged positions when response ordering changes.
 
 ```ts
 it("places every semantic layer on its fixed Y plane", () => {
@@ -132,21 +132,21 @@ it("places every semantic layer on its fixed Y plane", () => {
 });
 ```
 
-- [ ] Run: `cd frontend && npm run test -- src/components/provenance/layout.test.ts`
+- [x] Run: `cd frontend && npm run test -- src/components/provenance/layout.test.ts`
 
 Expected: FAIL.
 
-- [ ] Implement a deterministic 32-bit string hash and seeded PRNG. Sort nodes by ID before layout. Use `graph_version + serialized filters + node.id` as the seed input.
+- [x] Implement a deterministic 32-bit string hash and seeded PRNG. Sort nodes by ID before layout. Use `graph_version + serialized filters + node.id` as the seed input.
 
-- [ ] Arrange each layer into stable cluster rings in X/Z, then run a fixed-iteration collision relaxation constrained to that layer’s Y value. Do not use `Math.random()`.
+- [x] Arrange each layer into stable cluster rings in X/Z, then run a fixed-iteration collision relaxation constrained to that layer’s Y value. Do not use `Math.random()`.
 
-- [ ] Move `computeProvenanceLayout` invocation into `layout.worker.ts`. `useProvenanceLayout` must terminate the previous worker on graph/filter change and on unmount; provide a synchronous injectable adapter for unit tests.
+- [x] Move `computeProvenanceLayout` invocation into `layout.worker.ts`. `useProvenanceLayout` must terminate the previous worker on graph/filter change and on unmount; provide a synchronous injectable adapter for unit tests.
 
-- [ ] Run: `cd frontend && npm run test -- src/components/provenance/layout.test.ts`
+- [x] Run: `cd frontend && npm run test -- src/components/provenance/layout.test.ts`
 
 Expected: PASS.
 
-- [ ] Commit: `git add frontend/src/components/provenance/layout.ts frontend/src/components/provenance/layout.worker.ts frontend/src/components/provenance/useProvenanceLayout.ts frontend/src/components/provenance/layout.test.ts && git commit -m "feat: add deterministic provenance layout"`
+- [x] Commit: `git add frontend/src/components/provenance/layout.ts frontend/src/components/provenance/layout.worker.ts frontend/src/components/provenance/useProvenanceLayout.ts frontend/src/components/provenance/layout.test.ts && git commit -m "feat: add deterministic provenance layout"`
 
 ## Task 4: Build the true WebGL scene and semantic visual mapping
 
