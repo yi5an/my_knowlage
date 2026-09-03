@@ -157,11 +157,11 @@
   git commit -m "docs: record provenance contrast verification"
   ```
 
-- [ ] **Step 4: Deploy the merged result**
+- [x] **Step 4: Deploy the merged result**
 
   Sync the repository to `yi5an@123.57.165.38:/home/yi5an/knowpilot/` using the existing exclusions for `.env`, databases, virtualenvs, `node_modules`, and local storage. Run `docker compose -f docker-compose.prod.yml up -d --build backend frontend` on the server.
 
-- [ ] **Step 5: Verify deployment**
+- [x] **Step 5: Verify deployment**
 
 ### Implementation notes
 
