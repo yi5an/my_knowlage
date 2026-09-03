@@ -13,6 +13,7 @@ import { TraceEdges } from "./TraceEdges";
 import { FlowParticles } from "./FlowParticles";
 import type { ProvenanceScenePolicy } from "./scenePolicy";
 import { DebugSceneProbe } from "./DebugSceneProbe";
+import { PROVENANCE_PALETTE } from "./provenancePalette";
 import { nodeVisual } from "./visualEncoding";
 
 const LAYERS: TraceLayer[] = ["conclusion", "event", "evidence"];
@@ -41,11 +42,11 @@ interface ProvenanceSceneProps {
 export function ProvenanceScene(props: ProvenanceSceneProps) {
   return (
     <>
-      <color attach="background" args={["#07111f"]} />
-      <fog attach="fog" args={["#07111f", 45, 100]} />
+      <color attach="background" args={[PROVENANCE_PALETTE.stage.background]} />
+      <fog attach="fog" args={[PROVENANCE_PALETTE.stage.background, 45, 100]} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[12, 22, 10]} intensity={1.4} />
-      <directionalLight position={[-16, 5, -12]} intensity={0.45} color="#7dd3fc" />
+      <directionalLight position={[-16, 5, -12]} intensity={0.45} color="#64748b" />
       <CameraController
         ref={props.cameraControllerRef}
         initialState={props.initialCameraState}
