@@ -3,6 +3,7 @@ import type {
   ProvenanceNode,
   TraceLayer,
 } from "../../types/provenance";
+import { PROVENANCE_PALETTE } from "./provenancePalette";
 
 export interface NodeVisual {
   color: string;
@@ -17,21 +18,15 @@ export interface EdgeVisual {
   opacity: number;
 }
 
-const LAYER_COLORS: Record<TraceLayer, string> = {
-  conclusion: "#a855f7",
-  event: "#3b82f6",
-  evidence: "#14b8a6",
-};
-
 const RELATION_COLORS: Record<ProvenanceEdge["relation_type"], string> = {
-  supports: "#22c55e",
+  supports: PROVENANCE_PALETTE.statuses.confirmed,
   refutes: "#ef4444",
-  qualifies: "#f59e0b",
+  qualifies: PROVENANCE_PALETTE.statuses.qualified,
   explains: "#38bdf8",
   causes: "#8b5cf6",
-  derived_from: "#60a5fa",
+  derived_from: PROVENANCE_PALETTE.layers.event.edge,
   aggregates: "#a78bfa",
-  related_unconfirmed: "#94a3b8",
+  related_unconfirmed: PROVENANCE_PALETTE.statuses.inference,
 };
 
 export function nodeVisual(node: ProvenanceNode): NodeVisual {
@@ -39,7 +34,11 @@ export function nodeVisual(node: ProvenanceNode): NodeVisual {
   const stale = node.validation_status === "stale" || node.validation_status === "invalid";
   const confirmed = node.review_status === "confirmed";
   return {
-    color: conflicted ? "#ef4444" : stale ? "#f97316" : LAYER_COLORS[node.layer],
+    color: conflicted
+      ? PROVENANCE_PALETTE.statuses.conflict
+      : stale
+        ? PROVENANCE_PALETTE.statuses.stale
+        : PROVENANCE_PALETTE.layers[node.layer].node,
     glyph: conflicted ? "!" : stale ? "◷" : confirmed ? "✓" : node.review_status ? "?" : "",
     scale: 0.82 + Math.max(0, Math.min(1, node.confidence ?? 0.5)) * 0.36,
   };
