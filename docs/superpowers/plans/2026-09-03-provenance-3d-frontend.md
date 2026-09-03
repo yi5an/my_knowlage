@@ -297,19 +297,19 @@ Expected: PASS.
 - Create: `frontend/src/components/provenance/EvidenceAuditDrawer.test.tsx`
 - Create: `frontend/src/components/provenance/ProvenanceFallbackView.test.tsx`
 
-- [ ] Write failing tests for both trace modes, all state legend entries, stale evidence, exact text/PDF/media/image locators, edge metadata, review actions, conflict handling, and a visible “WebGL 不可用” fallback notice.
+- [x] Write failing tests for both trace modes, all state legend entries, stale evidence, exact text/PDF/media/image locators, edge metadata, review actions, conflict handling, and a visible “WebGL 不可用” fallback notice.
 
-- [ ] Run: `cd frontend && npm run test -- src/components/provenance/EvidenceAuditDrawer.test.tsx src/components/provenance/ProvenanceFallbackView.test.tsx`
+- [x] Run: `cd frontend && npm run test -- src/components/provenance/EvidenceAuditDrawer.test.tsx src/components/provenance/ProvenanceFallbackView.test.tsx`
 
 Expected: FAIL.
 
-- [ ] Implement `supportsWebGL()` using a temporary canvas and both `webgl2` and `webgl` context probes. Keep the function injectable so tests do not depend on jsdom canvas support.
+- [x] Implement `supportsWebGL()` using a temporary canvas and both `webgl2` and `webgl` context probes. Keep the function injectable so tests do not depend on jsdom canvas support.
 
-- [ ] Render a structured three-layer list/2D path in `ProvenanceFallbackView`. Label it as read-only fallback; do not apply CSS perspective or call it 3D.
+- [x] Render a structured three-layer list/2D path in `ProvenanceFallbackView`. Label it as read-only fallback; do not apply CSS perspective or call it 3D.
 
-- [ ] In `EvidenceAuditDrawer`, display quote, source snapshot, locator, freshness, confidence, relation rationale, model/prompt version, and review history. Enable review actions only when an edge and current `version_no` are loaded.
+- [x] In `EvidenceAuditDrawer`, display quote, source snapshot, locator, freshness, confidence, relation rationale, model/prompt version, and review history. Enable review actions only when an edge and current `version_no` are loaded.
 
-- [ ] Route locator links precisely:
+- [x] Route locator links precisely:
 
   - text span: `/reader/{document_id}?chunk={chunk_id}&start={start_offset}&end={end_offset}`
   - PDF region: reader URL plus `page` and normalized bbox parameters
@@ -317,13 +317,13 @@ Expected: FAIL.
   - image region: video/document viewer plus frame and bbox parameters
   - web fragment: stored source snapshot details; never expose local storage paths
 
-- [ ] On HTTP 409 review conflict, refetch the edge, keep the user note in the form, and show the newer version rather than retrying blindly.
+- [x] On HTTP 409 review conflict, refetch the edge, keep the user note in the form, and show the newer version rather than retrying blindly.
 
-- [ ] Run: `cd frontend && npm run test -- src/components/provenance/EvidenceAuditDrawer.test.tsx src/components/provenance/ProvenanceFallbackView.test.tsx`
+- [x] Run: `cd frontend && npm run test -- src/components/provenance/EvidenceAuditDrawer.test.tsx src/components/provenance/ProvenanceFallbackView.test.tsx`
 
 Expected: PASS.
 
-- [ ] Commit: `git add frontend/src/components/provenance && git commit -m "feat: add provenance audit and fallback"`
+- [x] Commit: `git add frontend/src/components/provenance && git commit -m "feat: add provenance audit and fallback"`
 
 ## Task 8: Assemble the page, route, and navigation
 
