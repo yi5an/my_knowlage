@@ -343,6 +343,17 @@ a {
 }
 
 .provenance-state--error { gap: 8px; color: #991b1b; }
+.provenance-state--empty { gap: 10px; padding: 24px; }
+.provenance-state--empty strong { color: #172033; font-size: 18px; }
+.provenance-state--empty button {
+  justify-self: center;
+  padding: 8px 12px;
+  border: 1px solid #64748b;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1d4ed8;
+  cursor: pointer;
+}
 
 .provenance-audit-drawer {
   position: fixed;

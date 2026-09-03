@@ -43,6 +43,37 @@ const graph: ProvenanceGraphResponse = {
 
 const api = vi.mocked(provenanceApi);
 
+const aggregateOnlyGraph: ProvenanceGraphResponse = {
+  ...graph,
+  nodes: [
+    graph.nodes[0],
+    {
+      ...graph.nodes[0],
+      id: "event-2",
+      backing_id: "event-2",
+      label: "聚合事实",
+    },
+  ],
+  edges: [
+    {
+      id: "aggregate-1",
+      source_id: "event-2",
+      target_id: "event-1",
+      relation_type: "aggregates",
+      rationale: "同层聚合",
+      confidence: 0.6,
+      review_status: "pending_review",
+      validation_status: "unverified",
+      origin_type: "rule",
+      evidence_anchor_ids: [],
+      version_no: 1,
+      model_metadata: {},
+    },
+  ],
+  total_nodes: 2,
+  returned_nodes: 2,
+};
+
 function renderPage(path = "/provenance") {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -88,6 +119,22 @@ describe("ProvenanceGraphPage", () => {
     expect(screen.getByLabelText("层级筛选")).toHaveValue("event");
   });
 
+  it("restores pagination and same-layer visibility from a deep link", async () => {
+    renderPage("/provenance?cursor=500&same_layer=1");
+
+    await waitFor(() =>
+      expect(api.overview).toHaveBeenCalledWith(
+        expect.objectContaining({ cursor: "500" }),
+        "ws_default",
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(screen.getByRole("button", { name: "隐藏同层关系" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
   it("fetches both path directions when mode changes and a node is selected", async () => {
     renderPage();
     await screen.findByTestId("mock-webgl");
@@ -110,7 +157,7 @@ describe("ProvenanceGraphPage", () => {
     });
     renderPage();
     expect(await screen.findByText(/图存储不可用/)).toBeInTheDocument();
-    expect(screen.getByText(/仅显示 500\/900/)).toBeInTheDocument();
+    expect(screen.getByText(/接口返回 500\/900/)).toBeInTheDocument();
   });
 
   it("shows empty and error states", async () => {
@@ -122,6 +169,17 @@ describe("ProvenanceGraphPage", () => {
     api.overview.mockRejectedValueOnce(new Error("offline"));
     renderPage();
     expect(await screen.findByText(/加载溯源图失败/)).toBeInTheDocument();
+  });
+
+  it("does not present same-layer aggregates as provenance by default", async () => {
+    api.overview.mockResolvedValueOnce(aggregateOnlyGraph);
+    renderPage();
+
+    expect(await screen.findByText("暂无跨层溯源关系")).toBeInTheDocument();
+    expect(screen.getByText(/当前数据只有 1 条同层关系/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "显示同层关系" }));
+    expect(await screen.findByTestId("mock-webgl")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "隐藏同层关系" })).toBeInTheDocument();
   });
 
   it("opens edge audit without unmounting the canvas", async () => {

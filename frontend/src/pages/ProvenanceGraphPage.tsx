@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { useSearchParams } from "react-router-dom";
 
 import { EvidenceAuditDrawer } from "../components/provenance/EvidenceAuditDrawer";
+import { filterProvenanceGraph } from "../components/provenance/graphVisibility";
 import { GraphLegend } from "../components/provenance/GraphLegend";
 import { ProvenanceFallbackView } from "../components/provenance/ProvenanceFallbackView";
 import { SpatialLayerCanvas3D } from "../components/provenance/SpatialLayerCanvas3D";
@@ -40,6 +41,7 @@ interface PageState {
   error: string | null;
   mode: TraceDirection;
   filters: ProvenanceOverviewFilters;
+  showSameLayerRelations: boolean;
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
 }
@@ -50,6 +52,7 @@ type PageAction =
   | { type: "failed"; error: string }
   | { type: "mode"; mode: TraceDirection }
   | { type: "filter"; filters: ProvenanceOverviewFilters }
+  | { type: "same_layer"; visible: boolean }
   | { type: "select_node"; nodeId: string | null }
   | { type: "select_edge"; edgeId: string | null }
   | { type: "edge_loaded"; edge: TraceEdgeDetail | null };
@@ -70,7 +73,9 @@ function parseInitialState(search: string): PageState {
         : undefined,
       display_status: params.get("status") ?? undefined,
       min_confidence: Number.isFinite(minConfidence) && minConfidence > 0 ? minConfidence : undefined,
+      cursor: params.get("cursor") ?? undefined,
     },
+    showSameLayerRelations: params.get("same_layer") === "1",
     selectedNodeId: params.get("node"),
     selectedEdgeId: params.get("edge"),
   };
@@ -88,6 +93,8 @@ function reducer(state: PageState, action: PageAction): PageState {
       return { ...state, mode: action.mode };
     case "filter":
       return { ...state, filters: action.filters, selectedNodeId: null };
+    case "same_layer":
+      return { ...state, showSameLayerRelations: action.visible };
     case "select_node":
       return { ...state, selectedNodeId: action.nodeId, selectedEdgeId: null, edge: null };
     case "select_edge":
@@ -186,7 +193,16 @@ export function ProvenanceGraphPage() {
     };
   }, [loadEdge]);
 
-  const graph = state.graph ?? EMPTY_GRAPH;
+  const rawGraph = state.graph ?? EMPTY_GRAPH;
+  const visibility = useMemo(
+    () =>
+      filterProvenanceGraph(rawGraph, {
+        showSameLayerRelations: state.showSameLayerRelations,
+        preserveNodeIds: state.selectedNodeId ? [state.selectedNodeId] : [],
+      }),
+    [rawGraph, state.selectedNodeId, state.showSameLayerRelations],
+  );
+  const graph = visibility.graph;
   const serializedFilters = useMemo(
     () => JSON.stringify({ ...state.filters, mode: state.mode }),
     [state.filters, state.mode],
@@ -222,8 +238,14 @@ export function ProvenanceGraphPage() {
   };
   const setLayer = (value: string) => {
     const layer = value ? (value as TraceLayer) : undefined;
-    dispatch({ type: "filter", filters: { ...state.filters, layer } });
-    updateUrl({ layer: value || null, node: null });
+    const filters = { ...state.filters, layer };
+    delete filters.cursor;
+    dispatch({ type: "filter", filters });
+    updateUrl({ layer: value || null, node: null, cursor: null });
+  };
+  const setSameLayerRelations = (visible: boolean) => {
+    dispatch({ type: "same_layer", visible });
+    updateUrl({ same_layer: visible ? "1" : null });
   };
 
   const reviewEdge = async (action: ReviewAction, version: number, note: string) => {
@@ -277,6 +299,17 @@ export function ProvenanceGraphPage() {
               <option value="evidence">证据层</option>
             </select>
           </label>
+          {visibility.hiddenSameLayerEdgeCount > 0 || state.showSameLayerRelations ? (
+            <button
+              type="button"
+              aria-pressed={state.showSameLayerRelations}
+              onClick={() => setSameLayerRelations(!state.showSameLayerRelations)}
+            >
+              {state.showSameLayerRelations
+                ? "隐藏同层关系"
+                : `显示同层关系 (${visibility.hiddenSameLayerEdgeCount})`}
+            </button>
+          ) : null}
           {state.selectedNodeId || state.selectedEdgeId ? (
             <button type="button" onClick={clearSelection}>返回全图</button>
           ) : null}
@@ -287,9 +320,9 @@ export function ProvenanceGraphPage() {
             图存储不可用，当前为 PostgreSQL 有界降级结果：{graph.degraded_reason ?? "未知原因"}
           </div>
         ) : null}
-        {graph.has_more ? (
+        {rawGraph.has_more ? (
           <div className="provenance-banner" role="status">
-            结果较大，仅显示 {graph.returned_nodes}/{graph.total_nodes} 个节点；选中节点可查看完整聚焦路径。
+            结果较大，接口返回 {rawGraph.returned_nodes}/{rawGraph.total_nodes} 个节点；选中节点可查看完整聚焦路径。
           </div>
         ) : null}
         {state.error ? (
@@ -299,6 +332,16 @@ export function ProvenanceGraphPage() {
           </div>
         ) : state.loading && !state.graph ? (
           <div className="provenance-state">正在构建三层空间…</div>
+        ) : graph.nodes.length === 0 && visibility.hiddenSameLayerEdgeCount > 0 ? (
+          <div className="provenance-state provenance-state--empty" role="status">
+            <strong>暂无跨层溯源关系</strong>
+            <span>
+              当前数据只有 {visibility.hiddenSameLayerEdgeCount} 条同层关系，已默认隐藏。
+            </span>
+            <button type="button" onClick={() => setSameLayerRelations(true)}>
+              显示同层关系
+            </button>
+          </div>
         ) : graph.nodes.length === 0 ? (
           <div className="provenance-state">暂无可展示的溯源数据</div>
         ) : showFallback ? (
