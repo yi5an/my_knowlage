@@ -321,13 +321,13 @@ Expected: PASS.
 - Create: `backend/tests/test_provenance_query.py`
 - Create: `backend/tests/test_provenance_projection.py`
 
-- [ ] Write failing tests for filtered overview, complete downward/upward focused paths, workspace isolation, deterministic graph version, explicit truncation metadata, projection parity, and graph-store failure fallback.
+- [x] Write failing tests for filtered overview, complete downward/upward focused paths, workspace isolation, deterministic graph version, explicit truncation metadata, projection parity, and graph-store failure fallback.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_query.py tests/test_provenance_projection.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_query.py tests/test_provenance_projection.py -q`
 
 Expected: FAIL.
 
-- [ ] Implement `ProvenanceQueryService.overview` and `trace`. The PostgreSQL walker uses a visited set, validates workspace on every selected node/edge, and caps traversal by explicit `max_nodes`/cursor metadata.
+- [x] Implement `ProvenanceQueryService.overview` and `trace`. The PostgreSQL walker uses a visited set, validates workspace on every selected node/edge, and caps traversal by explicit `max_nodes`/cursor metadata.
 
 ```python
 try:
@@ -339,17 +339,17 @@ except Exception as exc:  # adapter failure, not an empty graph
     graph.degraded_reason = "graph_store_unavailable"
 ```
 
-- [ ] Compute `graph_version` from the maximum updated timestamps and result filters, so the frontend can seed layout deterministically and cache safely.
+- [x] Compute `graph_version` from the maximum updated timestamps and result filters, so the frontend can seed layout deterministically and cache safely.
 
-- [ ] Implement `ProvenanceProjectionService.sync_workspace` using `GraphStore.upsert_node` and `upsert_edge`. Prefix projection IDs/types so they cannot collide with the entity graph; projection deletion/rebuild must never delete PostgreSQL source rows.
+- [x] Implement `ProvenanceProjectionService.sync_workspace` using the existing batch `GraphStore.upsert_nodes` and `upsert_edges` methods. Preserve stable provenance IDs, namespace projected node types as `provenance`, and never delete PostgreSQL source rows.
 
-- [ ] Add parity assertions comparing projected and PostgreSQL focused-path node/edge identities.
+- [x] Add parity assertions comparing projected and PostgreSQL focused-path node/edge identities.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_query.py tests/test_provenance_projection.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_query.py tests/test_provenance_projection.py -q`
 
 Expected: PASS.
 
-- [ ] Commit: `git add backend/app/services/provenance/query.py backend/app/services/provenance/projection.py backend/tests/test_provenance_query.py backend/tests/test_provenance_projection.py && git commit -m "feat: query and project provenance paths"`
+- [x] Commit: `git add backend/app/services/provenance/query.py backend/app/services/provenance/projection.py backend/tests/test_provenance_query.py backend/tests/test_provenance_projection.py && git commit -m "feat: query and project provenance paths"`
 
 ## Task 7: Expose workspace-scoped provenance APIs
 

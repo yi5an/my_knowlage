@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+from typing import NoReturn
 from uuid import UUID, uuid4, uuid5
 
 from sqlalchemy import select
@@ -14,26 +15,31 @@ from app.infrastructure.models import (
     ReadingAnalysis,
     ReadingInsight,
 )
-from app.schemas.provenance import ConclusionCreate
+from app.schemas.provenance import (
+    ConclusionCreate,
+    OriginType,
+    ReviewStatus,
+    ValidationStatus,
+)
 from app.services.provenance.registry import TraceRegistrationService
 
 _CONCLUSION_NAMESPACE = UUID("3fc8b648-08c2-463a-a70a-a46d781c994a")
 
-_CLAIM_STATUS: dict[str, tuple[str, str]] = {
-    "pending": ("pending_review", "unverified"),
-    "verified": ("confirmed", "supported"),
-    "refuted": ("confirmed", "refuted"),
-    "local_only": ("pending_review", "insufficient_evidence"),
+_CLAIM_STATUS: dict[str, tuple[ReviewStatus, ValidationStatus]] = {
+    "pending": (ReviewStatus.pending_review, ValidationStatus.unverified),
+    "verified": (ReviewStatus.confirmed, ValidationStatus.supported),
+    "refuted": (ReviewStatus.confirmed, ValidationStatus.refuted),
+    "local_only": (ReviewStatus.pending_review, ValidationStatus.insufficient_evidence),
 }
 _INSIGHT_REVIEW = {
-    "active": "ai_generated",
-    "confirmed": "confirmed",
-    "dismissed": "rejected",
+    "active": ReviewStatus.ai_generated,
+    "confirmed": ReviewStatus.confirmed,
+    "dismissed": ReviewStatus.rejected,
 }
 _INSIGHT_VALIDATION = {
-    "corroborated": "supported",
-    "conflicted": "conflicted",
-    "insufficient": "insufficient_evidence",
+    "corroborated": ValidationStatus.supported,
+    "conflicted": ValidationStatus.conflicted,
+    "insufficient": ValidationStatus.insufficient_evidence,
 }
 _THESIS_CONFIDENCE = {"low": 0.35, "medium": 0.65, "high": 0.9}
 
@@ -103,7 +109,7 @@ class ConclusionService:
                 confidence=0.75 if claim.verification_status == "verified" else 0.5,
                 review_status=review,
                 validation_status=validation,
-                origin_type="imported",
+                origin_type=OriginType.imported,
                 source_object_type="investment_claim",
                 source_object_id=claim.id,
             ),
@@ -127,11 +133,13 @@ class ConclusionService:
                 title=thesis.title,
                 body=thesis.body or thesis.title,
                 confidence=confidence,
-                review_status="confirmed" if thesis.status == "validated" else "pending_review",
-                validation_status="supported"
+                review_status=ReviewStatus.confirmed
                 if thesis.status == "validated"
-                else "unverified",
-                origin_type="imported",
+                else ReviewStatus.pending_review,
+                validation_status=ValidationStatus.supported
+                if thesis.status == "validated"
+                else ValidationStatus.unverified,
+                origin_type=OriginType.imported,
                 source_object_type="investment_thesis",
                 source_object_id=thesis.id,
             ),
@@ -163,7 +171,7 @@ class ConclusionService:
                 confidence=insight.confidence,
                 review_status=_INSIGHT_REVIEW[insight.status],
                 validation_status=_INSIGHT_VALIDATION[insight.evidence_state],
-                origin_type="imported",
+                origin_type=OriginType.imported,
                 source_object_type="reading_insight",
                 source_object_id=insight.id,
                 scope={"priority": insight.priority},
@@ -235,7 +243,7 @@ class ConclusionService:
         )
 
     @staticmethod
-    def _raise_not_found(kind: str) -> None:
+    def _raise_not_found(kind: str) -> NoReturn:
         raise AppError(
             "provenance_object_not_found",
             f"{kind} was not found in this workspace.",

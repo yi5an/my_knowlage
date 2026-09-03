@@ -160,7 +160,7 @@ class TraceLinkService:
                 version_no=expected_version + 1,
             )
         )
-        if result.rowcount != 1:
+        if getattr(result, "rowcount", 0) != 1:
             current_version = self.session.scalar(
                 select(TraceEdge.version_no).where(TraceEdge.id == edge_id)
             )

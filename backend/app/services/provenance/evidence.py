@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from hashlib import sha256
 from http import HTTPStatus
+from typing import NoReturn
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -153,6 +154,7 @@ class EvidenceAnchorService:
             if (
                 chunk is None
                 or version is None
+                or document is None
                 or chunk.version_id != version.id
                 or chunk.doc_id != document.id
             ):
@@ -204,7 +206,7 @@ class EvidenceAnchorService:
         return True
 
     @staticmethod
-    def _raise_source_not_found() -> None:
+    def _raise_source_not_found() -> NoReturn:
         raise AppError(
             "provenance_object_not_found",
             "Evidence source was not found in this workspace.",
@@ -212,7 +214,7 @@ class EvidenceAnchorService:
         )
 
     @staticmethod
-    def _raise_mismatch() -> None:
+    def _raise_mismatch() -> NoReturn:
         raise AppError(
             "evidence_anchor_mismatch",
             "The evidence quote does not match the persisted source locator.",

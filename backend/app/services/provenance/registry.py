@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
 from http import HTTPStatus
+from typing import Any
 from uuid import UUID, uuid5
 
 from sqlalchemy import select
@@ -28,7 +30,7 @@ from app.schemas.provenance import TraceLayer
 
 _TRACE_NAMESPACE = UUID("8b50ac76-67d8-41e6-835a-35be3e5fb8d9")
 
-_DIRECT_BACKINGS: dict[str, type[object]] = {
+_DIRECT_BACKINGS: dict[str, type[Any]] = {
     "evidence_anchor": EvidenceAnchor,
     "knowledge_event": KnowledgeEvent,
     "conclusion": Conclusion,
@@ -58,7 +60,7 @@ class TraceRegistrationService:
         node_type: str,
         label: str,
         display_status: str,
-        occurred_at: object | None = None,
+        occurred_at: datetime | None = None,
         confidence: float | None = None,
         properties: dict[str, object] | None = None,
     ) -> TraceNode:
@@ -76,7 +78,7 @@ class TraceRegistrationService:
             existing.node_type = node_type
             existing.label = label
             existing.display_status = display_status
-            existing.occurred_at = occurred_at  # type: ignore[assignment]
+            existing.occurred_at = occurred_at
             existing.confidence = confidence
             existing.properties = dict(properties or {})
             self.session.flush()
@@ -89,7 +91,7 @@ class TraceRegistrationService:
             backing_type=backing_type,
             backing_id=backing_id,
             label=label,
-            occurred_at=occurred_at,  # type: ignore[arg-type]
+            occurred_at=occurred_at,
             confidence=confidence,
             display_status=display_status,
             properties=dict(properties or {}),
