@@ -12,10 +12,10 @@ from app.infrastructure.database import Base
 from app.infrastructure.models import (
     Conclusion,
     EvidenceAnchor,
-    KnowledgeEvent,
     InvestmentFact,
     InvestmentItem,
     InvestmentSignal,
+    KnowledgeEvent,
     TraceEdge,
     TraceEdgeEvidence,
     TraceEdgeReview,
