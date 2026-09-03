@@ -37,25 +37,25 @@ Graph responses expose `nodes`, canonical-direction `edges`, `clusters`, `graph_
 - Modify: `frontend/package.json`
 - Modify: `frontend/package-lock.json`
 
-- [ ] Add exact compatible runtime versions.
+- [x] Add exact compatible runtime versions.
 
 Run: `cd frontend && npm install three@0.180.0 @react-three/fiber@8.18.0 @react-three/drei@9.122.0`
 
 Expected: npm exits 0 without React peer-dependency conflicts; the lockfile records one React 18 tree.
 
-- [ ] Verify the resolved peer graph.
+- [x] Verify the resolved peer graph.
 
 Run: `cd frontend && npm ls react three @react-three/fiber @react-three/drei`
 
 Expected: `react@18.3.1`, `three@0.180.0`, fiber `8.18.0`, and drei `9.122.0`, with no `invalid` marker.
 
-- [ ] Run the existing build before adding imports.
+- [x] Run the existing build before adding imports.
 
 Run: `cd frontend && npm run build`
 
 Expected: PASS.
 
-- [ ] Commit: `git add frontend/package.json frontend/package-lock.json && git commit -m "build: add provenance 3d dependencies"`
+- [x] Commit: `git add frontend/package.json frontend/package-lock.json && git commit -m "build: add provenance 3d dependencies"`
 
 ## Task 2: Mirror the backend contract in TypeScript
 
