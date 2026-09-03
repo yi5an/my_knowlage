@@ -16,6 +16,20 @@ Start after Tasks 1 and 7 of `2026-09-03-provenance-data-api.md` freeze the resp
 
 The canonical design is `docs/superpowers/specs/2026-09-03-event-conclusion-provenance-3d-design.md`.
 
+### Backend contract handoff
+
+The schema and route implementation is frozen at backend commit `480a7f2` (with the full quality gate restored at `dc90e2b`). The frontend consumes these workspace-scoped routes:
+
+- `GET /provenance/overview`
+- `GET /provenance/nodes/{node_id}/trace?direction=up|down`
+- `GET /provenance/edges/{edge_id}`
+- `POST /provenance/edges/{edge_id}/review`
+- `POST /provenance/conclusions`
+- `POST /provenance/rebuild`
+- `GET /provenance/jobs/{job_id}`
+
+Graph responses expose `nodes`, canonical-direction `edges`, `clusters`, `graph_version`, degradation fields, and cursor metadata. Edge reviews require `version_no`; rebuild job responses expose durable `progress`, `output`, and failure state.
+
 ## Task 1: Install a React-18-compatible real 3D stack
 
 **Files:**

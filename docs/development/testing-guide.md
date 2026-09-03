@@ -18,6 +18,26 @@ pytest
 
 The default test path is `backend/tests`. Database tests use SQLite in memory unless a test explicitly opts into PostgreSQL.
 
+For the provenance backend, run the focused contract suite before the complete gate:
+
+```bash
+pytest tests/test_provenance_schemas.py \
+  tests/test_provenance_models.py \
+  tests/test_provenance_evidence.py \
+  tests/test_provenance_links.py \
+  tests/test_provenance_domain.py \
+  tests/test_provenance_query.py \
+  tests/test_provenance_projection.py \
+  tests/test_provenance_api.py \
+  tests/test_provenance_rebuild_job.py -q
+ruff check app/services/provenance app/api/v1/provenance.py tests/test_provenance_*.py
+mypy app/services/provenance app/api/v1/provenance.py
+```
+
+Rebuild tests assert active-job deduplication, workspace isolation, partial-failure reporting, graph projection, and preservation of human-reviewed edges. The graph store is a disposable projection; assertions about durable provenance state must use the relational models.
+
+The historical SQLite migration chain contains an older foreign-key alteration that SQLite cannot execute. To validate a new provenance migration locally, stamp a disposable database at its direct parent and run upgrade/downgrade for the new revision; validate the complete chain against PostgreSQL in CI.
+
 ## Frontend
 
 Run from `frontend/`:
@@ -49,4 +69,3 @@ GitHub Actions runs backend and frontend jobs independently. A PR is ready for r
 - backend lint, type check, and tests pass;
 - frontend lint, tests, and build pass;
 - new modules include focused tests or documented test gaps.
-

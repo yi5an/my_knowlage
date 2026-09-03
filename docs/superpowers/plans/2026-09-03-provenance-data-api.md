@@ -434,29 +434,29 @@ Expected: PASS.
 - Modify: `README.md`
 - Modify: `docs/development/testing-guide.md`
 
-- [ ] Document the provenance endpoints, rebuild workflow, PostgreSQL/graph-store ownership, and the exact backend verification commands.
+- [x] Document the provenance endpoints, rebuild workflow, PostgreSQL/graph-store ownership, and the exact backend verification commands.
 
-- [ ] Run focused tests:
+- [x] Run focused tests:
 
 Run: `cd backend && pytest tests/test_provenance_schemas.py tests/test_provenance_models.py tests/test_provenance_evidence.py tests/test_provenance_links.py tests/test_provenance_domain.py tests/test_provenance_query.py tests/test_provenance_projection.py tests/test_provenance_api.py tests/test_provenance_rebuild_job.py -q`
 
 Expected: PASS.
 
-- [ ] Run the complete backend quality gate:
+- [x] Run the complete backend quality gate:
 
 Run: `cd backend && ruff check . && mypy app && pytest`
 
 Expected: all commands exit 0.
 
-- [ ] Inspect migration state:
+- [x] Inspect migration state:
 
 Run: `cd backend && alembic heads`
 
 Expected: exactly one head, `202609030001`.
 
-- [ ] Commit: `git add README.md docs/development/testing-guide.md && git commit -m "docs: document provenance backend"`
+- [x] Commit: `git add README.md docs/development/testing-guide.md && git commit -m "docs: document provenance backend"`
 
-- [ ] Record the final commit SHA and API contract in the frontend plan handoff; do not begin frontend work against an uncommitted schema.
+- [x] Record the final commit SHA and API contract in the frontend plan handoff; do not begin frontend work against an uncommitted schema.
 
 ## Implementation completion criteria
 
