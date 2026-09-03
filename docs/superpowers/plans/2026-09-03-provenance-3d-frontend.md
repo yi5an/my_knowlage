@@ -264,25 +264,25 @@ Expected: PASS.
 - Modify: `frontend/src/components/provenance/ProvenanceScene.tsx`
 - Modify: `frontend/src/components/provenance/LabelLayer.tsx`
 
-- [ ] Write failing policy tests for label LOD thresholds, device-quality tiers, selected-path-only particles, automatic rotation defaulting off, and every animation disabled under reduced motion.
+- [x] Write failing policy tests for label LOD thresholds, device-quality tiers, selected-path-only particles, automatic rotation defaulting off, and every animation disabled under reduced motion.
 
-- [ ] Run: `cd frontend && npm run test -- src/components/provenance/scenePolicy.test.ts`
+- [x] Run: `cd frontend && npm run test -- src/components/provenance/scenePolicy.test.ts`
 
 Expected: FAIL.
 
-- [ ] Implement a pure scene policy from camera distance, node count, DPR, and reduced-motion preference. It may reduce labels/DPR/shadows/particles but must never remove a selected evidence path.
+- [x] Implement a pure scene policy from camera distance, node count, DPR, and reduced-motion preference. It may reduce labels/DPR/shadows/particles but must never remove a selected evidence path.
 
-- [ ] Animate only selected path particles in canonical evidence-to-conclusion direction. Use a red conflict/refutation treatment rather than reversing the stored edge direction.
+- [x] Animate only selected path particles in canonical evidence-to-conclusion direction. Use a red conflict/refutation treatment rather than reversing the stored edge direction.
 
-- [ ] Keep `frameloop="demand"`; call `invalidate()` while focus, entrance, optional auto-rotate, or active particles require frames. Stop invalidating when motion settles.
+- [x] Keep `frameloop="demand"`; call `invalidate()` while focus, entrance, optional auto-rotate, or active particles require frames. Stop invalidating when motion settles.
 
-- [ ] Use CSS/JS media query `prefers-reduced-motion: reduce` to disable entrance staggering, drift, particles, camera tweening, and auto-rotation. Selection and camera changes occur immediately.
+- [x] Use CSS/JS media query `prefers-reduced-motion: reduce` to disable entrance staggering, drift, particles, camera tweening, and auto-rotation. Selection and camera changes occur immediately.
 
-- [ ] Run: `cd frontend && npm run test -- src/components/provenance/scenePolicy.test.ts`
+- [x] Run: `cd frontend && npm run test -- src/components/provenance/scenePolicy.test.ts`
 
 Expected: PASS.
 
-- [ ] Commit: `git add frontend/src/components/provenance && git commit -m "feat: add provenance motion and lod"`
+- [x] Commit: `git add frontend/src/components/provenance && git commit -m "feat: add provenance motion and lod"`
 
 ## Task 7: Build auditing UI and explicit WebGL fallback
 

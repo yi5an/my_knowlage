@@ -10,6 +10,8 @@ import { InstancedNodes } from "./InstancedNodes";
 import { LabelLayer } from "./LabelLayer";
 import { LayerPlane } from "./LayerPlane";
 import { TraceEdges } from "./TraceEdges";
+import { FlowParticles } from "./FlowParticles";
+import type { ProvenanceScenePolicy } from "./scenePolicy";
 
 const LAYERS: TraceLayer[] = ["conclusion", "event", "evidence"];
 const LABELS: Record<TraceLayer, string> = {
@@ -30,6 +32,7 @@ interface ProvenanceSceneProps {
   shiftPan?: boolean;
   motionEnabled?: boolean;
   onCameraChange?: (state: ProvenanceCameraState) => void;
+  scenePolicy?: ProvenanceScenePolicy;
 }
 
 export function ProvenanceScene(props: ProvenanceSceneProps) {
@@ -73,10 +76,17 @@ export function ProvenanceScene(props: ProvenanceSceneProps) {
         selectedEdgeIds={props.selectedEdgeIds}
         onSelectEdge={props.onSelectEdge}
       />
+      <FlowParticles
+        edges={props.graph.edges}
+        positions={props.positions}
+        selectedEdgeIds={props.selectedEdgeIds}
+        enabled={props.scenePolicy?.particles ?? false}
+      />
       <LabelLayer
         nodes={props.graph.nodes}
         positions={props.positions}
         selectedNodeId={props.selectedNodeId}
+        maxLabels={props.scenePolicy?.maxLabels}
       />
     </>
   );

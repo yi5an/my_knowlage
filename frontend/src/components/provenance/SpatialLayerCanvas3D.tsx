@@ -10,6 +10,8 @@ import {
   applyKeyboardCameraAction,
   type ProvenanceCameraState,
 } from "./cameraState";
+import { scenePolicy } from "./scenePolicy";
+import { useMotionPreference } from "./useMotionPreference";
 
 interface SpatialLayerCanvas3DProps {
   graph: ProvenanceGraphResponse;
@@ -28,6 +30,14 @@ export function SpatialLayerCanvas3D(props: SpatialLayerCanvas3DProps) {
   const [ready, setReady] = useState(false);
   const [shiftPan, setShiftPan] = useState(false);
   const cameraControllerRef = useRef<CameraControllerHandle>(null);
+  const reducedMotion = useMotionPreference();
+  const policy = scenePolicy({
+    cameraDistance: 40,
+    nodeCount: props.graph.nodes.length,
+    dpr: typeof window === "undefined" ? 1 : window.devicePixelRatio,
+    selectedPathEdges: props.selectedEdgeIds.size,
+    reducedMotion,
+  });
   const markReadyAfterRender = useCallback((state: RootState) => {
     state.invalidate();
     requestAnimationFrame(() => {
@@ -68,7 +78,7 @@ export function SpatialLayerCanvas3D(props: SpatialLayerCanvas3DProps) {
     >
       <Canvas
         frameloop="demand"
-        dpr={[1, 1.75]}
+        dpr={[1, policy.dpr]}
         camera={{ fov: 48, near: 0.1, far: 600, position: [22, 18, 28] }}
         gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
         onCreated={markReadyAfterRender}
@@ -83,8 +93,9 @@ export function SpatialLayerCanvas3D(props: SpatialLayerCanvas3DProps) {
           cameraControllerRef={cameraControllerRef}
           initialCameraState={props.initialCameraState}
           shiftPan={shiftPan}
-          motionEnabled={props.motionEnabled}
+          motionEnabled={(props.motionEnabled ?? true) && policy.cameraTween}
           onCameraChange={props.onCameraChange}
+          scenePolicy={policy}
         />
       </Canvas>
       <span className="provenance-sr-only" aria-live="polite">
