@@ -381,6 +381,17 @@ class EvidenceReference(BaseModel):
         return self
 
 
+class ClaimVerificationJudgment(BaseModel):
+    candidate_id: str = Field(min_length=1)
+    stance: Literal["supports", "refutes", "qualifies"]
+    rationale: str = Field(min_length=1)
+    confidence: float = Field(ge=0, le=1)
+
+
+class ClaimVerificationOutput(BaseModel):
+    judgments: list[ClaimVerificationJudgment] = Field(default_factory=list, max_length=20)
+
+
 class FactEventExtractionItem(BaseModel):
     event_type: str = Field(min_length=1)
     title: str = Field(min_length=1)

@@ -16,9 +16,12 @@ from app.infrastructure.models import (
     InvestmentSignal,
     InvestmentSource,
     InvestmentWatchlist,
+    TraceEdge,
+    TraceNode,
     Workspace,
 )
 from app.services.investment.signal_service import InvestmentSignalService
+from app.services.provenance.links import TraceLinkService
 
 
 def _session() -> Generator[Session, None, None]:
@@ -159,6 +162,106 @@ def test_refresh_signals_is_idempotent_for_same_fact_cluster() -> None:
     assert len(first) == 1
     assert len(second) == 1
     assert session.scalar(select(func.count(InvestmentSignal.id))) == 1
+    assert second[0].id == first[0].id
+
+
+def test_refresh_preserves_signal_review_and_registers_fact_aggregation_edges() -> None:
+    session = next(_session())
+    watchlist = _watchlist(session)
+    source = _source(session, "nvidia", watchlist.id)
+    item = _item(session, source, "NVIDIA platform")
+    fact = _fact(session, item, watchlist.id, "NVIDIA announced a new platform.", 0.7)
+
+    signal = InvestmentSignalService(session).refresh_signals("ws_default")[0]
+    signal_node = session.scalar(
+        select(TraceNode).where(
+            TraceNode.backing_type == "investment_signal",
+            TraceNode.backing_id == signal.id,
+        )
+    )
+    fact_node = session.scalar(
+        select(TraceNode).where(
+            TraceNode.backing_type == "investment_fact",
+            TraceNode.backing_id == fact.id,
+        )
+    )
+    assert signal_node is not None and fact_node is not None
+    edge = session.scalar(
+        select(TraceEdge).where(
+            TraceEdge.source_node_id == fact_node.id,
+            TraceEdge.target_node_id == signal_node.id,
+            TraceEdge.relation_type == "aggregates",
+        )
+    )
+    assert edge is not None
+    TraceLinkService(session).review(
+        edge_id=edge.id,
+        workspace_id="ws_default",
+        action="confirm",
+        expected_version=edge.version_no,
+        reviewer_id="reviewer",
+        note="verified cluster",
+    )
+    session.commit()
+
+    refreshed = InvestmentSignalService(session).refresh_signals("ws_default")[0]
+    refreshed_edge = session.get(TraceEdge, edge.id)
+    assert refreshed.id == signal.id
+    assert refreshed_edge is not None
+    assert refreshed_edge.review_status == "confirmed"
+    assert refreshed_edge.version_no == 2
+
+
+def test_membership_change_versions_signal_and_keeps_old_history() -> None:
+    session = next(_session())
+    watchlist = _watchlist(session)
+    source_a = _source(session, "nvidia", watchlist.id)
+    source_b = _source(session, "analyst", watchlist.id)
+    item_a = _item(session, source_a, "NVIDIA demand")
+    item_b = _item(session, source_b, "NVIDIA demand follow-up")
+    fact_a = _fact(session, item_a, watchlist.id, "NVIDIA data center demand remains strong.", 0.8)
+    fact_b = _fact(session, item_b, watchlist.id, "NVIDIA data center demand remains strong.", 0.9)
+
+    first = InvestmentSignalService(session).refresh_signals("ws_default")[0]
+    fact_b_node = session.scalar(
+        select(TraceNode).where(
+            TraceNode.backing_type == "investment_fact",
+            TraceNode.backing_id == fact_b.id,
+        )
+    )
+    first_node = session.scalar(
+        select(TraceNode).where(
+            TraceNode.backing_type == "investment_signal",
+            TraceNode.backing_id == first.id,
+        )
+    )
+    assert fact_b_node is not None and first_node is not None
+    old_edge = session.scalar(
+        select(TraceEdge).where(
+            TraceEdge.source_node_id == fact_b_node.id,
+            TraceEdge.target_node_id == first_node.id,
+            TraceEdge.relation_type == "aggregates",
+        )
+    )
+    assert old_edge is not None
+    TraceLinkService(session).review(
+        edge_id=old_edge.id,
+        workspace_id="ws_default",
+        action="confirm",
+        expected_version=old_edge.version_no,
+        reviewer_id="reviewer",
+        note="confirmed source",
+    )
+    fact_b.is_active = False
+    session.commit()
+
+    second = InvestmentSignalService(session).refresh_signals("ws_default")[0]
+    old_signal = session.get(InvestmentSignal, first.id)
+    historical_edge = session.get(TraceEdge, old_edge.id)
+    assert second.id != first.id
+    assert second.fact_ids == [fact_a.id]
+    assert old_signal is not None and old_signal.is_active is False
+    assert historical_edge is not None and historical_edge.review_status == "confirmed"
 
 
 def test_refresh_signals_clusters_near_duplicate_facts_with_different_entities() -> None:
