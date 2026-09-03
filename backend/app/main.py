@@ -223,6 +223,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # so the generic TaskJobProcessor can dispatch investment_fetch jobs.
     from app.services.companion.worker import register as register_companion_handler
     from app.services.investment.fetch_job_handler import register as register_investment_handler
+    from app.services.provenance.rebuild_job import register as register_provenance_handler
     from app.services.reading_companion import register as register_reading_companion_handler
     from app.services.youtube.local_video import register as register_youtube_local_video_handler
     from app.services.youtube.summary_job_handler import register as register_youtube_handler
@@ -230,6 +231,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     register_companion_handler()
     register_investment_handler()
     register_reading_companion_handler()
+    register_provenance_handler()
     register_youtube_handler()
     register_youtube_local_video_handler()
     _mark_interrupted_youtube_summaries()

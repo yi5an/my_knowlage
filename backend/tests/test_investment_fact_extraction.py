@@ -18,6 +18,7 @@ from app.infrastructure.models import (
     Document,
     DocumentChunk,
     DocumentVersion,
+    EvidenceAnchor,
     InvestmentClaim,
     InvestmentFact,
     InvestmentItem,
@@ -25,10 +26,13 @@ from app.infrastructure.models import (
     InvestmentThesis,
     InvestmentWatchlist,
     TaskJob,
+    TraceEdge,
+    TraceNode,
     Video,
     VideoFrameAnalysis,
     Workspace,
 )
+from app.schemas.provenance import EvidenceReference
 from app.services.investment.fact_extraction import (
     INVESTMENT_FACT_EXTRACTION_JOB_TYPE,
     InvestmentFactExtractionItem,
@@ -36,6 +40,7 @@ from app.services.investment.fact_extraction import (
     InvestmentFactExtractionService,
     InvestmentFactJobHandler,
 )
+from app.services.provenance.links import TraceLinkService
 from app.services.structured_output import MockStructuredOutputClient
 
 
@@ -118,7 +123,10 @@ def test_extracts_facts_with_evidence_confidence_and_watchlist() -> None:
                 fact_text_zh="英伟达宣布面向数据中心的新 AI 平台。",
                 fact_type="company_update",
                 entities=["NVIDIA", "data centers"],
-                evidence_excerpt="NVIDIA announced a new AI platform for data centers.",
+                evidence=EvidenceReference(
+                    source_segment_id=f"investment_item:{item.id}",
+                    quote="NVIDIA announced a new AI platform for data centers.",
+                ),
                 confidence=0.82,
             )
         ]
@@ -190,7 +198,10 @@ def test_youtube_fact_uses_matching_transcript_chunk_timestamp() -> None:
                 fact_text="NVIDIA announced new Blackwell shipments.",
                 fact_type="company_update",
                 entities=["NVIDIA", "Blackwell"],
-                evidence_excerpt="NVIDIA announced new Blackwell shipments",
+                evidence=EvidenceReference(
+                    source_segment_id=f"document_chunk:{chunk.id}",
+                    quote="NVIDIA announced new Blackwell shipments",
+                ),
                 confidence=0.86,
             )
         ]
@@ -285,7 +296,10 @@ def test_fact_job_handler_processes_single_item_scope() -> None:
                 fact_text="NVIDIA announced a new AI platform.",
                 fact_type="company_update",
                 entities=["NVIDIA"],
-                evidence_excerpt="NVIDIA announced a new AI platform",
+                evidence=EvidenceReference(
+                    source_segment_id=f"investment_item:{item.id}",
+                    quote="NVIDIA announced a new AI platform",
+                ),
                 confidence=0.77,
             )
         ]
@@ -344,7 +358,10 @@ def test_fact_job_creates_idempotent_claim_for_matching_thesis() -> None:
                 fact_text_zh="英伟达宣布面向数据中心的新 AI 平台。",
                 fact_type="company_update",
                 entities=["NVIDIA", "data centers"],
-                evidence_excerpt="NVIDIA announced a new AI platform for data centers.",
+                evidence=EvidenceReference(
+                    source_segment_id=f"investment_item:{item.id}",
+                    quote="NVIDIA announced a new AI platform for data centers.",
+                ),
                 confidence=0.82,
             )
         ]
@@ -403,6 +420,8 @@ def test_fact_job_assigns_thesis_impact_to_source_item() -> None:
     session.commit()
     source = _source(session, watchlist.id)
     item = _item(session, source)
+    item.summary = "NVIDIA data center demand slowed this quarter."
+    session.commit()
     canned = InvestmentFactExtractionSchema(
         facts=[
             InvestmentFactExtractionItem(
@@ -410,7 +429,10 @@ def test_fact_job_assigns_thesis_impact_to_source_item() -> None:
                 fact_text_zh="英伟达数据中心需求本季度放缓。",
                 fact_type="company_update",
                 entities=["NVIDIA", "data center"],
-                evidence_excerpt="NVIDIA data center demand slowed this quarter.",
+                evidence=EvidenceReference(
+                    source_segment_id=f"investment_item:{item.id}",
+                    quote="NVIDIA data center demand slowed this quarter.",
+                ),
                 confidence=0.84,
             )
         ]
@@ -438,32 +460,223 @@ def test_fact_job_assigns_thesis_impact_to_source_item() -> None:
     assert item.suggested_thesis_impact == "contradicts"
 
 
-def test_fact_extraction_replaces_existing_item_facts() -> None:
+def test_identical_rerun_preserves_fact_anchor_node_and_reviewed_edge() -> None:
     session = next(_session())
     item = _item(session)
-    session.add(
-        InvestmentFact(
-            id="fact_old",
-            workspace_id="ws_default",
-            source_item_id=item.id,
-            fact_text="old fact",
-            fact_type="other",
-            entities=[],
-            evidence_url=item.source_url,
-            evidence_excerpt="old",
-            confidence=0.1,
-            verification_status="pending",
-        )
+    canned = InvestmentFactExtractionSchema(
+        facts=[
+            InvestmentFactExtractionItem(
+                fact_text="NVIDIA announced a new AI platform for data centers.",
+                fact_type="company_update",
+                entities=["NVIDIA"],
+                evidence=EvidenceReference(
+                    source_segment_id=f"investment_item:{item.id}",
+                    quote="NVIDIA announced a new AI platform for data centers.",
+                ),
+                confidence=0.9,
+            )
+        ]
     )
+    service = InvestmentFactExtractionService(
+        session=session,
+        llm_client=MockStructuredOutputClient(outputs={InvestmentFactExtractionSchema: canned}),
+    )
+
+    first = service.extract_item(item.id)
+    fact = session.scalar(select(InvestmentFact).where(InvestmentFact.is_active.is_(True)))
+    anchor = session.scalar(select(EvidenceAnchor))
+    fact_node = session.scalar(
+        select(TraceNode).where(TraceNode.backing_type == "investment_fact")
+    )
+    edge = session.scalar(select(TraceEdge).where(TraceEdge.relation_type == "derived_from"))
+    assert fact is not None and anchor is not None and fact_node is not None and edge is not None
+    TraceLinkService(session).review(
+        edge_id=edge.id,
+        workspace_id="ws_default",
+        action="confirm",
+        expected_version=edge.version_no,
+        reviewer_id="user_1",
+        note="checked",
+    )
+    session.commit()
+
+    second = service.extract_item(item.id)
+
+    rerun_fact = session.scalar(select(InvestmentFact).where(InvestmentFact.is_active.is_(True)))
+    rerun_anchor = session.scalar(select(EvidenceAnchor))
+    rerun_node = session.scalar(
+        select(TraceNode).where(TraceNode.backing_type == "investment_fact")
+    )
+    rerun_edge = session.scalar(select(TraceEdge).where(TraceEdge.relation_type == "derived_from"))
+    assert first == {
+        "items_processed": 1,
+        "facts_created": 1,
+        "facts_reused": 0,
+        "facts_skipped": 0,
+        "failure_reasons": {},
+    }
+    assert second == {
+        "items_processed": 1,
+        "facts_created": 0,
+        "facts_reused": 1,
+        "facts_skipped": 0,
+        "failure_reasons": {},
+    }
+    assert rerun_fact is not None and rerun_fact.id == fact.id
+    assert rerun_anchor is not None and rerun_anchor.id == anchor.id
+    assert rerun_node is not None and rerun_node.id == fact_node.id
+    assert rerun_edge is not None and rerun_edge.id == edge.id
+    assert rerun_edge.review_status == "confirmed"
+
+
+def test_changed_fact_keeps_inactive_predecessor() -> None:
+    session = next(_session())
+    item = _item(session)
+    item.summary = "Demand was strong. Demand slowed after supply constraints."
+    session.commit()
+    first_output = InvestmentFactExtractionSchema(
+        facts=[
+            InvestmentFactExtractionItem(
+                fact_text="Demand was strong.",
+                fact_type="company_update",
+                evidence=EvidenceReference(
+                    source_segment_id=f"investment_item:{item.id}",
+                    quote="Demand was strong.",
+                ),
+                confidence=0.8,
+            )
+        ]
+    )
+    service = InvestmentFactExtractionService(
+        session=session,
+        llm_client=MockStructuredOutputClient(
+            outputs={InvestmentFactExtractionSchema: first_output}
+        ),
+    )
+    service.extract_item(item.id)
+    old = session.scalar(select(InvestmentFact).where(InvestmentFact.is_active.is_(True)))
+    assert old is not None
+    service.llm_client = MockStructuredOutputClient(
+        outputs={
+            InvestmentFactExtractionSchema: InvestmentFactExtractionSchema(
+                facts=[
+                    InvestmentFactExtractionItem(
+                        fact_text="Demand slowed after supply constraints.",
+                        fact_type="company_update",
+                        evidence=EvidenceReference(
+                            source_segment_id=f"investment_item:{item.id}",
+                            quote="Demand slowed after supply constraints.",
+                        ),
+                        confidence=0.86,
+                    )
+                ]
+            )
+        }
+    )
+
+    service.extract_item(item.id)
+
+    facts = list(session.scalars(select(InvestmentFact).order_by(InvestmentFact.created_at)))
+    assert len(facts) == 2
+    assert facts[0].id == old.id
+    assert facts[0].is_active is False
+    assert facts[1].is_active is True
+    assert facts[1].supersedes_id == old.id
+
+
+def test_fabricated_evidence_is_skipped_with_reason() -> None:
+    session = next(_session())
+    item = _item(session)
+    canned = InvestmentFactExtractionSchema(
+        facts=[
+            InvestmentFactExtractionItem(
+                fact_text="NVIDIA secretly doubled revenue.",
+                fact_type="company_update",
+                evidence=EvidenceReference(
+                    source_segment_id=f"investment_item:{item.id}",
+                    quote="secretly doubled revenue",
+                ),
+                confidence=0.9,
+            )
+        ]
+    )
+
+    result = InvestmentFactExtractionService(
+        session=session,
+        llm_client=MockStructuredOutputClient(outputs={InvestmentFactExtractionSchema: canned}),
+    ).extract_item(item.id)
+
+    assert result["facts_created"] == 0
+    assert result["facts_skipped"] == 1
+    assert result["failure_reasons"] == {"evidence_quote_mismatch": 1}
+    assert session.scalar(select(InvestmentFact)) is None
+
+
+def test_frame_reference_creates_image_region_anchor() -> None:
+    session = next(_session())
+    video = Video(
+        id="video_frame_anchor",
+        workspace_id="ws_default",
+        video_id="frame-anchor",
+        title="Frame anchor",
+        fetch_status="fetched",
+    )
+    document = Document(
+        id="doc_frame_anchor",
+        workspace_id="ws_default",
+        title="Frame anchor",
+        source_type="youtube",
+        source_uri="https://youtu.be/frame-anchor",
+        video_id=video.id,
+        status="ready",
+        parse_status="completed",
+    )
+    version = DocumentVersion(
+        id="docver_frame_anchor",
+        doc_id=document.id,
+        version_no=1,
+        title=document.title,
+        content_md="Frame transcript",
+        content_text="Frame transcript",
+    )
+    frame = VideoFrameAnalysis(
+        id="frame_anchor",
+        workspace_id="ws_default",
+        video_id=video.id,
+        timestamp_sec=42,
+        timestamp_str="00:42",
+        image_path="/tmp/frame-anchor.jpg",
+        perceptual_hash="frame-anchor",
+        frame_type="slide",
+        ocr_text="GPU supply chain revenue inflection",
+        confidence=0.91,
+    )
+    item = InvestmentItem(
+        id="inv_frame_anchor",
+        workspace_id="ws_default",
+        document_id=document.id,
+        dedupe_key="youtube|frame-anchor",
+        title="Frame anchor",
+        source_url=document.source_uri,
+        source_name="YouTube",
+        summary="A supply-chain slide is shown.",
+        info_layer="opinion",
+        source_credibility="personal_opinion",
+    )
+    session.add_all([video, document, version, frame, item])
     session.commit()
     canned = InvestmentFactExtractionSchema(
         facts=[
             InvestmentFactExtractionItem(
-                fact_text="new fact",
+                fact_text="The slide shows a GPU supply chain revenue inflection.",
                 fact_type="company_update",
-                entities=["NVIDIA"],
-                evidence_excerpt="new fact",
-                confidence=0.9,
+                evidence=EvidenceReference(
+                    source_segment_id=f"video_frame_analysis:{frame.id}",
+                    quote="GPU supply chain revenue inflection",
+                    bbox=(0.1, 0.2, 0.9, 0.8),
+                    ocr_block_ids=["ocr_1"],
+                ),
+                confidence=0.88,
             )
         ]
     )
@@ -473,6 +686,81 @@ def test_fact_extraction_replaces_existing_item_facts() -> None:
         llm_client=MockStructuredOutputClient(outputs={InvestmentFactExtractionSchema: canned}),
     ).extract_item(item.id)
 
-    facts = list(session.scalars(select(InvestmentFact)))
-    assert len(facts) == 1
-    assert facts[0].fact_text == "new fact"
+    anchor = session.scalar(select(EvidenceAnchor))
+    assert anchor is not None
+    assert anchor.anchor_type == "image_region"
+    assert anchor.locator == {
+        "type": "image_region",
+        "frame_id": frame.id,
+        "bbox": [0.1, 0.2, 0.9, 0.8],
+        "ocr_block_ids": ["ocr_1"],
+    }
+
+
+def test_youtube_timestamp_creates_media_segment_anchor() -> None:
+    session = next(_session())
+    document = Document(
+        id="doc_media_anchor",
+        workspace_id="ws_default",
+        title="Media anchor",
+        source_type="youtube",
+        source_uri="https://youtu.be/media-anchor",
+        status="ready",
+        parse_status="completed",
+    )
+    version = DocumentVersion(
+        id="docver_media_anchor",
+        doc_id=document.id,
+        version_no=1,
+        title=document.title,
+        content_md="Blackwell demand remained strong.",
+        content_text="Blackwell demand remained strong.",
+    )
+    chunk = DocumentChunk(
+        id="chunk_media_anchor",
+        doc_id=document.id,
+        version_id=version.id,
+        chunk_index=0,
+        content="Blackwell demand remained strong.",
+        start_offset=125,
+        end_offset=160,
+        metadata_={},
+    )
+    item = InvestmentItem(
+        id="inv_media_anchor",
+        workspace_id="ws_default",
+        document_id=document.id,
+        dedupe_key="youtube|media-anchor",
+        title="Media anchor",
+        source_url=document.source_uri,
+        source_name="YouTube",
+        summary="Blackwell demand remained strong.",
+        info_layer="opinion",
+        source_credibility="personal_opinion",
+    )
+    session.add_all([document, version, chunk, item])
+    session.commit()
+    canned = InvestmentFactExtractionSchema(
+        facts=[
+            InvestmentFactExtractionItem(
+                fact_text="Blackwell demand remained strong.",
+                fact_type="company_update",
+                evidence=EvidenceReference(
+                    source_segment_id=f"document_chunk:{chunk.id}",
+                    quote="Blackwell demand remained strong.",
+                ),
+                confidence=0.86,
+            )
+        ]
+    )
+
+    InvestmentFactExtractionService(
+        session=session,
+        llm_client=MockStructuredOutputClient(outputs={InvestmentFactExtractionSchema: canned}),
+    ).extract_item(item.id)
+
+    anchor = session.scalar(select(EvidenceAnchor))
+    assert anchor is not None
+    assert anchor.anchor_type == "media_segment"
+    assert anchor.locator["start_ms"] == 125_000
+    assert anchor.locator["end_ms"] == 160_000

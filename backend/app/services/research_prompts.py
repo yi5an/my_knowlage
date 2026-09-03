@@ -34,7 +34,7 @@ def _render_sources(sources: list[ResearchSourceItem]) -> str:
     for i, src in enumerate(sources, start=1):
         origin = src.url or src.doc_id or src.source_type
         lines.append(
-            f"[来源 {i}] 标题: {src.title}\n"
+            f"[来源 {i}] source_id: {src.source_id or '(未分配)'} 标题: {src.title}\n"
             f"  类型: {src.source_type} | 链接/文档: {origin}\n"
             f"  片段: {src.snippet}"
         )
@@ -53,10 +53,12 @@ def build_extract_claims_prompt(
         f"来源片段:\n{sources_block}\n\n"
         "要求:\n"
         "1. 每个 claim 的 text 是一句完整、可独立成立的事实陈述。\n"
-        "2. evidence 列出支撑该主张的来源标题(可多条)。\n"
-        "3. confidence ∈ [0,1]:来源越权威、表述越确定,分数越高;推断或孤证给较低分。\n"
-        "4. 只抽取来源**明确支持**的主张,不要编造来源中没有的信息。\n"
-        "5. 使用与来源一致的语言。\n\n"
+        "2. evidence_refs 必须引用上方 source_id，并逐字复制 quote；"
+        "stance 使用 supports/refutes/qualifies。\n"
+        "3. evidence 可保留来源标题以兼容旧客户端，但不能替代 evidence_refs。\n"
+        "4. confidence ∈ [0,1]:来源越权威、表述越确定,分数越高;推断或孤证给较低分。\n"
+        "5. 只抽取来源**明确支持**的主张,不要编造来源中没有的信息。\n"
+        "6. 使用与来源一致的语言。\n\n"
         "输出 ExtractedClaims JSON。"
     )
 
@@ -72,7 +74,10 @@ def build_cross_check_prompt(
         )
     lines = []
     for i, claim in enumerate(claims, start=1):
-        evidence = "; ".join(claim.evidence) if claim.evidence else "(无)"
+        evidence = "; ".join(
+            f"{ref.source_id}={ref.quote} ({ref.stance})"
+            for ref in claim.evidence_refs
+        ) or ("; ".join(claim.evidence) if claim.evidence else "(无)")
         lines.append(
             f"[主张 {i}] (conf={claim.confidence:.2f}) {claim.text}\n  证据: {evidence}"
         )
@@ -86,7 +91,7 @@ def build_cross_check_prompt(
         "2. 若多个独立来源支持同一主张,confidence 应上调;孤证或相互矛盾的主张下调。\n"
         "3. 直接删除与问题无关、或与其它来源明显冲突且无法调和的主张。\n"
         "4. confidence 最终值必须落在 [0,1]。\n"
-        "5. evidence 保留原始来源标题即可,不要新增。\n\n"
+        "5. evidence_refs 只能保留原始 source_id 和 quote，不要新增来源。\n\n"
         "输出 CrossCheckedClaims JSON。"
     )
 

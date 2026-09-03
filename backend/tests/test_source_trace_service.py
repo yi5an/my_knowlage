@@ -1,5 +1,8 @@
 from datetime import UTC, datetime
 
+from sqlalchemy import select
+
+from app.infrastructure.models import TraceEdge
 from tests.test_investment_themes_api import _client
 
 
@@ -35,6 +38,9 @@ def test_source_trace_service_persists_likely_earlier_source() -> None:
     assert traces[0].source_item_id == earlier.id
     assert traces[0].trace_type == "likely_source"
     assert traces[0].lead_time_hours == 12.0
+    edge = session.scalar(select(TraceEdge).where(TraceEdge.relation_type == "related_unconfirmed"))
+    assert edge is not None
+    assert edge.validation_status == "unverified"
 
 
 def test_source_trace_endpoint_lists_persisted_traces() -> None:

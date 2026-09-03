@@ -31,6 +31,41 @@ Expected response:
 {"status":"ok"}
 ```
 
+### Event/conclusion provenance API
+
+The provenance graph keeps its durable source of truth in PostgreSQL and treats the configured graph store as a rebuildable read projection. Every request is scoped by `workspace_id`.
+
+- `GET /api/v1/provenance/overview` returns the three-layer overview.
+- `GET /api/v1/provenance/nodes/{node_id}/trace?direction=up|down` returns a focused path while preserving the canonical evidence-to-conclusion edge direction.
+- `GET /api/v1/provenance/edges/{edge_id}` returns rationale and immutable evidence anchors.
+- `POST /api/v1/provenance/edges/{edge_id}/review` confirms, rejects, or marks a versioned edge as conflicted using optimistic locking.
+- `POST /api/v1/provenance/conclusions` creates a research or investment conclusion.
+- `POST /api/v1/provenance/rebuild` enqueues an asynchronous workspace rebuild and returns immediately.
+- `GET /api/v1/provenance/jobs/{job_id}` reports rebuild progress and partial failures.
+
+Example rebuild:
+
+```bash
+curl -X POST http://localhost:8010/api/v1/provenance/rebuild \
+  -H 'content-type: application/json' \
+  -d '{"workspace_id":"ws_default","force":false}'
+```
+
+The generic `task_job` worker registers persisted anchors, events, and conclusions, preserves reviewed edge versions, and refreshes the graph projection. A graph-store outage is surfaced as explicit degraded query metadata; PostgreSQL provenance rows remain authoritative.
+
+### True 3D provenance controls
+
+Open `/provenance` for the independent WebGL three-layer view. The controls are:
+
+- drag with the left mouse button to rotate;
+- drag with Shift-left, middle, or right mouse button to pan;
+- use the mouse wheel to zoom toward the pointer;
+- single-click a node to focus and load its evidence path, or click a relation to open its audit record;
+- double-click empty canvas space to reset the camera;
+- use arrow keys to pan, `+`/`-` to zoom, `R` to reset, and `Escape` to clear selection when the canvas has keyboard focus.
+
+The renderer lowers label density and device-pixel ratio for large graphs or constrained GPUs without dropping the selected path. The operating system’s reduced-motion preference disables path particles and camera tweening. If WebGL is unavailable—or on a narrow screen—the page shows an explicit read-only three-layer fallback; users can still inspect nodes and evidence and may opt into 3D manually.
+
 Backend checks:
 
 ```bash
@@ -74,7 +109,7 @@ Services:
 
 ## Current Scope
 
-This repository intentionally does not yet implement document import, AI provider calls, RAG, graph synchronization, or research workflows. Those belong to later Agent tasks.
+The repository includes document import, provider abstractions, RAG, graph synchronization, research workflows, and the schema-first provenance backend. See the development docs for feature-specific contracts and remaining limitations.
 
 ## Development Docs
 

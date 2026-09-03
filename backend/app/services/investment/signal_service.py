@@ -6,20 +6,23 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from uuid import uuid4
+from hashlib import sha256
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.infrastructure.models import InvestmentFact, InvestmentItem, InvestmentSignal
+from app.infrastructure.models import (
+    InvestmentFact,
+    InvestmentItem,
+    InvestmentSignal,
+    TraceEdge,
+)
 from app.services.investment.information_edge import (
     InformationEdgeScoreInput,
     score_information_edge,
 )
-
-
-def _new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid4().hex}"
+from app.services.provenance.links import TraceLinkService
+from app.services.provenance.registry import TraceRegistrationService
 
 
 @dataclass
@@ -44,13 +47,40 @@ class InvestmentSignalService:
         facts = self._facts(workspace_id=workspace_id, watchlist_id=watchlist_id)
         groups = self._group_facts(facts)
 
-        conditions = [InvestmentSignal.workspace_id == workspace_id]
+        conditions = [
+            InvestmentSignal.workspace_id == workspace_id,
+            InvestmentSignal.is_active.is_(True),
+        ]
         if watchlist_id is not None:
             conditions.append(InvestmentSignal.watchlist_id == watchlist_id)
-        self.session.execute(delete(InvestmentSignal).where(*conditions))
+        prior_signals = list(self.session.scalars(select(InvestmentSignal).where(*conditions)))
+        prior_by_key = {
+            signal.canonical_key: signal
+            for signal in prior_signals
+            if signal.canonical_key
+        }
+        signals: list[InvestmentSignal] = []
+        seen_keys: set[str] = set()
+        for group in groups:
+            canonical_key = _signal_key(workspace_id, group)
+            seen_keys.add(canonical_key)
+            candidate = self._build_signal(workspace_id, group, canonical_key)
+            existing = prior_by_key.get(canonical_key)
+            if existing is not None:
+                self._update_signal(existing, candidate)
+                signal = existing
+            else:
+                predecessor = _best_signal_predecessor(prior_signals, group)
+                candidate.supersedes_id = predecessor.id if predecessor else None
+                self.session.add(candidate)
+                self.session.flush()
+                signal = candidate
+            self._register_signal(signal, group)
+            signals.append(signal)
 
-        signals = [self._build_signal(workspace_id, group) for group in groups]
-        self.session.add_all(signals)
+        for old_signal in prior_signals:
+            if old_signal.canonical_key not in seen_keys:
+                old_signal.is_active = False
         self.session.commit()
         for signal in signals:
             self.session.refresh(signal)
@@ -64,7 +94,10 @@ class InvestmentSignalService:
         status: str | None = None,
         limit: int = 20,
     ) -> list[InvestmentSignal]:
-        stmt = select(InvestmentSignal).where(InvestmentSignal.workspace_id == workspace_id)
+        stmt = select(InvestmentSignal).where(
+            InvestmentSignal.workspace_id == workspace_id,
+            InvestmentSignal.is_active.is_(True),
+        )
         if watchlist_id is not None:
             stmt = stmt.where(InvestmentSignal.watchlist_id == watchlist_id)
         if theme_id is not None:
@@ -86,11 +119,12 @@ class InvestmentSignalService:
         stmt = select(InvestmentFact).where(InvestmentFact.workspace_id == workspace_id)
         if watchlist_id is not None:
             stmt = stmt.where(InvestmentFact.watchlist_id == watchlist_id)
+        stmt = stmt.where(InvestmentFact.is_active.is_(True))
         return list(self.session.scalars(stmt.order_by(InvestmentFact.created_at.asc())))
 
     def _group_facts(self, facts: list[InvestmentFact]) -> list[_SignalGroup]:
         bucket: dict[tuple[str, str], list[InvestmentFact]] = defaultdict(list)
-        for fact in facts:
+        for fact in sorted(facts, key=lambda value: value.canonical_key or value.id):
             key = (
                 fact.watchlist_id or "",
                 fact.fact_type or "other",
@@ -110,7 +144,12 @@ class InvestmentSignalService:
         groups.sort(key=lambda group: (_last_seen(group.facts), group.entity), reverse=True)
         return groups
 
-    def _build_signal(self, workspace_id: str, group: _SignalGroup) -> InvestmentSignal:
+    def _build_signal(
+        self,
+        workspace_id: str,
+        group: _SignalGroup,
+        canonical_key: str,
+    ) -> InvestmentSignal:
         facts = group.facts
         item_ids = _unique([fact.source_item_id for fact in facts])
         items = list(
@@ -157,7 +196,7 @@ class InvestmentSignalService:
         title = _signal_title(group)
         summary = "；".join((fact.fact_text_zh or fact.fact_text) for fact in facts[:3])
         return InvestmentSignal(
-            id=_new_id("sig"),
+            id=f"sig_{canonical_key[:32]}",
             workspace_id=workspace_id,
             theme_id=theme_id,
             watchlist_id=group.watchlist_id,
@@ -182,7 +221,98 @@ class InvestmentSignalService:
             information_edge_score=score.score,
             actionability=score.actionability,
             score_breakdown=score.breakdown,
+            canonical_key=canonical_key,
+            is_active=True,
         )
+
+    def _update_signal(
+        self,
+        existing: InvestmentSignal,
+        candidate: InvestmentSignal,
+    ) -> None:
+        existing.theme_id = candidate.theme_id
+        existing.title = candidate.title
+        existing.summary = candidate.summary
+        existing.signal_type = candidate.signal_type
+        existing.first_seen_at = min(existing.first_seen_at, candidate.first_seen_at)
+        existing.last_seen_at = max(existing.last_seen_at, candidate.last_seen_at)
+        existing.source_count = candidate.source_count
+        existing.fact_ids = candidate.fact_ids
+        existing.item_ids = candidate.item_ids
+        existing.confidence = candidate.confidence
+        existing.signal_stage = candidate.signal_stage
+        existing.source_layers = candidate.source_layers
+        existing.first_source_layer = candidate.first_source_layer
+        existing.first_source_id = candidate.first_source_id
+        existing.lead_time_hours = candidate.lead_time_hours
+        existing.information_edge_score = candidate.information_edge_score
+        existing.actionability = candidate.actionability
+        existing.score_breakdown = candidate.score_breakdown
+        existing.is_active = True
+
+    def _register_signal(self, signal: InvestmentSignal, group: _SignalGroup) -> None:
+        registry = TraceRegistrationService(self.session)
+        signal_node = registry.register(
+            workspace_id=signal.workspace_id,
+            backing_type="investment_signal",
+            backing_id=signal.id,
+            layer="event",
+            node_type="signal",
+            label=signal.title,
+            display_status=signal.status,
+            confidence=signal.confidence,
+            occurred_at=signal.last_seen_at,
+            properties={"canonical_key": signal.canonical_key, "is_active": signal.is_active},
+        )
+        member_node_ids: set[str] = set()
+        links = TraceLinkService(self.session)
+        for fact in group.facts:
+            fact_node = registry.register(
+                workspace_id=fact.workspace_id,
+                backing_type="investment_fact",
+                backing_id=fact.id,
+                layer="event",
+                node_type="fact",
+                label=fact.fact_text[:240],
+                display_status=fact.verification_status,
+                confidence=fact.confidence,
+                properties={"canonical_key": fact.canonical_key, "is_active": fact.is_active},
+            )
+            member_node_ids.add(fact_node.id)
+            links.create(
+                workspace_id=signal.workspace_id,
+                source_node_id=fact_node.id,
+                target_node_id=signal_node.id,
+                relation_type="aggregates",
+                origin_type="rule",
+                confidence=signal.confidence,
+                rationale="Signal groups active facts in the same semantic cluster.",
+                evidence_anchor_ids=[],
+                model_metadata={"workflow": "investment_signal_refresh"},
+                review_status="pending_review",
+                validation_status="unverified",
+            )
+        self._mark_stale_member_edges(signal_node.id, member_node_ids)
+
+    def _mark_stale_member_edges(
+        self,
+        signal_node_id: str,
+        active_member_ids: set[str],
+    ) -> None:
+        edges = list(
+            self.session.scalars(
+                select(TraceEdge).where(
+                    TraceEdge.target_node_id == signal_node_id,
+                    TraceEdge.relation_type == "aggregates",
+                )
+            )
+        )
+        for edge in edges:
+            if (
+                edge.source_node_id not in active_member_ids
+                and edge.review_status == "pending_review"
+            ):
+                edge.validation_status = "stale"
 
 
 def _primary_entity(fact: InvestmentFact) -> str:
@@ -190,6 +320,29 @@ def _primary_entity(fact: InvestmentFact) -> str:
     if entities:
         return entities[0].casefold()
     return (fact.fact_type or "other").casefold()
+
+
+def _signal_key(workspace_id: str, group: _SignalGroup) -> str:
+    members = "|".join(
+        sorted(fact.canonical_key or fact.id for fact in group.facts)
+    )
+    raw = (
+        f"{workspace_id}|{group.watchlist_id or ''}|{group.signal_type}|"
+        f"{group.entity}|{members}"
+    )
+    return sha256(raw.encode()).hexdigest()
+
+
+def _best_signal_predecessor(
+    signals: list[InvestmentSignal], group: _SignalGroup
+) -> InvestmentSignal | None:
+    candidates = [
+        signal
+        for signal in signals
+        if signal.watchlist_id == group.watchlist_id
+        and signal.signal_type == group.signal_type
+    ]
+    return max(candidates, key=lambda signal: signal.last_seen_at, default=None)
 
 
 def _signal_title(group: _SignalGroup) -> str:

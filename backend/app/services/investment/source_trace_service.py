@@ -8,6 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.infrastructure.models import InvestmentItem, InvestmentSourceTrace
+from app.services.provenance.links import TraceLinkService
+from app.services.provenance.registry import TraceRegistrationService
 
 
 def _new_id(prefix: str) -> str:
@@ -39,6 +41,9 @@ class SourceTraceService:
 
         traces: list[InvestmentSourceTrace] = []
         for candidate, score in scored[:limit]:
+            candidate_published_at = candidate.published_at
+            if candidate_published_at is None:
+                continue
             existing = self.session.scalar(
                 select(InvestmentSourceTrace).where(
                     InvestmentSourceTrace.workspace_id == target.workspace_id,
@@ -47,10 +52,11 @@ class SourceTraceService:
                 )
             )
             if existing is not None:
+                self._ensure_provenance_edge(candidate, target, existing.confidence)
                 traces.append(existing)
                 continue
             lead_time = round(
-                max(0.0, (target.published_at - candidate.published_at).total_seconds() / 3600),
+                max(0.0, (target.published_at - candidate_published_at).total_seconds() / 3600),
                 2,
             )
             trace = InvestmentSourceTrace(
@@ -66,12 +72,55 @@ class SourceTraceService:
                 confidence=round(min(1.0, score), 2),
             )
             self.session.add(trace)
+            self.session.flush()
+            self._ensure_provenance_edge(candidate, target, trace.confidence)
             traces.append(trace)
         if traces:
             self.session.commit()
             for trace in traces:
                 self.session.refresh(trace)
         return traces
+
+    def _ensure_provenance_edge(
+        self,
+        source: InvestmentItem,
+        target: InvestmentItem,
+        confidence: float,
+    ) -> None:
+        registry = TraceRegistrationService(self.session)
+        source_node = registry.register(
+            workspace_id=source.workspace_id,
+            backing_type="investment_item",
+            backing_id=source.id,
+            layer="event",
+            node_type="investment_item",
+            label=source.title,
+            display_status=source.action_status,
+            confidence=confidence,
+        )
+        target_node = registry.register(
+            workspace_id=target.workspace_id,
+            backing_type="investment_item",
+            backing_id=target.id,
+            layer="event",
+            node_type="investment_item",
+            label=target.title,
+            display_status=target.action_status,
+            confidence=confidence,
+        )
+        TraceLinkService(self.session).create(
+            workspace_id=source.workspace_id,
+            source_node_id=source_node.id,
+            target_node_id=target_node.id,
+            relation_type="related_unconfirmed",
+            origin_type="rule",
+            confidence=confidence,
+            rationale="Likely source based on temporal and phrase overlap; awaiting review.",
+            evidence_anchor_ids=[],
+            model_metadata={"workflow": "investment_source_trace"},
+            review_status="pending_review",
+            validation_status="unverified",
+        )
 
 
 def _tokens(item: InvestmentItem) -> set[str]:

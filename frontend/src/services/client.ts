@@ -3,6 +3,7 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 export type ApiRequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
+  signal?: AbortSignal;
 };
 
 export class ApiError extends Error {
@@ -32,6 +33,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
         : options.body
           ? JSON.stringify(options.body)
           : undefined,
+      signal: options.signal,
     });
   } catch {
     // Network failure / timeout — the backend is unreachable.

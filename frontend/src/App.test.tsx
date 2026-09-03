@@ -27,6 +27,7 @@ describe("App shell", () => {
       ["/library", "文档库"],
       ["/reader", "阅读"],
       ["/graph", "知识图谱"],
+      ["/provenance", "事件结论溯源"],
       ["/search", "智能搜索"],
       ["/research", "深度研究"],
       ["/entity", "实体详情"],
@@ -57,5 +58,12 @@ describe("App shell", () => {
     expect(screen.getByText("已启用订阅")).toBeInTheDocument();
     expect(screen.getByText("已总结视频")).toBeInTheDocument();
     expect(screen.getByText("抽取实体")).toBeInTheDocument();
+  });
+
+  it("selects the provenance navigation item on the dedicated route", () => {
+    renderRoute("/provenance");
+    expect(screen.getByRole("menuitem", { name: /溯源图/ })).toHaveClass(
+      "ant-menu-item-selected",
+    );
   });
 });

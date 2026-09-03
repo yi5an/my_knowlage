@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     rag_min_score: float = Field(default=0.05, alias="RAG_MIN_SCORE")
     graph_store_backend: str = Field(default="memory", alias="GRAPH_STORE_BACKEND")
     kuzu_database_path: str | None = Field(default=None, alias="KUZU_DATABASE_PATH")
+    provenance_causes_min_confidence: float = Field(
+        default=0.85, alias="PROVENANCE_CAUSES_MIN_CONFIDENCE"
+    )
+    provenance_causes_min_independent_anchors: int = Field(
+        default=2, alias="PROVENANCE_CAUSES_MIN_INDEPENDENT_ANCHORS"
+    )
 
     # YouTube source configuration.
     youtube_api_key: str | None = Field(default=None, alias="YOUTUBE_API_KEY")
