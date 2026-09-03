@@ -9,11 +9,19 @@ from sqlalchemy.orm import Session
 
 from app.infrastructure.models import (
     Document,
+    DocumentChunk,
     InvestmentClaim,
     InvestmentFact,
     InvestmentItem,
     InvestmentSignal,
     MacroEvent,
+)
+from app.schemas.provenance import (
+    EvidenceLocator,
+    MediaSegmentLocator,
+    PdfRegionLocator,
+    TextSpanLocator,
+    WebFragmentLocator,
 )
 from app.schemas.rag import SearchMode, SearchRequest
 
@@ -29,6 +37,9 @@ class ReadingEvidenceCandidate:
     excerpt: str
     published_at: datetime | None
     retrieval_score: float
+    version_id: str | None = None
+    locator: EvidenceLocator | None = None
+    source_item_id: str | None = None
 
 
 class RagSearchProtocol(Protocol):
@@ -93,6 +104,22 @@ class ReadingEvidenceAdapter:
             ):
                 continue
             source_kind = self._document_kind(document_id)
+            version_id: str | None = None
+            locator: EvidenceLocator | None = None
+            excerpt = _excerpt(content)
+            if self.session is not None:
+                chunk = self.session.get(DocumentChunk, chunk_id)
+                document = self.session.get(Document, document_id)
+                if (
+                    chunk is None
+                    or document is None
+                    or document.workspace_id != workspace_id
+                    or chunk.doc_id != document.id
+                ):
+                    continue
+                excerpt = _exact_excerpt(chunk.content)
+                version_id = chunk.version_id
+                locator = _chunk_locator(document, chunk, excerpt)
             candidates.append(
                 ReadingEvidenceCandidate(
                     source_kind=source_kind,
@@ -101,9 +128,11 @@ class ReadingEvidenceAdapter:
                     document_id=document_id,
                     chunk_id=chunk_id,
                     title=title,
-                    excerpt=_excerpt(content),
+                    excerpt=excerpt,
                     published_at=None,
                     retrieval_score=float(score),
+                    version_id=version_id,
+                    locator=locator,
                 )
             )
         return candidates
@@ -140,9 +169,15 @@ class ReadingEvidenceAdapter:
                     document_id=item.document_id,
                     chunk_id=None,
                     title=item.title,
-                    excerpt=_excerpt(text),
+                    excerpt=_exact_excerpt(text),
                     published_at=item.published_at or item.event_at or item.created_at,
                     retrieval_score=_match_score(terms, text),
+                    locator=WebFragmentLocator(
+                        fragment_id=item.id,
+                        text_quote=_exact_excerpt(text),
+                        captured_at=item.published_at or item.event_at or item.created_at,
+                    ),
+                    source_item_id=item.id,
                 )
             )
         for fact in self.session.scalars(
@@ -247,6 +282,44 @@ def _match_score(terms: list[str], content: str) -> float:
 def _excerpt(value: str, max_length: int = 360) -> str:
     compact = " ".join(value.split())
     return compact if len(compact) <= max_length else f"{compact[: max_length - 1]}…"
+
+
+def _exact_excerpt(value: str, max_length: int = 360) -> str:
+    return value if len(value) <= max_length else value[:max_length]
+
+
+def _chunk_locator(
+    document: Document,
+    chunk: DocumentChunk,
+    excerpt: str,
+) -> EvidenceLocator | None:
+    if not excerpt:
+        return None
+    if document.source_type == "youtube":
+        start_sec = chunk.start_offset
+        end_sec = chunk.end_offset
+        if start_sec is not None and end_sec is not None and end_sec > start_sec:
+            return MediaSegmentLocator(
+                start_ms=start_sec * 1_000,
+                end_ms=end_sec * 1_000,
+                chunk_id=chunk.id,
+            )
+    if chunk.page_no is not None:
+        raw_bbox = (chunk.metadata_ or {}).get("normalized_bbox")
+        if (
+            isinstance(raw_bbox, (list, tuple))
+            and len(raw_bbox) == 4
+            and all(isinstance(value, (int, float)) for value in raw_bbox)
+        ):
+            try:
+                return PdfRegionLocator(
+                    page_no=chunk.page_no,
+                    bbox=tuple(float(value) for value in raw_bbox),  # type: ignore[arg-type]
+                    chunk_id=chunk.id,
+                )
+            except ValueError:
+                pass
+    return TextSpanLocator(chunk_id=chunk.id, start_offset=0, end_offset=len(excerpt))
 
 
 def _dedupe_and_limit(
