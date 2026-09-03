@@ -242,7 +242,7 @@ Expected: PASS.
 - Create: `backend/app/services/provenance/links.py`
 - Create: `backend/tests/test_provenance_links.py`
 
-- [ ] Write failing tests for deterministic node IDs, backing object existence, workspace isolation, allowed layer direction, required evidence on AI links, stable replay, superseding reviewed links, and review history.
+- [x] Write failing tests for deterministic node IDs, backing object existence, workspace isolation, allowed layer direction, required evidence on AI links, stable replay, superseding reviewed links, and review history.
 
 ```python
 def test_ai_link_without_anchor_is_rejected(session: Session) -> None:
@@ -260,23 +260,23 @@ def test_ai_link_without_anchor_is_rejected(session: Session) -> None:
     assert exc.value.code == "trace_evidence_required"
 ```
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_links.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_links.py -q`
 
 Expected: FAIL.
 
-- [ ] Implement `TraceRegistrationService.register`. Use `uuid5` with a fixed application namespace and `workspace_id/backing_type/backing_id`; validate the backing object through a mapping of repository lookups.
+- [x] Implement `TraceRegistrationService.register`. Use `uuid5` with a fixed application namespace and `workspace_id/backing_type/backing_id`; validate the backing object through a mapping of repository lookups.
 
-- [ ] Implement `TraceLinkService.create` with the canonical direction `evidence -> event/fact/signal -> conclusion`. Permit same-layer `related_unconfirmed` only for event normalization candidates.
+- [x] Implement `TraceLinkService.create` with the canonical direction `evidence -> event/fact/signal -> conclusion`. Permit same-layer `aggregates` for fact-to-signal links and `related_unconfirmed` for event normalization candidates.
 
-- [ ] Lock reviewed versions from overwrite. A changed inference creates a new `TraceEdge` with `version_no + 1` and `supersedes_id`; an exact replay returns the current edge.
+- [x] Lock reviewed versions from overwrite. A changed inference creates a new `TraceEdge` with `version_no + 1` and `supersedes_id`; an exact replay returns the current edge.
 
-- [ ] Implement `review(edge_id, workspace_id, action, expected_version, reviewer_id, note)` using an update guarded by `version_no`. Insert `TraceEdgeReview` in the same transaction and raise `trace_review_conflict` on zero updated rows.
+- [x] Implement `review(edge_id, workspace_id, action, expected_version, reviewer_id, note)` using an update guarded by `version_no`. Insert `TraceEdgeReview` in the same transaction and raise `trace_review_conflict` on zero updated rows.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_links.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_links.py -q`
 
 Expected: PASS.
 
-- [ ] Commit: `git add backend/app/services/provenance/registry.py backend/app/services/provenance/links.py backend/tests/test_provenance_links.py && git commit -m "feat: add stable provenance nodes and links"`
+- [x] Commit: `git add backend/app/services/provenance/registry.py backend/app/services/provenance/links.py backend/tests/test_provenance_links.py && git commit -m "feat: add stable provenance nodes and links"`
 
 ## Task 5: Add event and conclusion domain services
 
