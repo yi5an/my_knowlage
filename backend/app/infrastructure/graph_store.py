@@ -136,16 +136,36 @@ class InMemoryGraphStore(GraphStore):
         # Treat "*" or empty query as a wildcard returning all nodes.
         wildcard = query.strip() in ("", "*")
         lowered = query.lower()
-        results: list[GraphStoreNode] = []
+        candidates: list[GraphStoreNode] = []
         for node in self.nodes.values():
             if node.properties.get("workspace_id") != workspace_id:
                 continue
             if not _node_type_allowed(node, node_types):
                 continue
             if wildcard or lowered in node.label.lower() or lowered in str(node.properties).lower():
-                results.append(node)
-            if len(results) >= limit:
-                break
+                candidates.append(node)
+
+        # A wildcard overview is capped by ``limit``. Prefer nodes that are
+        # actually connected so a large workspace does not return a page of
+        # isolated objects and hide every relationship from the graph view.
+        # Preserve insertion order as the stable tie-breaker for nodes with
+        # the same degree and for non-wildcard searches.
+        if wildcard:
+            candidate_ids = {node.id for node in candidates}
+            degree = {node.id: 0 for node in candidates}
+            for edge in self.edges.values():
+                if edge.source_id in candidate_ids and edge.target_id in candidate_ids:
+                    degree[edge.source_id] += 1
+                    degree[edge.target_id] += 1
+            candidates = [
+                node
+                for _, node in sorted(
+                    enumerate(candidates),
+                    key=lambda item: (-degree[item[1].id], item[0]),
+                )
+            ]
+
+        results = candidates[:limit]
         node_ids = {node.id for node in results}
         edges = [
             edge
