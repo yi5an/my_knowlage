@@ -323,6 +323,21 @@ class ProvenanceRebuildResponse(BaseModel):
     reused: bool = False
 
 
+class ProvenanceJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    status: str
+    progress: int
+    input: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] = Field(default_factory=dict)
+    error_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime | None = None
+
+
 class EvidenceReference(BaseModel):
     anchor_id: str = Field(min_length=1)
     quote: str = Field(min_length=1)
@@ -352,4 +367,3 @@ class ConclusionLinkOutput(BaseModel):
     rationale: str = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)
     evidence_anchor_ids: list[str] = Field(min_length=1)
-

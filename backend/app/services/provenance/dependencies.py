@@ -10,6 +10,7 @@ from app.services.provenance.conclusions import ConclusionService
 from app.services.provenance.links import TraceLinkService
 from app.services.provenance.projection import ProvenanceProjectionService
 from app.services.provenance.query import ProvenanceQueryService
+from app.services.provenance.rebuild_job import ProvenanceRebuildService
 
 DB_SESSION_DEPENDENCY = Depends(get_db_session)
 
@@ -31,3 +32,9 @@ def get_trace_link_service(session: Session = DB_SESSION_DEPENDENCY) -> TraceLin
 
 def get_conclusion_service(session: Session = DB_SESSION_DEPENDENCY) -> ConclusionService:
     return ConclusionService(session)
+
+
+def get_provenance_rebuild_service(
+    session: Session = DB_SESSION_DEPENDENCY,
+) -> ProvenanceRebuildService:
+    return ProvenanceRebuildService(session)

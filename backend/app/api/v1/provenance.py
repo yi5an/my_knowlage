@@ -10,6 +10,9 @@ from app.schemas.provenance import (
     ConclusionCreate,
     ConclusionResponse,
     ProvenanceGraphResponse,
+    ProvenanceJobResponse,
+    ProvenanceRebuildRequest,
+    ProvenanceRebuildResponse,
     ReviewStatus,
     TraceDirection,
     TraceEdgeDetailResponse,
@@ -21,15 +24,18 @@ from app.services.provenance.conclusions import ConclusionService
 from app.services.provenance.dependencies import (
     get_conclusion_service,
     get_provenance_query_service,
+    get_provenance_rebuild_service,
     get_trace_link_service,
 )
 from app.services.provenance.links import TraceLinkService
 from app.services.provenance.query import ProvenanceQueryService
+from app.services.provenance.rebuild_job import ProvenanceRebuildService
 
 router = APIRouter(prefix="/provenance", tags=["provenance"])
 QUERY_SERVICE = Depends(get_provenance_query_service)
 LINK_SERVICE = Depends(get_trace_link_service)
 CONCLUSION_SERVICE = Depends(get_conclusion_service)
+REBUILD_SERVICE = Depends(get_provenance_rebuild_service)
 
 
 @router.get("/overview", response_model=ProvenanceGraphResponse)
@@ -122,3 +128,30 @@ def create_conclusion(
     service.session.commit()
     response.headers["Location"] = f"/api/v1/provenance/nodes/{conclusion.id}"
     return ConclusionResponse.model_validate(conclusion)
+
+
+@router.post(
+    "/rebuild",
+    response_model=ProvenanceRebuildResponse,
+    status_code=HTTPStatus.ACCEPTED,
+)
+def rebuild(
+    request: ProvenanceRebuildRequest,
+    service: ProvenanceRebuildService = REBUILD_SERVICE,
+) -> ProvenanceRebuildResponse:
+    job, reused = service.enqueue(
+        workspace_id=request.workspace_id,
+        force=request.force,
+    )
+    return ProvenanceRebuildResponse(job_id=job.id, status=job.status, reused=reused)
+
+
+@router.get("/jobs/{job_id}", response_model=ProvenanceJobResponse)
+def get_rebuild_job(
+    job_id: str,
+    workspace_id: str = "ws_default",
+    service: ProvenanceRebuildService = REBUILD_SERVICE,
+) -> ProvenanceJobResponse:
+    return ProvenanceJobResponse.model_validate(
+        service.get_owned(workspace_id=workspace_id, job_id=job_id)
+    )

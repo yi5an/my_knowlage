@@ -400,15 +400,15 @@ Expected: PASS.
 - Modify: `backend/app/api/v1/provenance.py`
 - Create: `backend/tests/test_provenance_rebuild_job.py`
 
-- [ ] Write failing tests that `POST /provenance/rebuild` creates one pending job, duplicate active requests reuse that job, the handler is registered, progress/output are persisted, partial item failures are reported, and reruns preserve reviewed edges.
+- [x] Write failing tests that `POST /provenance/rebuild` creates one pending job, duplicate active requests reuse that job, the handler is registered, progress/output are persisted, partial item failures are reported, and reruns preserve reviewed edges.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_rebuild_job.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_rebuild_job.py -q`
 
 Expected: FAIL.
 
-- [ ] Add `PROVENANCE_REBUILD_JOB_TYPE = "provenance_rebuild"`, a handler implementing the existing `JobHandler` protocol, and an idempotent `register()` that assigns `_HANDLERS[PROVENANCE_REBUILD_JOB_TYPE]`.
+- [x] Add `PROVENANCE_REBUILD_JOB_TYPE = "provenance_rebuild"`, a handler implementing the existing `JobHandler` protocol, and an idempotent `register()` that assigns `_HANDLERS[PROVENANCE_REBUILD_JOB_TYPE]`.
 
-- [ ] Make the first backend-only handler register existing objects and project already-persisted trace rows. The extraction/enrichment stages are added by the AI integration plan without changing the job contract.
+- [x] Make the first backend-only handler register existing objects and project already-persisted trace rows. The extraction/enrichment stages are added by the AI integration plan without changing the job contract.
 
 ```python
 def register() -> None:
@@ -417,15 +417,15 @@ def register() -> None:
     _HANDLERS[PROVENANCE_REBUILD_JOB_TYPE] = ProvenanceRebuildJobHandler()
 ```
 
-- [ ] Register the handler in the `main.py` lifespan alongside the other job handlers.
+- [x] Register the handler in the `main.py` lifespan alongside the other job handlers.
 
-- [ ] Implement `GET /provenance/jobs/{job_id}` by reusing the existing task-job response convention and enforcing workspace ownership.
+- [x] Implement `GET /provenance/jobs/{job_id}` by reusing the existing task-job response convention and enforcing workspace ownership.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_rebuild_job.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_rebuild_job.py -q`
 
 Expected: PASS.
 
-- [ ] Commit: `git add backend/app/services/provenance/rebuild_job.py backend/app/main.py backend/app/api/v1/provenance.py backend/tests/test_provenance_rebuild_job.py && git commit -m "feat: add provenance rebuild job"`
+- [x] Commit: `git add backend/app/services/provenance/rebuild_job.py backend/app/main.py backend/app/api/v1/provenance.py backend/tests/test_provenance_rebuild_job.py && git commit -m "feat: add provenance rebuild job"`
 
 ## Task 9: Backend regression and contract handoff
 
