@@ -1,9 +1,15 @@
 import { Canvas, type RootState } from "@react-three/fiber";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 
 import type { ProvenanceGraphResponse } from "../../types/provenance";
 import type { ProvenancePosition } from "./layout";
 import { ProvenanceScene } from "./ProvenanceScene";
+import type { CameraControllerHandle } from "./CameraController";
+import {
+  DEFAULT_CAMERA_STATE,
+  applyKeyboardCameraAction,
+  type ProvenanceCameraState,
+} from "./cameraState";
 
 interface SpatialLayerCanvas3DProps {
   graph: ProvenanceGraphResponse;
@@ -12,10 +18,16 @@ interface SpatialLayerCanvas3DProps {
   selectedEdgeIds: ReadonlySet<string>;
   onSelectNode: (nodeId: string) => void;
   onSelectEdge: (edgeId: string) => void;
+  initialCameraState?: ProvenanceCameraState;
+  onCameraChange?: (state: ProvenanceCameraState) => void;
+  onClearSelection?: () => void;
+  motionEnabled?: boolean;
 }
 
 export function SpatialLayerCanvas3D(props: SpatialLayerCanvas3DProps) {
   const [ready, setReady] = useState(false);
+  const [shiftPan, setShiftPan] = useState(false);
+  const cameraControllerRef = useRef<CameraControllerHandle>(null);
   const markReadyAfterRender = useCallback((state: RootState) => {
     state.invalidate();
     requestAnimationFrame(() => {
@@ -25,12 +37,34 @@ export function SpatialLayerCanvas3D(props: SpatialLayerCanvas3DProps) {
     });
   }, []);
 
+  const handleKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Shift") {
+      setShiftPan(event.type === "keydown");
+      return;
+    }
+    if (event.type !== "keydown") return;
+    const current = cameraControllerRef.current?.getState() ?? DEFAULT_CAMERA_STATE;
+    const action = applyKeyboardCameraAction(current, event.key);
+    if (!action.handled) return;
+    event.preventDefault();
+    cameraControllerRef.current?.applyState(action.state);
+    props.onCameraChange?.(action.state);
+    if (action.clearSelection) props.onClearSelection?.();
+  };
+
   return (
     <div
       className="provenance-canvas"
       data-provenance-canvas
       data-renderer="webgl"
       data-webgl-ready={ready ? "true" : "false"}
+      role="application"
+      aria-label="事件结论三层溯源 3D 画布"
+      tabIndex={0}
+      onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={handleKeyboard}
+      onKeyUp={handleKeyboard}
+      onBlur={() => setShiftPan(false)}
     >
       <Canvas
         frameloop="demand"
@@ -38,9 +72,28 @@ export function SpatialLayerCanvas3D(props: SpatialLayerCanvas3DProps) {
         camera={{ fov: 48, near: 0.1, far: 600, position: [22, 18, 28] }}
         gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
         onCreated={markReadyAfterRender}
+        onPointerMissed={(event) => {
+          if (event.detail !== 2) return;
+          cameraControllerRef.current?.reset();
+          props.onClearSelection?.();
+        }}
       >
-        <ProvenanceScene {...props} />
+        <ProvenanceScene
+          {...props}
+          cameraControllerRef={cameraControllerRef}
+          initialCameraState={props.initialCameraState}
+          shiftPan={shiftPan}
+          motionEnabled={props.motionEnabled}
+          onCameraChange={props.onCameraChange}
+        />
       </Canvas>
+      <span className="provenance-sr-only" aria-live="polite">
+        {props.selectedNodeId
+          ? `已选择节点 ${props.selectedNodeId}`
+          : props.selectedEdgeIds.size
+            ? `已选择 ${props.selectedEdgeIds.size} 条关系`
+            : "未选择溯源对象"}
+      </span>
     </div>
   );
 }

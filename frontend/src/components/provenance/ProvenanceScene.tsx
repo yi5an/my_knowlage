@@ -1,6 +1,9 @@
 import { Html } from "@react-three/drei";
 
 import type { ProvenanceGraphResponse, TraceLayer } from "../../types/provenance";
+import type { CameraControllerHandle } from "./CameraController";
+import { CameraController } from "./CameraController";
+import type { ProvenanceCameraState } from "./cameraState";
 import type { ProvenancePosition } from "./layout";
 import { LAYER_Y } from "./layout";
 import { InstancedNodes } from "./InstancedNodes";
@@ -22,6 +25,11 @@ interface ProvenanceSceneProps {
   selectedEdgeIds: ReadonlySet<string>;
   onSelectNode: (nodeId: string) => void;
   onSelectEdge: (edgeId: string) => void;
+  cameraControllerRef?: React.Ref<CameraControllerHandle>;
+  initialCameraState?: ProvenanceCameraState;
+  shiftPan?: boolean;
+  motionEnabled?: boolean;
+  onCameraChange?: (state: ProvenanceCameraState) => void;
 }
 
 export function ProvenanceScene(props: ProvenanceSceneProps) {
@@ -32,6 +40,16 @@ export function ProvenanceScene(props: ProvenanceSceneProps) {
       <ambientLight intensity={0.75} />
       <directionalLight position={[12, 22, 10]} intensity={1.4} />
       <directionalLight position={[-16, 5, -12]} intensity={0.45} color="#7dd3fc" />
+      <CameraController
+        ref={props.cameraControllerRef}
+        initialState={props.initialCameraState}
+        focusPosition={
+          props.selectedNodeId ? props.positions.get(props.selectedNodeId) : undefined
+        }
+        shiftPan={props.shiftPan ?? false}
+        motionEnabled={props.motionEnabled}
+        onCameraChange={props.onCameraChange}
+      />
       {LAYERS.map((layer) => (
         <group key={layer}>
           <LayerPlane layer={layer} />

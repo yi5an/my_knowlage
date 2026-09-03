@@ -211,15 +211,15 @@ Expected: PASS.
 - Modify: `frontend/src/components/provenance/ProvenanceScene.tsx`
 - Modify: `frontend/src/components/provenance/SpatialLayerCanvas3D.tsx`
 
-- [ ] Write failing tests for distance limits, pitch limits, focus destination, URL serialization, keyboard deltas, reset state, and selection clearing.
+- [x] Write failing tests for distance limits, pitch limits, focus destination, URL serialization, keyboard deltas, reset state, and selection clearing.
 
-- [ ] Run: `cd frontend && npm run test -- src/components/provenance/cameraState.test.ts`
+- [x] Run: `cd frontend && npm run test -- src/components/provenance/cameraState.test.ts`
 
 Expected: FAIL.
 
-- [ ] Implement pure camera-state serialization/parsing and focus transition helpers. Invalid URL values must return the default overview camera.
+- [x] Implement pure camera-state serialization/parsing and focus transition helpers. Invalid URL values must return the default overview camera.
 
-- [ ] Configure `OrbitControls` with damping, `zoomToCursor`, min/max distance, polar angle limits, and the approved mouse mapping: left rotate; middle/right pan. Add a canvas key modifier so `Shift + left` temporarily changes the left action to pan and restores it on keyup/blur.
+- [x] Configure `OrbitControls` with damping, `zoomToCursor`, min/max distance, polar angle limits, and the approved mouse mapping: left rotate; middle/right pan. Add a canvas key modifier so `Shift + left` temporarily changes the left action to pan and restores it on keyup/blur.
 
 ```tsx
 <OrbitControls
@@ -239,19 +239,19 @@ Expected: FAIL.
 />
 ```
 
-- [ ] Prevent the context menu only inside the 3D canvas. Do not change browser behavior elsewhere.
+- [x] Prevent the context menu only inside the 3D canvas. Do not change browser behavior elsewhere.
 
-- [ ] On node click, fetch/highlight its path and animate camera/target for about 450 ms. On edge click, open its audit record. On `onPointerMissed` double-click, reset the saved camera.
+- [x] On node click, fetch/highlight its path and animate camera/target for about 450 ms. On edge click, open its audit record. On `onPointerMissed` double-click, reset the saved camera.
 
-- [ ] Add keyboard alternatives on a focusable canvas wrapper: arrows pan, `+/-` zoom, `R` reset, `Esc` clear selection. Update an `aria-live` summary after selection.
+- [x] Add keyboard alternatives on a focusable canvas wrapper: arrows pan, `+/-` zoom, `R` reset, `Esc` clear selection. Update an `aria-live` summary after selection.
 
-- [ ] Persist camera state in URL search parameters after interaction settles, not every animation frame.
+- [x] Persist camera state in URL search parameters after interaction settles, not every animation frame.
 
-- [ ] Run: `cd frontend && npm run test -- src/components/provenance/cameraState.test.ts src/components/provenance/SpatialLayerCanvas3D.test.tsx`
+- [x] Run: `cd frontend && npm run test -- src/components/provenance/cameraState.test.ts src/components/provenance/SpatialLayerCanvas3D.test.tsx`
 
 Expected: PASS.
 
-- [ ] Commit: `git add frontend/src/components/provenance && git commit -m "feat: control provenance camera and selection"`
+- [x] Commit: `git add frontend/src/components/provenance && git commit -m "feat: control provenance camera and selection"`
 
 ## Task 6: Add path motion, LOD, and reduced-motion behavior
 
