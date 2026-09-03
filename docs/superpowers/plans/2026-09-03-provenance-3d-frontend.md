@@ -162,17 +162,17 @@ Expected: PASS.
 - Create: `frontend/src/components/provenance/SpatialLayerCanvas3D.tsx`
 - Create: `frontend/src/components/provenance/SpatialLayerCanvas3D.test.tsx`
 
-- [ ] Write failing tests for layer colors, relation colors/line styles, status glyphs, instance-ID-to-node mapping, selected-path opacity, and a mocked `Canvas` receiving a perspective camera rather than CSS transforms.
+- [x] Write failing tests for layer colors, relation colors/line styles, status glyphs, instance-ID-to-node mapping, selected-path opacity, and a mocked `Canvas` receiving a perspective camera rather than CSS transforms.
 
-- [ ] Run: `cd frontend && npm run test -- src/components/provenance/visualEncoding.test.ts src/components/provenance/SpatialLayerCanvas3D.test.tsx`
+- [x] Run: `cd frontend && npm run test -- src/components/provenance/visualEncoding.test.ts src/components/provenance/SpatialLayerCanvas3D.test.tsx`
 
 Expected: FAIL.
 
-- [ ] Implement pure `nodeVisual` and `edgeVisual` mappings. Encode state by color plus line style/glyph: confirmed solid, inference/pending dashed, refuted/conflict red with conflict marker, qualified amber.
+- [x] Implement pure `nodeVisual` and `edgeVisual` mappings. Encode state by color plus line style/glyph: confirmed solid, inference/pending dashed, refuted/conflict red with conflict marker, qualified amber.
 
-- [ ] Render translucent horizontal `LayerPlane` meshes at Y `9`, `0`, and `-9`; add labels “结论层”, “事件/事实层”, and “证据层”.
+- [x] Render translucent horizontal `LayerPlane` meshes at Y `9`, `0`, and `-9`; add labels “结论层”, “事件/事实层”, and “证据层”.
 
-- [ ] Render same-geometry nodes with one `InstancedMesh` per layer. Maintain an immutable `instanceId -> nodeId` array and resolve R3F `ThreeEvent<PointerEvent>.instanceId` through it.
+- [x] Render same-geometry nodes with one `InstancedMesh` per layer. Maintain an immutable `instanceId -> nodeId` array and resolve R3F `ThreeEvent<PointerEvent>.instanceId` through it.
 
 ```tsx
 <instancedMesh
@@ -189,17 +189,17 @@ Expected: FAIL.
 </instancedMesh>
 ```
 
-- [ ] Render batched unselected edges and separately pickable selected/hovered edges. All coordinates must come from Three.js world space, not CSS `perspective`, `rotateX`, or DOM transforms.
+- [x] Render batched unselected edges and separately pickable selected/hovered edges. All coordinates must come from Three.js world space, not CSS `perspective`, `rotateX`, or DOM transforms.
 
-- [ ] Create `<Canvas frameloop="demand" camera={{ fov: 48, near: 0.1, far: 600, position: [22, 18, 28] }}>`; add ambient and directional light, call `invalidate()` only while transitions/particles run, and dispose custom geometry/material resources on unmount.
+- [x] Create `<Canvas frameloop="demand" camera={{ fov: 48, near: 0.1, far: 600, position: [22, 18, 28] }}>`; add ambient and directional light, call `invalidate()` only while transitions/particles run, and dispose custom geometry/material resources on unmount.
 
-- [ ] Expose `data-renderer="webgl"` and set `data-webgl-ready="true"` from `onCreated` only after `gl.info.render.frame >= 1` on the next frame. This marker supports diagnostics; it is not the sole browser assertion.
+- [x] Expose `data-renderer="webgl"` and set `data-webgl-ready="true"` from `onCreated` only after `gl.info.render.frame >= 1` on the next frame. This marker supports diagnostics; it is not the sole browser assertion.
 
-- [ ] Run: `cd frontend && npm run test -- src/components/provenance/visualEncoding.test.ts src/components/provenance/SpatialLayerCanvas3D.test.tsx`
+- [x] Run: `cd frontend && npm run test -- src/components/provenance/visualEncoding.test.ts src/components/provenance/SpatialLayerCanvas3D.test.tsx`
 
 Expected: PASS.
 
-- [ ] Commit: `git add frontend/src/components/provenance && git commit -m "feat: render provenance in webgl"`
+- [x] Commit: `git add frontend/src/components/provenance && git commit -m "feat: render provenance in webgl"`
 
 ## Task 5: Add camera gestures, picking, focus, and reset
 
