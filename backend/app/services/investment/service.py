@@ -15,9 +15,9 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import exists, false, func, or_, select
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import Select
+from sqlalchemy.sql import ColumnElement, Select
 
 from app.core.errors import AppError
 from app.infrastructure.models import (
@@ -58,6 +58,7 @@ from app.schemas.investment import (
     InvestmentWatchlistUpdate,
     PersonSourceCreate,
     PersonSourceUpdate,
+    SourceType,
     ThemeSourceBindRequest,
 )
 from app.services.investment.post_processing import enqueue_investment_post_processing
@@ -102,7 +103,7 @@ DEFAULT_X_SOURCES: tuple[dict[str, Any], ...] = (
 )
 
 
-def _challenged_item_filter():
+def _challenged_item_filter() -> ColumnElement[bool]:
     return or_(
         InvestmentItem.thesis_impact.in_(CHALLENGING_THESIS_IMPACTS),
         InvestmentItem.suggested_thesis_impact.in_(CHALLENGING_THESIS_IMPACTS),
@@ -195,9 +196,7 @@ class InvestmentService:
             if watchlist_id in [str(v) for v in (source.default_watchlist_ids or [])]
         ]
 
-    def bind_source_to_watchlist(
-        self, watchlist_id: str, source_id: str
-    ) -> InvestmentSource:
+    def bind_source_to_watchlist(self, watchlist_id: str, source_id: str) -> InvestmentSource:
         wl = self.session.get(InvestmentWatchlist, watchlist_id)
         if wl is None:
             raise AppError("not_found", "watchlist not found", 404)
@@ -212,9 +211,7 @@ class InvestmentService:
             self.session.refresh(src)
         return src
 
-    def unbind_source_from_watchlist(
-        self, watchlist_id: str, source_id: str
-    ) -> InvestmentSource:
+    def unbind_source_from_watchlist(self, watchlist_id: str, source_id: str) -> InvestmentSource:
         wl = self.session.get(InvestmentWatchlist, watchlist_id)
         if wl is None:
             raise AppError("not_found", "watchlist not found", 404)
@@ -258,9 +255,7 @@ class InvestmentService:
             )
         )
 
-    def update_theme(
-        self, theme_id: str, payload: InvestmentThemeUpdate
-    ) -> InvestmentTheme:
+    def update_theme(self, theme_id: str, payload: InvestmentThemeUpdate) -> InvestmentTheme:
         theme = self.session.get(InvestmentTheme, theme_id)
         if theme is None:
             raise AppError("not_found", "theme not found", 404)
@@ -431,26 +426,20 @@ class InvestmentService:
         workspace_id: str = "ws_default",
     ) -> list[InvestmentSource]:
         existing = [
-            source
-            for source in self.list_sources(workspace_id)
-            if source.source_type == "x_web"
+            source for source in self.list_sources(workspace_id) if source.source_type == "x_web"
         ]
         result: list[InvestmentSource] = []
         for definition in DEFAULT_X_SOURCES:
             config = dict(definition["config"])
             source = next(
-                (
-                    candidate
-                    for candidate in existing
-                    if dict(candidate.config or {}) == config
-                ),
+                (candidate for candidate in existing if dict(candidate.config or {}) == config),
                 None,
             )
             if source is None:
                 source = self.create_source(
                     InvestmentSourceCreate(
                         workspace_id=workspace_id,
-                        source_type="x_web",
+                        source_type=SourceType.X_WEB,
                         name=str(definition["name"]),
                         config=config,
                         poll_interval_seconds=900,
@@ -460,9 +449,7 @@ class InvestmentService:
             result.append(source)
         return result
 
-    def update_source(
-        self, source_id: str, payload: InvestmentSourceUpdate
-    ) -> InvestmentSource:
+    def update_source(self, source_id: str, payload: InvestmentSourceUpdate) -> InvestmentSource:
         src = self.session.get(InvestmentSource, source_id)
         if src is None:
             raise AppError("not_found", "source not found", 404)
@@ -800,8 +787,7 @@ class InvestmentService:
             "stale_or_noise": [
                 signal
                 for signal in top_signals
-                if signal.signal_stage in {"stale", "noise"}
-                or signal.actionability == "noise"
+                if signal.signal_stage in {"stale", "noise"} or signal.actionability == "noise"
             ],
         }
 
@@ -831,9 +817,7 @@ class InvestmentService:
         stmt = stmt.order_by(InvestmentThesis.created_at.desc())
         return list(self.session.scalars(stmt))
 
-    def update_thesis(
-        self, thesis_id: str, payload: InvestmentThesisUpdate
-    ) -> InvestmentThesis:
+    def update_thesis(self, thesis_id: str, payload: InvestmentThesisUpdate) -> InvestmentThesis:
         th = self.session.get(InvestmentThesis, thesis_id)
         if th is None:
             raise AppError("not_found", "thesis not found", 404)
@@ -878,9 +862,7 @@ class InvestmentService:
         stmt = stmt.order_by(InvestmentClaim.created_at.desc())
         return list(self.session.scalars(stmt))
 
-    def update_claim(
-        self, claim_id: str, payload: InvestmentClaimUpdate
-    ) -> InvestmentClaim:
+    def update_claim(self, claim_id: str, payload: InvestmentClaimUpdate) -> InvestmentClaim:
         cl = self.session.get(InvestmentClaim, claim_id)
         if cl is None:
             raise AppError("not_found", "claim not found", 404)
@@ -920,9 +902,7 @@ class InvestmentService:
 
     # --- classification & verification ------------------------------------
 
-    def classify_item(
-        self, item_id: str, llm_client: object | None = None
-    ) -> object:
+    def classify_item(self, item_id: str, llm_client: object | None = None) -> object:
         """Run the GLM-5.2 classifier on an item. Writes suggested_* only.
 
         ``llm_client`` is optional; when None the classifier cannot run (the
@@ -934,7 +914,8 @@ class InvestmentService:
         from app.services.investment.classifier import InvestmentClassifier
 
         return InvestmentClassifier(
-            session=self.session, llm_client=llm_client  # type: ignore[arg-type]
+            session=self.session,
+            llm_client=llm_client,  # type: ignore[arg-type]
         ).classify_item(item_id)
 
     def translate_items(
@@ -948,7 +929,8 @@ class InvestmentService:
 
         try:
             return InvestmentTranslationService(
-                session=self.session, llm_client=llm_client  # type: ignore[arg-type]
+                session=self.session,
+                llm_client=llm_client,  # type: ignore[arg-type]
             ).translate_untranslated(
                 workspace_id=workspace_id,
                 limit=limit,
@@ -990,9 +972,7 @@ class InvestmentService:
         if src is None:
             raise AppError("not_found", "source not found", 404)
         job_type = (
-            X_WEB_COLLECT_JOB_TYPE
-            if src.source_type == "x_web"
-            else INVESTMENT_FETCH_JOB_TYPE
+            X_WEB_COLLECT_JOB_TYPE if src.source_type == "x_web" else INVESTMENT_FETCH_JOB_TYPE
         )
 
         existing = self.session.scalar(
@@ -1090,10 +1070,7 @@ class InvestmentService:
             select(func.count(InvestmentItem.id)).where(
                 InvestmentItem.workspace_id == workspace_id,
                 (InvestmentItem.title_zh.is_(None))
-                | (
-                    InvestmentItem.summary.is_not(None)
-                    & InvestmentItem.summary_zh.is_(None)
-                ),
+                | (InvestmentItem.summary.is_not(None) & InvestmentItem.summary_zh.is_(None)),
             )
         )
         unextracted = _count(
@@ -1165,7 +1142,7 @@ class InvestmentService:
         )
         if source_ids is not None:
             if not source_ids:
-                highlights_stmt = highlights_stmt.where(False)
+                highlights_stmt = highlights_stmt.where(false())
             else:
                 highlights_stmt = highlights_stmt.where(InvestmentItem.source_id.in_(source_ids))
         today_highlights = list(
@@ -1183,9 +1160,7 @@ class InvestmentService:
         if watchlist_id is not None:
             claims_stmt = claims_stmt.where(InvestmentClaim.watchlist_id == watchlist_id)
         pending_claims = list(
-            self.session.scalars(
-                claims_stmt.order_by(InvestmentClaim.created_at.desc()).limit(5)
-            )
+            self.session.scalars(claims_stmt.order_by(InvestmentClaim.created_at.desc()).limit(5))
         )
         challenged_stmt = select(InvestmentItem).where(
             InvestmentItem.workspace_id == workspace_id,
@@ -1193,7 +1168,7 @@ class InvestmentService:
         )
         if source_ids is not None:
             if not source_ids:
-                challenged_stmt = challenged_stmt.where(False)
+                challenged_stmt = challenged_stmt.where(false())
             else:
                 challenged_stmt = challenged_stmt.where(InvestmentItem.source_id.in_(source_ids))
         challenged_items = list(
@@ -1287,15 +1262,12 @@ def _digest_response_from_data(data: dict[str, Any]) -> InvestmentDigestResponse
         today_highlights=[
             InvestmentItemResponse.model_validate(i) for i in data["today_highlights"]
         ],
-        pending_claims=[
-            InvestmentClaimResponse.model_validate(c) for c in data["pending_claims"]
-        ],
+        pending_claims=[InvestmentClaimResponse.model_validate(c) for c in data["pending_claims"]],
         challenged_items=[
             InvestmentItemResponse.model_validate(i) for i in data["challenged_items"]
         ],
         early_signals=[
-            InvestmentSignalResponse.model_validate(signal)
-            for signal in data["early_signals"]
+            InvestmentSignalResponse.model_validate(signal) for signal in data["early_signals"]
         ],
         pending_facts=[
             InvestmentFactResponse.model_validate(fact) for fact in data["pending_facts"]

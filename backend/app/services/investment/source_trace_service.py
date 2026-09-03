@@ -39,6 +39,9 @@ class SourceTraceService:
 
         traces: list[InvestmentSourceTrace] = []
         for candidate, score in scored[:limit]:
+            candidate_published_at = candidate.published_at
+            if candidate_published_at is None:
+                continue
             existing = self.session.scalar(
                 select(InvestmentSourceTrace).where(
                     InvestmentSourceTrace.workspace_id == target.workspace_id,
@@ -50,7 +53,7 @@ class SourceTraceService:
                 traces.append(existing)
                 continue
             lead_time = round(
-                max(0.0, (target.published_at - candidate.published_at).total_seconds() / 3600),
+                max(0.0, (target.published_at - candidate_published_at).total_seconds() / 3600),
                 2,
             )
             trace = InvestmentSourceTrace(

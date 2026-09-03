@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import feedparser  # type: ignore[import-untyped]
 
@@ -59,8 +59,7 @@ class HttpClient(Protocol):
     underlying connection pool; fakes implement it as a no-op.
     """
 
-    def get(self, url: str, headers: dict[str, str] | None = None) -> tuple[bytes, str]:
-        ...
+    def get(self, url: str, headers: dict[str, str] | None = None) -> tuple[bytes, str]: ...
 
     def post(
         self,
@@ -68,11 +67,9 @@ class HttpClient(Protocol):
         *,
         headers: dict[str, str] | None = None,
         data: dict[str, str] | str | None = None,
-    ) -> tuple[bytes, str]:
-        ...
+    ) -> tuple[bytes, str]: ...
 
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...
 
 
 class HttpxHttpClient:
@@ -117,7 +114,12 @@ class HttpxHttpClient:
         headers: dict[str, str] | None = None,
         data: dict[str, str] | str | None = None,
     ) -> tuple[bytes, str]:
-        response = self._client.post(url, headers=headers or {}, data=data)
+        response = self._client.post(
+            url,
+            headers=headers or {},
+            data=data if isinstance(data, dict) else None,
+            content=data if isinstance(data, str) else None,
+        )
         response.raise_for_status()
         return response.content, str(response.url)
 
@@ -132,7 +134,8 @@ class HttpxHttpClient:
         response = self._client.post(
             url,
             headers=headers or {},
-            data=data,
+            data=data if isinstance(data, dict) else None,
+            content=data if isinstance(data, str) else None,
             timeout=timeout_seconds,
         )
         response.raise_for_status()
@@ -148,8 +151,7 @@ class HttpxHttpClient:
 class InvestmentFetcher(Protocol):
     """Turn a source config into raw items. No persistence, no dedupe."""
 
-    def fetch(self, source: InvestmentSource, http: HttpClient) -> list[InvestmentRawItem]:
-        ...
+    def fetch(self, source: InvestmentSource, http: HttpClient) -> list[InvestmentRawItem]: ...
 
 
 # --- SEC EDGAR -------------------------------------------------------------
@@ -515,9 +517,7 @@ class BlsFetcher:
                             url=f"{base}/timeseries/data/{sid}",
                             source_name="BLS",
                             published_at=(
-                                _parse_date(str(obs.get("year")))
-                                if obs.get("year")
-                                else None
+                                _parse_date(str(obs.get("year"))) if obs.get("year") else None
                             ),
                             summary=None,
                             raw_payload={
@@ -764,10 +764,13 @@ def _http_get(
     timeout_seconds: int | None = None,
 ) -> tuple[bytes, str]:
     if timeout_seconds is not None and hasattr(http, "get_with_timeout"):
-        return http.get_with_timeout(  # type: ignore[attr-defined]
-            url,
-            headers=headers,
-            timeout_seconds=timeout_seconds,
+        return cast(
+            tuple[bytes, str],
+            cast(Any, http).get_with_timeout(
+                url,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+            ),
         )
     return http.get(url, headers=headers)
 
@@ -781,11 +784,14 @@ def _http_post(
     timeout_seconds: int | None = None,
 ) -> tuple[bytes, str]:
     if timeout_seconds is not None and hasattr(http, "post_with_timeout"):
-        return http.post_with_timeout(  # type: ignore[attr-defined]
-            url,
-            headers=headers,
-            data=data,
-            timeout_seconds=timeout_seconds,
+        return cast(
+            tuple[bytes, str],
+            cast(Any, http).post_with_timeout(
+                url,
+                headers=headers,
+                data=data,
+                timeout_seconds=timeout_seconds,
+            ),
         )
     return http.post(url, headers=headers, data=data)
 
@@ -885,9 +891,7 @@ def _extract_html_summary(body: bytes, limit: int = 2000) -> str | None:
     return paragraph_summary
 
 
-def _extract_html_attachments(
-    body: bytes, base_url: str, limit: int = 8
-) -> list[dict[str, Any]]:
+def _extract_html_attachments(body: bytes, base_url: str, limit: int = 8) -> list[dict[str, Any]]:
     """Extract article-level attachment links from a detail HTML page."""
     import re
     from urllib.parse import urljoin
@@ -1155,7 +1159,6 @@ def _parse_date(value: str) -> datetime | None:
     if not value:
         return None
     try:
-
         dt = datetime.fromisoformat(value)
         return dt.replace(tzinfo=UTC)
     except ValueError:
