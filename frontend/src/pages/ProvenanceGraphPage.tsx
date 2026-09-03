@@ -110,17 +110,25 @@ export function ProvenanceGraphPage() {
   const webglAvailable = useMemo(() => supportsWebGL(), []);
   const graphRequest = useRef(0);
   const edgeRequest = useRef(0);
+  const searchParamsRef = useRef(searchParams);
+  const observedSearchRef = useRef(searchParams.toString());
+  const observedSearch = searchParams.toString();
+  if (observedSearchRef.current !== observedSearch) {
+    observedSearchRef.current = observedSearch;
+    searchParamsRef.current = searchParams;
+  }
 
   const updateUrl = useCallback(
     (changes: Record<string, string | null>) => {
-      const next = new URLSearchParams(searchParams);
+      const next = new URLSearchParams(searchParamsRef.current);
       Object.entries(changes).forEach(([key, value]) => {
         if (value) next.set(key, value);
         else next.delete(key);
       });
+      searchParamsRef.current = next;
       setSearchParams(next, { replace: true });
     },
-    [searchParams, setSearchParams],
+    [setSearchParams],
   );
 
   useEffect(() => {

@@ -369,11 +369,11 @@ Expected: PASS.
 - Modify: `frontend/package.json`
 - Modify: `frontend/package-lock.json`
 
-- [ ] Add `"test:e2e": "playwright test"` and configure Vite as Playwright’s web server on a fixed test port.
+- [x] Add `"test:e2e": "playwright test"` and configure Vite as Playwright’s web server on a fixed test port.
 
-- [ ] Add a deterministic API fixture route for 100, 500, and 2000 raw-node responses. The browser test must not require a live backend.
+- [x] Add a deterministic API fixture route for 100, 500, and 2000 raw-node responses. The browser test must not require a live backend.
 
-- [ ] Add a development/test-only scene probe exposing copies of renderer/camera/control state through `window.__KNOWPILOT_PROVENANCE_DEBUG__`. Do not expose mutable Three.js objects.
+- [x] Add a development/test-only scene probe exposing copies of renderer/camera/control state through `window.__KNOWPILOT_PROVENANCE_DEBUG__`. Do not expose mutable Three.js objects.
 
 ```ts
 interface ProvenanceDebugSnapshot {
@@ -388,7 +388,7 @@ interface ProvenanceDebugSnapshot {
 }
 ```
 
-- [ ] Write browser assertions that prove behavior, not just appearance:
+- [x] Write browser assertions that prove behavior, not just appearance:
 
 ```ts
 test("rotates, pans, zooms, raycasts, and resets in WebGL", async ({ page }) => {
@@ -405,13 +405,13 @@ test("rotates, pans, zooms, raycasts, and resets in WebGL", async ({ page }) => 
 });
 ```
 
-- [ ] Also assert WebGL renderer construction, at least one rendered frame, node raycast selection updating the audit drawer, edge selection, Shift-left pan, middle pan, double-click reset, keyboard alternatives, reduced motion, explicit no-WebGL fallback, resource counts after mount/unmount, and selected-path completeness for the 2000-node fixture.
+- [x] Also assert WebGL renderer construction, at least one rendered frame, node raycast selection updating the audit drawer, edge selection, Shift-left pan, middle pan, double-click reset, keyboard alternatives, reduced motion, explicit no-WebGL fallback, resource counts after mount/unmount, and selected-path completeness for the 2000-node fixture.
 
-- [ ] Run: `cd frontend && npm run test:e2e -- e2e/provenance-3d.spec.ts`
+- [x] Run: `cd frontend && npm run test:e2e -- e2e/provenance-3d.spec.ts`
 
 Expected: PASS in Chromium with hardware or SwiftShader WebGL.
 
-- [ ] Commit: `git add frontend/playwright.config.ts frontend/e2e frontend/package.json frontend/package-lock.json frontend/src/components/provenance && git commit -m "test: verify provenance webgl interactions"`
+- [x] Commit: `git add frontend/playwright.config.ts frontend/e2e frontend/package.json frontend/package-lock.json frontend/src/components/provenance && git commit -m "test: verify provenance webgl interactions"`
 
 ## Task 10: Frontend regression and documentation
 

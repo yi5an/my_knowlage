@@ -91,6 +91,13 @@ export function TraceEdges({
           key={batch.key}
           geometry={batch.geometry}
           onClick={(event: ThreeEvent<MouseEvent>) => {
+            if (
+              event.intersections.some(
+                (intersection) => intersection.object instanceof THREE.InstancedMesh,
+              )
+            ) {
+              return;
+            }
             event.stopPropagation();
             const segmentIndex = Math.floor((event.index ?? 0) / 2);
             const edgeId = batch.edgeIds[segmentIndex];
@@ -129,6 +136,13 @@ export function TraceEdges({
             transparent
             opacity={1}
             onClick={(event) => {
+              if (
+                event.intersections.some(
+                  (intersection) => intersection.object instanceof THREE.InstancedMesh,
+                )
+              ) {
+                return;
+              }
               event.stopPropagation();
               onSelectEdge(edge.id);
             }}

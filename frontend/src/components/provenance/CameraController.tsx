@@ -17,6 +17,7 @@ import {
   type ProvenanceCameraState,
 } from "./cameraState";
 import type { ProvenancePosition } from "./layout";
+import { updateProvenanceDebug } from "./debug";
 
 export interface CameraControllerHandle {
   getState(): ProvenanceCameraState;
@@ -58,10 +59,16 @@ export const CameraController = forwardRef<CameraControllerHandle, CameraControl
 
     const readState = (): ProvenanceCameraState => {
       const target = controlsRef.current?.target ?? new THREE.Vector3(...initialState.target);
-      return clampCameraState({
+      const state = clampCameraState({
         position: camera.position.toArray() as [number, number, number],
         target: target.toArray() as [number, number, number],
       });
+      updateProvenanceDebug({
+        cameraPosition: [...state.position],
+        cameraQuaternion: camera.quaternion.toArray() as [number, number, number, number],
+        controlsTarget: [...state.target],
+      });
+      return state;
     };
 
     const applyState = (state: ProvenanceCameraState) => {
@@ -69,6 +76,7 @@ export const CameraController = forwardRef<CameraControllerHandle, CameraControl
       camera.position.set(...bounded.position);
       controlsRef.current?.target.set(...bounded.target);
       controlsRef.current?.update();
+      readState();
       invalidate();
     };
 
@@ -154,7 +162,10 @@ export const CameraController = forwardRef<CameraControllerHandle, CameraControl
           MIDDLE: THREE.MOUSE.PAN,
           RIGHT: THREE.MOUSE.PAN,
         }}
-        onChange={() => invalidate()}
+        onChange={() => {
+          readState();
+          invalidate();
+        }}
         onEnd={() => onCameraChange?.(readState())}
       />
     );

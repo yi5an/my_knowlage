@@ -12,6 +12,7 @@ import {
 } from "./cameraState";
 import { scenePolicy } from "./scenePolicy";
 import { useMotionPreference } from "./useMotionPreference";
+import { updateProvenanceDebug } from "./debug";
 
 interface SpatialLayerCanvas3DProps {
   graph: ProvenanceGraphResponse;
@@ -42,7 +43,17 @@ export function SpatialLayerCanvas3D(props: SpatialLayerCanvas3DProps) {
     state.invalidate();
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        if (state.gl.info.render.frame >= 1) setReady(true);
+        if (state.gl.info.render.frame >= 1) {
+          setReady(true);
+          updateProvenanceDebug({
+            frame: state.gl.info.render.frame,
+            cameraPosition: state.camera.position.toArray() as [number, number, number],
+            cameraQuaternion: state.camera.quaternion.toArray() as [number, number, number, number],
+            geometries: state.gl.info.memory.geometries,
+            textures: state.gl.info.memory.textures,
+            mounted: true,
+          });
+        }
       });
     });
   }, []);
@@ -96,6 +107,7 @@ export function SpatialLayerCanvas3D(props: SpatialLayerCanvas3DProps) {
           motionEnabled={(props.motionEnabled ?? true) && policy.cameraTween}
           onCameraChange={props.onCameraChange}
           scenePolicy={policy}
+          reducedMotion={reducedMotion}
         />
       </Canvas>
       <span className="provenance-sr-only" aria-live="polite">

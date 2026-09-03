@@ -12,6 +12,7 @@ import { LayerPlane } from "./LayerPlane";
 import { TraceEdges } from "./TraceEdges";
 import { FlowParticles } from "./FlowParticles";
 import type { ProvenanceScenePolicy } from "./scenePolicy";
+import { DebugSceneProbe } from "./DebugSceneProbe";
 
 const LAYERS: TraceLayer[] = ["conclusion", "event", "evidence"];
 const LABELS: Record<TraceLayer, string> = {
@@ -33,6 +34,7 @@ interface ProvenanceSceneProps {
   motionEnabled?: boolean;
   onCameraChange?: (state: ProvenanceCameraState) => void;
   scenePolicy?: ProvenanceScenePolicy;
+  reducedMotion?: boolean;
 }
 
 export function ProvenanceScene(props: ProvenanceSceneProps) {
@@ -52,6 +54,13 @@ export function ProvenanceScene(props: ProvenanceSceneProps) {
         shiftPan={props.shiftPan ?? false}
         motionEnabled={props.motionEnabled}
         onCameraChange={props.onCameraChange}
+      />
+      <DebugSceneProbe
+        graph={props.graph}
+        positions={props.positions}
+        selectedNodeId={props.selectedNodeId}
+        selectedEdgeCount={props.selectedEdgeIds.size}
+        reducedMotion={props.reducedMotion ?? false}
       />
       {LAYERS.map((layer) => (
         <group key={layer}>
