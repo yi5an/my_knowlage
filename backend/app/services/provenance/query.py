@@ -11,8 +11,15 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.infrastructure.graph_store import GraphStore, GraphStoreEdge, GraphStoreNode
-from app.infrastructure.models import TraceEdge, TraceEdgeEvidence, TraceNode
+from app.infrastructure.models import (
+    EvidenceAnchor,
+    TraceEdge,
+    TraceEdgeEvidence,
+    TraceEdgeReview,
+    TraceNode,
+)
 from app.schemas.provenance import (
+    EvidenceAnchorResponse,
     EvidenceValidationState,
     OriginType,
     ProvenanceCluster,
@@ -21,6 +28,7 @@ from app.schemas.provenance import (
     ProvenanceNode,
     ReviewStatus,
     TraceDirection,
+    TraceEdgeDetailResponse,
     TraceLayer,
     TraceRelationType,
     ValidationStatus,
@@ -144,6 +152,57 @@ class ProvenanceQueryService:
             has_more=has_more,
             next_cursor=str(max_nodes) if has_more else None,
             filters={"direction": parsed_direction.value, "node_id": node_id},
+        )
+
+    def edge_detail(self, *, workspace_id: str, edge_id: str) -> TraceEdgeDetailResponse:
+        edge = self.session.get(TraceEdge, edge_id)
+        if edge is None or edge.workspace_id != workspace_id:
+            raise AppError(
+                "provenance_object_not_found",
+                "Trace edge was not found in this workspace.",
+                HTTPStatus.NOT_FOUND,
+            )
+        evidence_ids = list(
+            self.session.scalars(
+                select(TraceEdgeEvidence.evidence_anchor_id).where(
+                    TraceEdgeEvidence.edge_id == edge.id
+                )
+            )
+        )
+        evidence = list(
+            self.session.scalars(
+                select(EvidenceAnchor).where(
+                    EvidenceAnchor.workspace_id == workspace_id,
+                    EvidenceAnchor.id.in_(evidence_ids),
+                )
+            )
+        )
+        reviews = list(
+            self.session.scalars(
+                select(TraceEdgeReview)
+                .where(
+                    TraceEdgeReview.workspace_id == workspace_id,
+                    TraceEdgeReview.edge_id == edge.id,
+                )
+                .order_by(TraceEdgeReview.created_at)
+            )
+        )
+        payload = self.edge_schema(edge).model_dump()
+        return TraceEdgeDetailResponse(
+            **payload,
+            evidence=[EvidenceAnchorResponse.model_validate(anchor) for anchor in evidence],
+            review_history=[
+                {
+                    "id": review.id,
+                    "reviewer_id": review.reviewer_id,
+                    "previous_status": review.previous_status,
+                    "new_status": review.new_status,
+                    "decision": review.decision,
+                    "note": review.note,
+                    "created_at": review.created_at,
+                }
+                for review in reviews
+            ],
         )
 
     def _from_postgres_overview(
@@ -271,7 +330,7 @@ class ProvenanceQueryService:
         response_nodes = [_node_schema(node) for node in nodes]
         return ProvenanceGraphResponse(
             nodes=response_nodes,
-            edges=[self._edge_schema(edge) for edge in edges],
+            edges=[self.edge_schema(edge) for edge in edges],
             clusters=_clusters(response_nodes),
             graph_version=self._graph_version(workspace_id, filters),
             total_nodes=total_nodes,
@@ -280,7 +339,7 @@ class ProvenanceQueryService:
             next_cursor=next_cursor,
         )
 
-    def _edge_schema(self, edge: TraceEdge) -> ProvenanceEdge:
+    def edge_schema(self, edge: TraceEdge) -> ProvenanceEdge:
         evidence_ids = list(
             self.session.scalars(
                 select(TraceEdgeEvidence.evidence_anchor_id).where(

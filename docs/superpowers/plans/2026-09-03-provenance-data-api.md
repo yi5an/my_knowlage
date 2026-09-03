@@ -362,13 +362,13 @@ Expected: PASS.
 - Modify: `docs/development/error-codes.md`
 - Create: `backend/tests/test_provenance_api.py`
 
-- [ ] Write failing API tests for `overview`, both trace directions, edge detail, review success, 409 optimistic-lock conflict, conclusion creation, invalid locator 422, missing workspace access, and degraded response fields.
+- [x] Write failing API tests for `overview`, both trace directions, edge detail, review success, 409 optimistic-lock conflict, conclusion creation, invalid locator 422, missing workspace access, and degraded response fields.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_api.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_api.py -q`
 
 Expected: FAIL with 404 because the router is not registered.
 
-- [ ] Add `APIRouter(prefix="/provenance", tags=["provenance"])`. Use the project’s existing session/graph-store dependencies and pass `workspace_id` into every service call.
+- [x] Add `APIRouter(prefix="/provenance", tags=["provenance"])`. Use the project’s existing session/graph-store dependencies and pass `workspace_id` into every service call.
 
 ```python
 @router.get("/nodes/{node_id}/trace", response_model=ProvenanceGraphResponse)
@@ -381,15 +381,15 @@ def trace_node(
     return service.trace(workspace_id=workspace_id, node_id=node_id, direction=direction)
 ```
 
-- [ ] Add error-code documentation for `evidence_anchor_mismatch`, `trace_evidence_required`, `trace_invalid_direction`, `trace_review_conflict`, `provenance_path_too_large`, and `provenance_object_not_found`.
+- [x] Add error-code documentation for `evidence_anchor_mismatch`, `trace_evidence_required`, `trace_invalid_direction`, `trace_review_conflict`, `provenance_path_too_large`, and `provenance_object_not_found`.
 
-- [ ] Register the router in `backend/app/api/v1/router.py` and document pagination/degradation conventions.
+- [x] Register the router in `backend/app/api/v1/router.py` and document pagination/degradation conventions.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_api.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_api.py -q`
 
 Expected: PASS.
 
-- [ ] Commit: `git add backend/app/api/v1/provenance.py backend/app/api/v1/router.py backend/app/services/provenance/dependencies.py docs/development/api-conventions.md docs/development/error-codes.md backend/tests/test_provenance_api.py && git commit -m "feat: expose provenance APIs"`
+- [x] Commit: `git add backend/app/api/v1/provenance.py backend/app/api/v1/router.py backend/app/services/provenance/dependencies.py docs/development/api-conventions.md docs/development/error-codes.md backend/tests/test_provenance_api.py && git commit -m "feat: expose provenance APIs"`
 
 ## Task 8: Run rebuilds through `task_job`
 

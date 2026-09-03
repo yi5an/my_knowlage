@@ -42,3 +42,16 @@ AI-generated API results must include:
 
 Do not hardcode provider names or API keys in request handlers.
 
+## Provenance Graph
+
+Event–conclusion provenance uses `/api/v1/provenance`. Stored edges always point from
+evidence toward events/facts/signals and then toward conclusions; `direction=down`
+and `direction=up` control traversal without reversing that stored direction.
+
+Overview and trace responses include `graph_version`, node counts, `has_more`, and
+an optional `next_cursor`. If the graph-store projection is unavailable, the API
+returns a bounded PostgreSQL result with `degraded=true` and a non-empty
+`degraded_reason` rather than presenting it as a complete graph.
+
+Edge review requests include the current `version_no`. A stale review is rejected
+with HTTP 409 so clients can refetch without overwriting another review.
