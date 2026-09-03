@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -1111,3 +1112,184 @@ class MacroEvent(UpdatedTimestampMixin, Base):
     value: Mapped[str | None] = mapped_column(String(128))
     unit: Mapped[str | None] = mapped_column(String(64))
     raw_payload: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
+
+
+class EvidenceAnchor(TimestampMixin, Base):
+    """Immutable pointer to an exact fragment of persisted source content."""
+
+    __tablename__ = "evidence_anchor"
+    __table_args__ = (
+        Index("idx_evidence_anchor_workspace_type", "workspace_id", "anchor_type"),
+        Index("idx_evidence_anchor_document", "document_id", "version_id"),
+        Index("idx_evidence_anchor_source_item", "source_item_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("document.id"))
+    version_id: Mapped[str | None] = mapped_column(ForeignKey("document_version.id"))
+    chunk_id: Mapped[str | None] = mapped_column(ForeignKey("document_chunk.id"))
+    source_item_id: Mapped[str | None] = mapped_column(ForeignKey("investment_item.id"))
+    anchor_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    locator: Mapped[JsonObject] = mapped_column("locator_json", JsonType, default=dict)
+    quote: Mapped[str] = mapped_column(Text(), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_uri_snapshot: Mapped[str | None] = mapped_column(Text())
+    source_quality: Mapped[float | None] = mapped_column(Float())
+    validation_state: Mapped[str] = mapped_column(
+        String(32), default="valid", server_default="valid", nullable=False
+    )
+    created_by_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_by_id: Mapped[str | None] = mapped_column(String(64))
+    supersedes_anchor_id: Mapped[str | None] = mapped_column(ForeignKey("evidence_anchor.id"))
+
+
+class KnowledgeEvent(UpdatedTimestampMixin, Base):
+    """Normalized event in the middle layer of the provenance graph."""
+
+    __tablename__ = "knowledge_event"
+    __table_args__ = (
+        Index("idx_knowledge_event_workspace_time", "workspace_id", "occurred_from"),
+        Index("idx_knowledge_event_canonical", "workspace_id", "canonical_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(Text(), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text())
+    subject_entity_ids: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    action: Mapped[str] = mapped_column(Text(), nullable=False)
+    object_entity_ids: Mapped[JsonArray] = mapped_column(JsonType, default=list)
+    occurred_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    occurred_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    location: Mapped[str | None] = mapped_column(Text())
+    canonical_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float(), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    validation_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    origin_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_metadata: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
+
+
+class Conclusion(UpdatedTimestampMixin, Base):
+    """Versioned investment or general-research conclusion."""
+
+    __tablename__ = "conclusion"
+    __table_args__ = (
+        Index("idx_conclusion_workspace_type", "workspace_id", "conclusion_type"),
+        Index("idx_conclusion_source", "workspace_id", "source_object_type", "source_object_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    conclusion_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    conclusion_subtype: Mapped[str | None] = mapped_column(String(64))
+    title: Mapped[str] = mapped_column(Text(), nullable=False)
+    body: Mapped[str] = mapped_column(Text(), nullable=False)
+    stance: Mapped[str | None] = mapped_column(String(64))
+    scope: Mapped[JsonObject] = mapped_column("scope_json", JsonType, default=dict)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confidence: Mapped[float] = mapped_column(Float(), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    validation_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    origin_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_metadata: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
+    source_object_type: Mapped[str | None] = mapped_column(String(64))
+    source_object_id: Mapped[str | None] = mapped_column(String(64))
+    version_no: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    supersedes_id: Mapped[str | None] = mapped_column(ForeignKey("conclusion.id"))
+
+
+class TraceNode(UpdatedTimestampMixin, Base):
+    """Stable node identity shared by PostgreSQL and graph projections."""
+
+    __tablename__ = "trace_node"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "backing_type", "backing_id", name="uq_trace_node_backing"
+        ),
+        UniqueConstraint("id", "workspace_id", name="uq_trace_node_id_workspace"),
+        Index("idx_trace_node_workspace_layer", "workspace_id", "layer"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    layer: Mapped[str] = mapped_column(String(32), nullable=False)
+    node_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    backing_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    backing_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(Text(), nullable=False)
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confidence: Mapped[float | None] = mapped_column(Float())
+    display_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    properties: Mapped[JsonObject] = mapped_column("properties_json", JsonType, default=dict)
+
+
+class TraceEdge(UpdatedTimestampMixin, Base):
+    """Versioned semantic link whose direction follows evidence to conclusion."""
+
+    __tablename__ = "trace_edge"
+    __table_args__ = (
+        Index("idx_trace_edge_workspace_source", "workspace_id", "source_node_id"),
+        Index("idx_trace_edge_workspace_target", "workspace_id", "target_node_id"),
+        ForeignKeyConstraint(
+            ["source_node_id", "workspace_id"],
+            ["trace_node.id", "trace_node.workspace_id"],
+            name="fk_trace_edge_source_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["target_node_id", "workspace_id"],
+            ["trace_node.id", "trace_node.workspace_id"],
+            name="fk_trace_edge_target_workspace",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "source_node_id",
+            "target_node_id",
+            "relation_type",
+            "version_no",
+            name="uq_trace_edge_version",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    source_node_id: Mapped[str] = mapped_column(ForeignKey("trace_node.id"), nullable=False)
+    target_node_id: Mapped[str] = mapped_column(ForeignKey("trace_node.id"), nullable=False)
+    relation_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    rationale: Mapped[str | None] = mapped_column(Text())
+    confidence: Mapped[float | None] = mapped_column(Float())
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    validation_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    origin_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_metadata: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
+    version_no: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    supersedes_id: Mapped[str | None] = mapped_column(ForeignKey("trace_edge.id"))
+
+
+class TraceEdgeEvidence(Base):
+    __tablename__ = "trace_edge_evidence"
+
+    edge_id: Mapped[str] = mapped_column(ForeignKey("trace_edge.id"), primary_key=True)
+    evidence_anchor_id: Mapped[str] = mapped_column(
+        ForeignKey("evidence_anchor.id"), primary_key=True
+    )
+
+
+class TraceEdgeReview(TimestampMixin, Base):
+    """Append-only audit event for an edge review decision."""
+
+    __tablename__ = "trace_edge_review"
+    __table_args__ = (Index("idx_trace_edge_review_edge", "edge_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    edge_id: Mapped[str] = mapped_column(ForeignKey("trace_edge.id"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    reviewer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    previous_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    new_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text())

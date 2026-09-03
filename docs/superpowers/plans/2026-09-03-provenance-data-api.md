@@ -126,7 +126,7 @@ Expected: PASS.
 - Create: `backend/alembic/versions/202609030001_provenance_core.py`
 - Create: `backend/tests/test_provenance_models.py`
 
-- [ ] Write model tests using the existing in-memory SQLite fixture style. Cover unique node registration, same-workspace edge endpoints, immutable anchor behavior at service level, edge evidence uniqueness, conclusion supersession, and review history persistence.
+- [x] Write model tests using the existing in-memory SQLite fixture style. Cover unique node registration, same-workspace edge endpoints, immutable anchor behavior at service level, edge evidence uniqueness, conclusion supersession, and review history persistence.
 
 ```python
 def test_trace_node_backing_identity_is_unique(session: Session) -> None:
@@ -140,11 +140,11 @@ def test_trace_node_backing_identity_is_unique(session: Session) -> None:
         session.commit()
 ```
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_models.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_models.py -q`
 
 Expected: FAIL because the models do not exist.
 
-- [ ] Add `EvidenceAnchor`, `KnowledgeEvent`, `Conclusion`, `TraceNode`, `TraceEdge`, `TraceEdgeEvidence`, and `TraceEdgeReview` SQLAlchemy models. Use string primary keys, `JsonType`, explicit indexes, foreign keys, and named constraints consistent with `models.py`.
+- [x] Add `EvidenceAnchor`, `KnowledgeEvent`, `Conclusion`, `TraceNode`, `TraceEdge`, `TraceEdgeEvidence`, and `TraceEdgeReview` SQLAlchemy models. Use string primary keys, `JsonType`, explicit indexes, foreign keys, and named constraints consistent with `models.py`.
 
 ```python
 class TraceNode(UpdatedTimestampMixin, Base):
@@ -170,17 +170,17 @@ class TraceNode(UpdatedTimestampMixin, Base):
     properties: Mapped[JsonObject] = mapped_column("properties_json", JsonType, default=dict)
 ```
 
-- [ ] Store `locator_json` and `model_metadata` in portable `JsonType`; use composite unique constraints for `trace_edge_evidence(edge_id, evidence_anchor_id)` and a monotonic integer `version_no` on conclusions and edges.
+- [x] Store `locator_json` and `model_metadata` in portable `JsonType`; use composite unique constraints for `trace_edge_evidence(edge_id, evidence_anchor_id)` and a monotonic integer `version_no` on conclusions and edges.
 
-- [ ] Write migration upgrade and downgrade operations. Set `down_revision = "202607230002"`. Create tables in dependency order and drop them in exact reverse order.
+- [x] Write migration upgrade and downgrade operations. Set `down_revision = "202607230002"`. Create tables in dependency order and drop them in exact reverse order.
 
-- [ ] Run migration verification against a temporary SQLite database and the model tests.
+- [x] Run migration verification against a temporary SQLite database and the model tests. The repository's older `202607150005` migration cannot run from zero on SQLite because it adds a foreign key outside batch mode, so execution stamped a disposable database at `202607230002` and verified this migration's upgrade and downgrade independently.
 
 Run: `cd backend && alembic upgrade head && pytest tests/test_provenance_models.py -q`
 
 Expected: PASS; Alembic reports revision `202609030001`.
 
-- [ ] Commit: `git add backend/app/infrastructure/models.py backend/alembic/versions/202609030001_provenance_core.py backend/tests/test_provenance_models.py && git commit -m "feat: add provenance persistence models"`
+- [x] Commit: `git add backend/app/infrastructure/models.py backend/alembic/versions/202609030001_provenance_core.py backend/tests/test_provenance_models.py && git commit -m "feat: add provenance persistence models"`
 
 ## Task 3: Implement immutable evidence anchors
 
