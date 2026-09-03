@@ -328,6 +328,19 @@ class ClaimVerifier:
                 else "unverified",
             )
             edge_ids.append(edge.id)
+        if by_stance:
+            if "supports" in by_stance and "refutes" in by_stance:
+                conclusion.validation_status = "conflicted"
+            elif "refutes" in by_stance:
+                conclusion.validation_status = "refuted"
+            elif "supports" in by_stance:
+                conclusion.validation_status = "supported"
+            else:
+                conclusion.validation_status = "insufficient_evidence"
+            conclusion_node.properties = {
+                **dict(conclusion_node.properties or {}),
+                "validation_status": conclusion.validation_status,
+            }
         return edge_ids, unanchored
 
 

@@ -154,6 +154,7 @@ def test_claim_verification_persists_exact_anchor_edges_and_conclusion() -> None
     conclusion = session.scalar(select(Conclusion))
     assert conclusion is not None
     assert conclusion.source_object_id == claim.id
+    assert conclusion.validation_status == "conflicted"
     edges = list(session.scalars(select(TraceEdge)))
     assert {edge.relation_type for edge in edges} == {"derived_from", "supports", "refutes"}
     assert len(list(session.scalars(select(TraceEdgeEvidence)))) == 4
