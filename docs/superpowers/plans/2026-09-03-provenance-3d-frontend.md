@@ -65,7 +65,7 @@ Expected: PASS.
 - Create: `frontend/src/services/provenanceApi.ts`
 - Create: `frontend/src/services/provenanceApi.test.ts`
 
-- [ ] Write failing request tests by mocking `apiRequest`. Cover overview filters, URL encoding, upward/downward trace, edge review with `version_no`, conclusion creation, rebuild, and job polling.
+- [x] Write failing request tests by mocking `apiRequest`. Cover overview filters, URL encoding, upward/downward trace, edge review with `version_no`, conclusion creation, rebuild, and job polling.
 
 ```ts
 it("requests an upward trace without reversing stored edges", async () => {
@@ -76,11 +76,11 @@ it("requests an upward trace without reversing stored edges", async () => {
 });
 ```
 
-- [ ] Run: `cd frontend && npm run test -- src/services/provenanceApi.test.ts`
+- [x] Run: `cd frontend && npm run test -- src/services/provenanceApi.test.ts`
 
 Expected: FAIL because the API module does not exist.
 
-- [ ] Define literal unions for all node layers/types, edge relations, review/validation statuses, evidence locators, graph metadata, filters, and review actions. Keep API field names in snake case rather than silently transforming them.
+- [x] Define literal unions for all node layers/types, edge relations, review/validation statuses, evidence locators, graph metadata, filters, and review actions. Keep API field names in snake case rather than silently transforming them.
 
 ```ts
 export type EvidenceLocator =
@@ -104,13 +104,13 @@ export interface ProvenanceGraphResponse {
 }
 ```
 
-- [ ] Build query strings with `URLSearchParams`, omit undefined filters, and encode path IDs with `encodeURIComponent`.
+- [x] Build query strings with `URLSearchParams`, omit undefined filters, and encode path IDs with `encodeURIComponent`.
 
-- [ ] Run: `cd frontend && npm run test -- src/services/provenanceApi.test.ts`
+- [x] Run: `cd frontend && npm run test -- src/services/provenanceApi.test.ts`
 
 Expected: PASS.
 
-- [ ] Commit: `git add frontend/src/types/provenance.ts frontend/src/services/provenanceApi.ts frontend/src/services/provenanceApi.test.ts && git commit -m "feat: add provenance frontend contract"`
+- [x] Commit: `git add frontend/src/types/provenance.ts frontend/src/services/provenanceApi.ts frontend/src/services/provenanceApi.test.ts && git commit -m "feat: add provenance frontend contract"`
 
 ## Task 3: Implement deterministic three-layer layout in a worker
 
