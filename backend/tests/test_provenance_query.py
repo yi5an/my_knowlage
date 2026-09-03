@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.infrastructure.database import Base
-from app.infrastructure.graph_store import GraphStore, GraphStoreError, InMemoryGraphStore
+from app.infrastructure.graph_store import (
+    GraphStore,
+    GraphStoreEdge,
+    GraphStoreError,
+    GraphStoreNode,
+    InMemoryGraphStore,
+)
 from app.infrastructure.models import Conclusion, EvidenceAnchor, KnowledgeEvent, Workspace
 from app.services.provenance.links import TraceLinkService
 from app.services.provenance.projection import ProvenanceProjectionService
@@ -203,3 +209,47 @@ def test_projection_preserves_node_and_edge_identity(
     assert result.edge_count == 2
     assert {node.id for node in projected.nodes} == set(trace_graph)
     assert len(projected.edges) == 2
+
+
+def test_overview_prioritizes_connected_nodes_when_result_is_capped() -> None:
+    store = InMemoryGraphStore()
+    store.upsert_nodes(
+        [
+            GraphStoreNode(
+                id=f"filler-{index}",
+                label=f"Filler {index}",
+                node_type="provenance",
+                properties={"workspace_id": "ws"},
+            )
+            for index in range(3)
+        ]
+        + [
+            GraphStoreNode(
+                id="source",
+                label="Source",
+                node_type="provenance",
+                properties={"workspace_id": "ws"},
+            ),
+            GraphStoreNode(
+                id="target",
+                label="Target",
+                node_type="provenance",
+                properties={"workspace_id": "ws"},
+            ),
+        ]
+    )
+    store.upsert_edges(
+        [
+            GraphStoreEdge(
+                id="edge",
+                source_id="source",
+                target_id="target",
+                relation_type="supports",
+            )
+        ]
+    )
+
+    result = store.search("*", "ws", limit=2, node_types=["provenance"])
+
+    assert {node.id for node in result.nodes} == {"source", "target"}
+    assert [edge.id for edge in result.edges] == ["edge"]
