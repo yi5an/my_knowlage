@@ -286,13 +286,13 @@ Expected: PASS.
 - Create: `backend/app/services/provenance/conclusions.py`
 - Create: `backend/tests/test_provenance_domain.py`
 
-- [ ] Write failing tests for event `canonical_key`, uncertain duplicate preservation, investment/research conclusion adapters, version increments, and atomic node registration.
+- [x] Write failing tests for event `canonical_key`, uncertain duplicate preservation, investment/research conclusion adapters, version increments, and atomic node registration.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_domain.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_domain.py -q`
 
 Expected: FAIL.
 
-- [ ] Implement deterministic event keys from normalized subject/action/object, event type, and bounded time bucket. Return candidate matches separately; never merge solely on embedding similarity.
+- [x] Implement deterministic event keys from normalized subject/action/object, event type, and bounded time bucket. Return candidate matches separately; never merge solely on embedding similarity.
 
 ```python
 @dataclass(frozen=True)
@@ -302,15 +302,15 @@ class EventNormalizationResult:
     candidate_event_ids: tuple[str, ...]
 ```
 
-- [ ] Implement `ConclusionService.create`, `revise`, `from_investment_claim`, `from_investment_thesis`, and `from_reading_insight`. Persist the generic conclusion and register its trace node in one transaction.
+- [x] Implement `ConclusionService.create`, `revise`, `from_investment_claim`, `from_investment_thesis`, and `from_reading_insight`. Persist the generic conclusion and register its trace node in one transaction.
 
-- [ ] Map existing status vocabularies explicitly in module-level dictionaries; reject unknown values instead of silently defaulting.
+- [x] Map existing status vocabularies explicitly in module-level dictionaries; reject unknown values instead of silently defaulting.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_domain.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_domain.py -q`
 
 Expected: PASS.
 
-- [ ] Commit: `git add backend/app/services/provenance/events.py backend/app/services/provenance/conclusions.py backend/tests/test_provenance_domain.py && git commit -m "feat: add provenance event and conclusion services"`
+- [x] Commit: `git add backend/app/services/provenance/events.py backend/app/services/provenance/conclusions.py backend/tests/test_provenance_domain.py && git commit -m "feat: add provenance event and conclusion services"`
 
 ## Task 6: Query paths and graph-store projection with explicit degradation
 
