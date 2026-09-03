@@ -27,10 +27,10 @@ export const provenanceApi = {
   overview(
     filters: ProvenanceOverviewFilters = {},
     workspaceId = DEFAULT_WORKSPACE_ID,
+    signal?: AbortSignal,
   ): Promise<ProvenanceGraphResponse> {
-    return apiRequest(
-      `/provenance/overview${query({ workspace_id: workspaceId, ...filters })}`,
-    );
+    const path = `/provenance/overview${query({ workspace_id: workspaceId, ...filters })}`;
+    return signal ? apiRequest(path, { signal }) : apiRequest(path);
   },
 
   traceNode(
@@ -38,14 +38,14 @@ export const provenanceApi = {
     direction: TraceDirection,
     workspaceId = DEFAULT_WORKSPACE_ID,
     maxNodes?: number,
+    signal?: AbortSignal,
   ): Promise<ProvenanceGraphResponse> {
-    return apiRequest(
-      `/provenance/nodes/${encodeURIComponent(nodeId)}/trace${query({
-        workspace_id: workspaceId,
-        direction,
-        max_nodes: maxNodes,
-      })}`,
-    );
+    const path = `/provenance/nodes/${encodeURIComponent(nodeId)}/trace${query({
+      workspace_id: workspaceId,
+      direction,
+      max_nodes: maxNodes,
+    })}`;
+    return signal ? apiRequest(path, { signal }) : apiRequest(path);
   },
 
   edge(edgeId: string, workspaceId = DEFAULT_WORKSPACE_ID): Promise<TraceEdgeDetail> {

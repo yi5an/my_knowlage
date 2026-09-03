@@ -10,6 +10,7 @@ import {
   NodeIndexOutlined,
   ReadOutlined,
   SearchOutlined,
+  ShareAltOutlined,
   SettingOutlined,
   StockOutlined,
   YoutubeOutlined,
@@ -38,6 +39,7 @@ import { InvestmentThesesPage } from "./pages/InvestmentThesesPage";
 import { InvestmentWatchlistPage } from "./pages/InvestmentWatchlistPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { ModelManagementPage } from "./pages/ModelManagementPage";
+import { ProvenanceGraphPage } from "./pages/ProvenanceGraphPage";
 import { NotebookPage } from "./pages/NotebookPage";
 import { ReaderPage } from "./pages/ReaderPage";
 import { ResearchPage } from "./pages/ResearchPage";
@@ -57,6 +59,7 @@ const navItems: MenuProps["items"] = [
   { key: "/library", icon: <BookOutlined />, label: <Link to="/library">文档库</Link> },
   { key: "/reader", icon: <ReadOutlined />, label: <Link to="/reader">阅读</Link> },
   { key: "/graph", icon: <NodeIndexOutlined />, label: <Link to="/graph">知识图谱</Link> },
+  { key: "/provenance", icon: <ShareAltOutlined />, label: <Link to="/provenance">溯源图</Link> },
   { key: "/search", icon: <SearchOutlined />, label: <Link to="/search">搜索</Link> },
   { key: "/research", icon: <FileSearchOutlined />, label: <Link to="/research">研究</Link> },
   { key: "/entity", icon: <StockOutlined />, label: <Link to="/entity">实体</Link> },
@@ -141,6 +144,7 @@ export function App() {
             <Route path="/reader" element={<ReaderPage />} />
             <Route path="/reader/:documentId" element={<ReaderPage />} />
             <Route path="/graph" element={<GraphPage />} />
+            <Route path="/provenance" element={<ProvenanceGraphPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/research" element={<ResearchPage />} />
             <Route path="/entity" element={<EntityPage />} />

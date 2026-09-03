@@ -335,29 +335,29 @@ Expected: PASS.
 - Modify: `frontend/src/App.test.tsx`
 - Modify: `frontend/src/styles.css`
 
-- [ ] Write failing page tests for initial overview loading, URL-restored mode/filter/selection, upward/downward path fetches, degraded banner, partial result warning, empty/error states, fallback selection, and cleanup of stale requests.
+- [x] Write failing page tests for initial overview loading, URL-restored mode/filter/selection, upward/downward path fetches, degraded banner, partial result warning, empty/error states, fallback selection, and cleanup of stale requests.
 
-- [ ] Add a failing route assertion that `/provenance` renders “事件结论溯源” and selects the new navigation item.
+- [x] Add a failing route assertion that `/provenance` renders “事件结论溯源” and selects the new navigation item.
 
-- [ ] Run: `cd frontend && npm run test -- src/pages/ProvenanceGraphPage.test.tsx src/App.test.tsx`
+- [x] Run: `cd frontend && npm run test -- src/pages/ProvenanceGraphPage.test.tsx src/App.test.tsx`
 
 Expected: FAIL.
 
-- [ ] Implement page state with `useReducer` and `AbortController`. Ignore out-of-order responses. Store shareable filter/mode/selection/camera state in URL parameters.
+- [x] Implement page state with `useReducer` and `AbortController`. Ignore out-of-order responses. Store shareable filter/mode/selection/camera state in URL parameters.
 
-- [ ] Keep the canvas mounted while the audit drawer opens. Selection triggers the focused trace endpoint; closing the drawer returns to the overview only when the URL has no selected node/edge.
+- [x] Keep the canvas mounted while the audit drawer opens. Selection triggers the focused trace endpoint; closing the drawer returns to the overview only when the URL has no selected node/edge.
 
-- [ ] Show a persistent degraded banner whenever `degraded=true`, including `degraded_reason`; never present the bounded fallback as a complete overview.
+- [x] Show a persistent degraded banner whenever `degraded=true`, including `degraded_reason`; never present the bounded fallback as a complete overview.
 
-- [ ] Add the `/provenance` route and a “溯源图” navigation entry without changing `/graph` or `GraphCanvas`.
+- [x] Add the `/provenance` route and a “溯源图” navigation entry without changing `/graph` or `GraphCanvas`.
 
-- [ ] Add responsive styles: full-height desktop canvas, overlay toolbar/legend, side drawer, and a usable small-screen list-first fallback.
+- [x] Add responsive styles: full-height desktop canvas, overlay toolbar/legend, side drawer, and a usable small-screen list-first fallback.
 
-- [ ] Run: `cd frontend && npm run test -- src/pages/ProvenanceGraphPage.test.tsx src/App.test.tsx`
+- [x] Run: `cd frontend && npm run test -- src/pages/ProvenanceGraphPage.test.tsx src/App.test.tsx`
 
 Expected: PASS.
 
-- [ ] Commit: `git add frontend/src/pages/ProvenanceGraphPage.tsx frontend/src/pages/ProvenanceGraphPage.test.tsx frontend/src/App.tsx frontend/src/App.test.tsx frontend/src/styles.css && git commit -m "feat: add provenance graph page"`
+- [x] Commit: `git add frontend/src/pages/ProvenanceGraphPage.tsx frontend/src/pages/ProvenanceGraphPage.test.tsx frontend/src/App.tsx frontend/src/App.test.tsx frontend/src/styles.css && git commit -m "feat: add provenance graph page"`
 
 ## Task 9: Prove true 3D behavior in a real browser
 
