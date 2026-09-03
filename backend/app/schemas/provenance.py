@@ -339,8 +339,46 @@ class ProvenanceJobResponse(BaseModel):
 
 
 class EvidenceReference(BaseModel):
-    anchor_id: str = Field(min_length=1)
+    """A model-visible reference that can be resolved to an immutable anchor.
+
+    ``anchor_id`` remains accepted for workflows that already created anchors
+    before prompting. New extraction workflows should use ``source_segment_id``
+    and let the application resolve the segment and validate the quote.
+    """
+
+    source_segment_id: str | None = Field(default=None, min_length=1)
+    anchor_id: str | None = Field(default=None, min_length=1)
     quote: str = Field(min_length=1)
+    start_offset: int | None = Field(default=None, ge=0)
+    end_offset: int | None = Field(default=None, gt=0)
+    start_ms: int | None = Field(default=None, ge=0)
+    end_ms: int | None = Field(default=None, gt=0)
+    bbox: NormalizedBBox | None = None
+    ocr_block_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def has_source_reference(self) -> Self:
+        if self.source_segment_id is None and self.anchor_id is None:
+            raise ValueError("source_segment_id or anchor_id is required")
+        if (self.start_offset is None) != (self.end_offset is None):
+            raise ValueError("start_offset and end_offset must be provided together")
+        if (
+            self.start_offset is not None
+            and self.end_offset is not None
+            and self.end_offset <= self.start_offset
+        ):
+            raise ValueError("end_offset must be greater than start_offset")
+        if (self.start_ms is None) != (self.end_ms is None):
+            raise ValueError("start_ms and end_ms must be provided together")
+        if (
+            self.start_ms is not None
+            and self.end_ms is not None
+            and self.end_ms <= self.start_ms
+        ):
+            raise ValueError("end_ms must be greater than start_ms")
+        if self.bbox is not None:
+            _validate_bbox(self.bbox)
+        return self
 
 
 class FactEventExtractionItem(BaseModel):
