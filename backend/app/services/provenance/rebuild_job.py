@@ -13,6 +13,10 @@ from app.infrastructure.graph_store import GraphStore
 from app.infrastructure.models import (
     Conclusion,
     EvidenceAnchor,
+    InvestmentClaim,
+    InvestmentFact,
+    InvestmentItem,
+    InvestmentSignal,
     KnowledgeEvent,
     TaskJob,
     Workspace,
@@ -232,6 +236,28 @@ class ProvenanceRebuildJobHandler:
                     },
                 )
             )
+        for model, backing_type, node_type, label_field, status_field in [
+            (InvestmentItem, "investment_item", "investment_item", "title", "action_status"),
+            (InvestmentFact, "investment_fact", "fact", "fact_text", "verification_status"),
+            (InvestmentSignal, "investment_signal", "signal", "title", "status"),
+            (InvestmentClaim, "investment_claim", "claim", "claim_text", "verification_status"),
+        ]:
+            for row in session.scalars(
+                select(model).where(model.workspace_id == workspace_id)  # type: ignore[attr-defined]
+            ):
+                items.append(
+                    _Registration(
+                        backing_type=backing_type,
+                        backing_id=row.id,  # type: ignore[attr-defined]
+                        layer="event",
+                        node_type=node_type,
+                        label=str(getattr(row, label_field) or "")[:240],
+                        display_status=str(getattr(row, status_field, "pending")),
+                        occurred_at=getattr(row, "published_at", None)
+                        or getattr(row, "last_seen_at", None),
+                        confidence=getattr(row, "confidence", None),
+                    )
+                )
         return items
 
 
