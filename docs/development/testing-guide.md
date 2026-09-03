@@ -51,6 +51,16 @@ npm run build
 
 Frontend unit tests use Vitest with jsdom.
 
+The provenance page additionally uses real Chromium WebGL checks:
+
+```bash
+npm run test:e2e -- e2e/provenance-3d.spec.ts
+```
+
+The deterministic 100/500/2000-node fixtures do not require a running backend. Browser assertions compare copied Three.js renderer, camera, control-target, selection, and resource counters. They cover left-drag rotation; Shift-left/middle/right pan; cursor wheel zoom; node and edge raycasting; empty-space double-click reset; arrow/plus/minus/R/Escape keyboard controls; reduced motion; no-WebGL fallback; unmount cleanup; and selected-path preservation at the low-quality 2000-node tier.
+
+When visually reviewing the feature, check desktop and narrow viewports. Labels must not cover the audit drawer, path selection must remain legible, and status must remain distinguishable through text, glyphs, and line style—not color alone.
+
 ## Fixtures
 
 Shared test fixtures live under root `tests/fixtures/`:

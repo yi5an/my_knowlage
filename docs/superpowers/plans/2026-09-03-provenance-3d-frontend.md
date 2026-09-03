@@ -420,19 +420,19 @@ Expected: PASS in Chromium with hardware or SwiftShader WebGL.
 - Modify: `README.md`
 - Modify: `docs/development/testing-guide.md`
 
-- [ ] Document the controls exactly: left rotate; Shift-left/middle/right pan; wheel cursor zoom; single-click focus; double-click empty reset; arrows/plus/minus/R/Escape keyboard controls.
+- [x] Document the controls exactly: left rotate; Shift-left/middle/right pan; wheel cursor zoom; single-click focus; double-click empty reset; arrows/plus/minus/R/Escape keyboard controls.
 
-- [ ] Document GPU adaptation, reduced-motion behavior, and the visible WebGL fallback.
+- [x] Document GPU adaptation, reduced-motion behavior, and the visible WebGL fallback.
 
-- [ ] Run the complete frontend quality gate:
+- [x] Run the complete frontend quality gate:
 
 Run: `cd frontend && npm run lint && npm run test && npm run build && npm run test:e2e`
 
 Expected: all commands exit 0.
 
-- [ ] Manually inspect desktop and narrow viewport layouts against 100- and 2000-node fixtures. Confirm the selected path remains legible, labels do not cover the audit drawer, and status is not encoded by color alone.
+- [x] Manually inspect desktop and narrow viewport layouts against 100- and 2000-node fixtures. Confirm the selected path remains legible, labels do not cover the audit drawer, and status is not encoded by color alone.
 
-- [ ] Commit: `git add README.md docs/development/testing-guide.md && git commit -m "docs: document provenance 3d controls"`
+- [x] Commit: `git add README.md docs/development/testing-guide.md && git commit -m "docs: document provenance 3d controls"`
 
 ## Implementation completion criteria
 

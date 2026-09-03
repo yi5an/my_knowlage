@@ -53,6 +53,19 @@ curl -X POST http://localhost:8010/api/v1/provenance/rebuild \
 
 The generic `task_job` worker registers persisted anchors, events, and conclusions, preserves reviewed edge versions, and refreshes the graph projection. A graph-store outage is surfaced as explicit degraded query metadata; PostgreSQL provenance rows remain authoritative.
 
+### True 3D provenance controls
+
+Open `/provenance` for the independent WebGL three-layer view. The controls are:
+
+- drag with the left mouse button to rotate;
+- drag with Shift-left, middle, or right mouse button to pan;
+- use the mouse wheel to zoom toward the pointer;
+- single-click a node to focus and load its evidence path, or click a relation to open its audit record;
+- double-click empty canvas space to reset the camera;
+- use arrow keys to pan, `+`/`-` to zoom, `R` to reset, and `Escape` to clear selection when the canvas has keyboard focus.
+
+The renderer lowers label density and device-pixel ratio for large graphs or constrained GPUs without dropping the selected path. The operating system’s reduced-motion preference disables path particles and camera tweening. If WebGL is unavailable—or on a narrow screen—the page shows an explicit read-only three-layer fallback; users can still inspect nodes and evidence and may opt into 3D manually.
+
 Backend checks:
 
 ```bash
