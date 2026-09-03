@@ -57,7 +57,7 @@ export function clampCameraState(state: ProvenanceCameraState): ProvenanceCamera
 export function focusCameraState(position: ProvenancePosition): ProvenanceCameraState {
   return clampCameraState({
     target: [position.x, position.y, position.z],
-    position: [position.x + 10, position.y + 7, position.z + 12],
+    position: [position.x + 16, position.y + 12, position.z + 20],
   });
 }
 

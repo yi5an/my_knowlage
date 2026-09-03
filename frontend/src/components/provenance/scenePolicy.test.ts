@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { scenePolicy } from "./scenePolicy";
+import { scenePolicy, shouldBatchSelectedEdges } from "./scenePolicy";
 
 describe("scenePolicy", () => {
   it("reduces label density by distance and graph size", () => {
@@ -14,6 +14,8 @@ describe("scenePolicy", () => {
     const policy = scenePolicy({ cameraDistance: 35, nodeCount: 900, dpr: 3 });
     expect(policy.dpr).toBeLessThanOrEqual(1.25);
     expect(policy.shadows).toBe(false);
+    expect(policy.nodeScale).toBeLessThan(0.6);
+    expect(policy.maxParticles).toBeLessThanOrEqual(32);
   });
 
   it("emits particles only for a selected path and never auto-rotates by default", () => {
@@ -46,5 +48,10 @@ describe("scenePolicy", () => {
       autoRotate: false,
       preserveSelectedPath: true,
     });
+  });
+
+  it("batches very large selected paths instead of creating one wide-line object per edge", () => {
+    expect(shouldBatchSelectedEdges(160)).toBe(false);
+    expect(shouldBatchSelectedEdges(161)).toBe(true);
   });
 });

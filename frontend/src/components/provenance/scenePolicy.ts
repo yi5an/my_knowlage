@@ -12,12 +12,18 @@ export interface ProvenanceScenePolicy {
   maxLabels: number;
   dpr: number;
   shadows: boolean;
+  nodeScale: number;
+  maxParticles: number;
   particles: boolean;
   entrance: boolean;
   drift: boolean;
   cameraTween: boolean;
   autoRotate: boolean;
   preserveSelectedPath: true;
+}
+
+export function shouldBatchSelectedEdges(selectedEdgeCount: number): boolean {
+  return selectedEdgeCount > 160;
 }
 
 export function scenePolicy(input: ScenePolicyInput): ProvenanceScenePolicy {
@@ -40,6 +46,8 @@ export function scenePolicy(input: ScenePolicyInput): ProvenanceScenePolicy {
     maxLabels,
     dpr: Math.min(input.dpr, quality === "high" ? 1.75 : quality === "medium" ? 1.25 : 1),
     shadows: quality === "high",
+    nodeScale: quality === "high" ? 1 : quality === "medium" ? 0.72 : 0.46,
+    maxParticles: quality === "high" ? 120 : quality === "medium" ? 64 : 32,
     particles: !reducedMotion && (input.selectedPathEdges ?? 0) > 0,
     entrance: !reducedMotion,
     drift: !reducedMotion,

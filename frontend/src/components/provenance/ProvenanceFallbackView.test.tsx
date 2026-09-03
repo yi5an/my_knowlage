@@ -35,6 +35,18 @@ describe("provenance fallback and controls", () => {
     expect(onSelectNode).toHaveBeenCalledWith("c");
   });
 
+  it("does not claim WebGL failed when a narrow screen chooses the list view", () => {
+    render(
+      <ProvenanceFallbackView
+        graph={graph}
+        onSelectNode={vi.fn()}
+        reason="narrow-screen"
+      />,
+    );
+    expect(screen.getByText("小屏兼容视图")).toBeInTheDocument();
+    expect(screen.queryByText("WebGL 不可用")).not.toBeInTheDocument();
+  });
+
   it("offers both trace modes and a complete semantic legend", () => {
     const onChange = vi.fn();
     render(

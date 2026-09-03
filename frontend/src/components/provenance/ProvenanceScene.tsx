@@ -13,6 +13,7 @@ import { TraceEdges } from "./TraceEdges";
 import { FlowParticles } from "./FlowParticles";
 import type { ProvenanceScenePolicy } from "./scenePolicy";
 import { DebugSceneProbe } from "./DebugSceneProbe";
+import { nodeVisual } from "./visualEncoding";
 
 const LAYERS: TraceLayer[] = ["conclusion", "event", "evidence"];
 const LABELS: Record<TraceLayer, string> = {
@@ -70,13 +71,28 @@ export function ProvenanceScene(props: ProvenanceSceneProps) {
               {LABELS[layer]}
             </span>
           </Html>
-          <InstancedNodes
-            layer={layer}
-            nodes={props.graph.nodes}
-            positions={props.positions}
-            selectedNodeId={props.selectedNodeId}
-            onSelectNode={props.onSelectNode}
-          />
+          {Array.from(
+            props.graph.nodes
+              .filter((node) => node.layer === layer)
+              .reduce((groups, node) => {
+                const color = nodeVisual(node).color;
+                const group = groups.get(color);
+                if (group) group.push(node);
+                else groups.set(color, [node]);
+                return groups;
+              }, new Map<string, typeof props.graph.nodes>()),
+          ).map(([color, nodes]) => (
+            <InstancedNodes
+              key={`${layer}-${color}`}
+              layer={layer}
+              nodes={nodes}
+              positions={props.positions}
+              selectedNodeId={props.selectedNodeId}
+              onSelectNode={props.onSelectNode}
+              nodeScale={props.scenePolicy?.nodeScale}
+              color={color}
+            />
+          ))}
         </group>
       ))}
       <TraceEdges
@@ -90,6 +106,7 @@ export function ProvenanceScene(props: ProvenanceSceneProps) {
         positions={props.positions}
         selectedEdgeIds={props.selectedEdgeIds}
         enabled={props.scenePolicy?.particles ?? false}
+        maxParticles={props.scenePolicy?.maxParticles}
       />
       <LabelLayer
         nodes={props.graph.nodes}

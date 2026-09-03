@@ -1,4 +1,4 @@
-import { type ThreeEvent } from "@react-three/fiber";
+import { type ThreeEvent, useThree } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
@@ -12,6 +12,8 @@ interface InstancedNodesProps {
   positions: Map<string, ProvenancePosition>;
   selectedNodeId: string | null;
   onSelectNode: (nodeId: string) => void;
+  nodeScale?: number;
+  color: string;
 }
 
 export function InstancedNodes({
@@ -20,9 +22,12 @@ export function InstancedNodes({
   positions,
   selectedNodeId,
   onSelectNode,
+  nodeScale = 1,
+  color,
 }: InstancedNodesProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const hitMeshRef = useRef<THREE.InstancedMesh>(null);
+  const invalidate = useThree((state) => state.invalidate);
   const instanceNodeIds = useMemo(() => buildInstanceNodeIds(nodes, layer), [layer, nodes]);
   const nodesById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
 
@@ -32,7 +37,6 @@ export function InstancedNodes({
     );
     if (!meshes.length) return;
     const object = new THREE.Object3D();
-    const color = new THREE.Color();
     instanceNodeIds.forEach((nodeId, index) => {
       const node = nodesById.get(nodeId);
       const position = positions.get(nodeId);
@@ -40,19 +44,20 @@ export function InstancedNodes({
       const visual = nodeVisual(node);
       object.position.set(position.x, position.y, position.z);
       const selectionScale = selectedNodeId === nodeId ? 1.45 : 1;
-      object.scale.setScalar(visual.scale * selectionScale);
+      object.scale.setScalar(visual.scale * selectionScale * nodeScale);
       object.updateMatrix();
-      meshes.forEach((mesh) => {
-        mesh.setMatrixAt(index, object.matrix);
-        mesh.setColorAt(index, color.set(visual.color));
-      });
+      meshRef.current?.setMatrixAt(index, object.matrix);
+
+      object.scale.setScalar(visual.scale * selectionScale * Math.max(nodeScale, 0.55));
+      object.updateMatrix();
+      hitMeshRef.current?.setMatrixAt(index, object.matrix);
     });
     meshes.forEach((mesh) => {
       mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       mesh.computeBoundingSphere();
     });
-  }, [instanceNodeIds, nodesById, positions, selectedNodeId]);
+    invalidate();
+  }, [instanceNodeIds, invalidate, nodeScale, nodesById, positions, selectedNodeId]);
 
   const selectInstance = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
@@ -70,7 +75,7 @@ export function InstancedNodes({
         onClick={selectInstance}
       >
         <sphereGeometry args={[0.42, 16, 12]} />
-        <meshStandardMaterial vertexColors transparent roughness={0.32} metalness={0.18} />
+        <meshBasicMaterial color={color} toneMapped={false} />
       </instancedMesh>
       <instancedMesh
         ref={hitMeshRef}

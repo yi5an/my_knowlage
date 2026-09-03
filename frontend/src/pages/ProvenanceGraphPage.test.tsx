@@ -74,7 +74,7 @@ describe("ProvenanceGraphPage", () => {
     await waitFor(() => expect(api.overview).toHaveBeenCalled());
     expect(await screen.findByTestId("mock-webgl")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "使用兼容视图" }));
-    expect(screen.getByText(/WebGL 不可用/)).toBeInTheDocument();
+    expect(screen.getByText("兼容视图")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "政策收紧" }));
     await waitFor(() => expect(api.traceNode).toHaveBeenCalled());
   });

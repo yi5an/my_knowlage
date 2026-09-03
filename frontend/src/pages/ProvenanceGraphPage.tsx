@@ -106,7 +106,10 @@ export function ProvenanceGraphPage() {
   const [state, dispatch] = useReducer(reducer, searchParams.toString(), (search) =>
     parseInitialState(search ? `?${search}` : ""),
   );
-  const [forceFallback, setForceFallback] = useState(false);
+  const [viewMode, setViewMode] = useState<"auto" | "3d" | "fallback">("auto");
+  const [narrowScreen, setNarrowScreen] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 760px)").matches : false,
+  );
   const webglAvailable = useMemo(() => supportsWebGL(), []);
   const graphRequest = useRef(0);
   const edgeRequest = useRef(0);
@@ -117,6 +120,14 @@ export function ProvenanceGraphPage() {
     observedSearchRef.current = observedSearch;
     searchParamsRef.current = searchParams;
   }
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 760px)");
+    const update = () => setNarrowScreen(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
 
   const updateUrl = useCallback(
     (changes: Record<string, string | null>) => {
@@ -226,6 +237,13 @@ export function ProvenanceGraphPage() {
   };
 
   const initialCamera = useRef(parseCameraState(searchParams)).current;
+  const showFallback =
+    !webglAvailable || viewMode === "fallback" || (viewMode === "auto" && narrowScreen);
+  const fallbackReason = !webglAvailable
+    ? "webgl-unavailable" as const
+    : viewMode === "auto" && narrowScreen
+      ? "narrow-screen" as const
+      : "user-choice" as const;
 
   return (
     <main className="provenance-page">
@@ -238,8 +256,11 @@ export function ProvenanceGraphPage() {
         <div className="provenance-page__stats" aria-label="图统计">
           <span><strong>{graph.returned_nodes}</strong> 已显示</span>
           <span><strong>{graph.edges.length}</strong> 关系</span>
-          <button type="button" onClick={() => setForceFallback((value) => !value)}>
-            {forceFallback ? "启用 3D 视图" : "使用兼容视图"}
+          <button
+            type="button"
+            onClick={() => setViewMode(showFallback && webglAvailable ? "3d" : "fallback")}
+          >
+            {showFallback && webglAvailable ? "启用 3D 视图" : "使用兼容视图"}
           </button>
         </div>
       </header>
@@ -280,11 +301,12 @@ export function ProvenanceGraphPage() {
           <div className="provenance-state">正在构建三层空间…</div>
         ) : graph.nodes.length === 0 ? (
           <div className="provenance-state">暂无可展示的溯源数据</div>
-        ) : !webglAvailable || forceFallback ? (
+        ) : showFallback ? (
           <ProvenanceFallbackView
             graph={graph}
             onSelectNode={selectNode}
             onSelectEdge={selectEdge}
+            reason={fallbackReason}
           />
         ) : (
           <SpatialLayerCanvas3D

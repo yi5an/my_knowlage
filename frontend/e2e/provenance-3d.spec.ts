@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { edgeDetail, provenanceGraph } from "./fixtures/provenanceGraphs";
+import { edgeDetail, provenanceGraph, provenanceTrace } from "./fixtures/provenanceGraphs";
 
 type DebugSnapshot = {
   renderer: string;
@@ -22,8 +22,13 @@ async function mockGraph(page: Page, size: 100 | 500 | 2000) {
   const graph = provenanceGraph(size);
   await page.route("**/api/v1/provenance/**", async (route) => {
     const url = new URL(route.request().url());
-    if (url.pathname.endsWith("/overview") || url.pathname.includes("/nodes/")) {
+    if (url.pathname.endsWith("/overview")) {
       await route.fulfill({ json: graph });
+      return;
+    }
+    const nodeMatch = url.pathname.match(/\/nodes\/([^/]+)\/trace$/);
+    if (nodeMatch) {
+      await route.fulfill({ json: provenanceTrace(graph, decodeURIComponent(nodeMatch[1])) });
       return;
     }
     const edgeMatch = url.pathname.match(/\/edges\/([^/]+)$/);
@@ -80,6 +85,7 @@ test("rotates, pans, zooms, raycasts, and resets in a real WebGL renderer", asyn
   const initial = await debugSnapshot(page);
   expect(initial.renderer).toBe("WebGLRenderer");
   expect(initial.geometries).toBeGreaterThan(0);
+  await page.screenshot({ path: "test-results/provenance-desktop-100.png", fullPage: true });
 
   await dragCanvas(page, "left", 120, 30);
   expect((await debugSnapshot(page)).cameraQuaternion).not.toEqual(initial.cameraQuaternion);
@@ -104,14 +110,16 @@ test("rotates, pans, zooms, raycasts, and resets in a real WebGL renderer", asyn
   await page.waitForTimeout(250);
   expect(distanceToTarget(await debugSnapshot(page))).toBeLessThan(distanceToTarget(beforeZoom));
 
+  const edgePoint = (await debugSnapshot(page)).edgeScreenPositions["edge-event-conclusion-0"];
+  await page.mouse.click(edgePoint[0], edgePoint[1]);
+  await expect(page.locator('[aria-label="关系审计"]')).toBeVisible();
+  await page.getByRole("button", { name: "关闭审计" }).click();
+
   const nodePoint = (await debugSnapshot(page)).nodeScreenPositions["event-1"];
   await page.mouse.click(nodePoint[0], nodePoint[1]);
   await expect(page).toHaveURL(/node=event-1/);
   await expect.poll(async () => (await debugSnapshot(page)).selectedNodeId).toBe("event-1");
-
-  const edgePoint = (await debugSnapshot(page)).edgeScreenPositions["edge-event-conclusion-0"];
-  await page.mouse.click(edgePoint[0], edgePoint[1]);
-  await expect(page.locator('[aria-label="关系审计"]')).toBeVisible();
+  await expect.poll(async () => (await debugSnapshot(page)).selectedEdgeCount).toBe(2);
 
   const wrapper = page.locator("[data-provenance-canvas]");
   await wrapper.focus();
@@ -161,9 +169,32 @@ test("honors reduced motion and shows an explicit no-WebGL fallback", async ({ p
   await noWebglPage.close();
 });
 
+test("uses a list-first narrow layout and allows opting into real 3D", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockGraph(page, 100);
+  await page.goto("/provenance?fixture=100");
+  await expect(page.getByText("小屏兼容视图")).toBeVisible();
+  await expect(page.locator("[data-provenance-canvas] canvas")).toHaveCount(0);
+  await page.screenshot({ path: "test-results/provenance-narrow-list.png", fullPage: true });
+
+  await page.getByRole("button", { name: "启用 3D 视图" }).click();
+  await expect(page.locator('[data-webgl-ready="true"]')).toBeVisible();
+  expect((await debugSnapshot(page)).renderer).toBe("WebGLRenderer");
+  await page.screenshot({ path: "test-results/provenance-narrow-3d.png", fullPage: true });
+});
+
 test("preserves the selected path under the 2000-node quality tier", async ({ page }) => {
   const graph = await mockGraph(page, 2000);
-  await page.goto("/provenance?fixture=2000&node=event-1");
+  const expectedTrace = provenanceTrace(graph, "event-1");
+  await page.goto("/provenance?fixture=2000");
   await expect(page.locator('[data-webgl-ready="true"]')).toBeVisible();
-  await expect.poll(async () => (await debugSnapshot(page)).selectedEdgeCount).toBe(graph.edges.length);
+  await page.screenshot({ path: "test-results/provenance-desktop-2000.png", fullPage: true });
+
+  await page.getByRole("button", { name: "使用兼容视图" }).click();
+  await page.getByRole("button", { name: "事件 1", exact: true }).click();
+  await page.getByRole("button", { name: "启用 3D 视图" }).click();
+  await expect(page.locator('[data-webgl-ready="true"]')).toBeVisible();
+  await expect.poll(async () => (await debugSnapshot(page)).selectedNodeId).toBe("event-1");
+  await expect.poll(async () => (await debugSnapshot(page)).selectedEdgeCount).toBe(expectedTrace.edges.length);
+  await page.screenshot({ path: "test-results/provenance-desktop-2000-path.png", fullPage: true });
 });

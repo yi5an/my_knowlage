@@ -4,6 +4,7 @@ interface ProvenanceFallbackViewProps {
   graph: ProvenanceGraphResponse;
   onSelectNode: (nodeId: string) => void;
   onSelectEdge?: (edgeId: string) => void;
+  reason?: "webgl-unavailable" | "narrow-screen" | "user-choice";
 }
 
 const LAYERS: Array<[TraceLayer, string]> = [
@@ -16,12 +17,19 @@ export function ProvenanceFallbackView({
   graph,
   onSelectNode,
   onSelectEdge,
+  reason = "webgl-unavailable",
 }: ProvenanceFallbackViewProps) {
+  const notice = reason === "webgl-unavailable"
+    ? ["WebGL 不可用", "当前显示只读三层列表，节点和证据仍可审计。"]
+    : reason === "narrow-screen"
+      ? ["小屏兼容视图", "为保证可读性，当前优先显示三层列表；可在上方手动启用 3D。"]
+      : ["兼容视图", "当前显示只读三层列表，节点和证据仍可审计。"];
+
   return (
-    <section className="provenance-fallback" aria-label="溯源图只读降级视图">
-      <div role="alert">
-        <strong>WebGL 不可用</strong>
-        <span>当前显示只读三层列表，节点和证据仍可审计。</span>
+    <section className="provenance-fallback" aria-label="溯源图只读兼容视图">
+      <div role={reason === "webgl-unavailable" ? "alert" : "status"}>
+        <strong>{notice[0]}</strong>
+        <span>{notice[1]}</span>
       </div>
       <div className="provenance-fallback__layers">
         {LAYERS.map(([layer, label]) => (

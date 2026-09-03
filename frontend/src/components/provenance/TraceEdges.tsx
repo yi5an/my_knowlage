@@ -5,6 +5,7 @@ import * as THREE from "three";
 
 import type { ProvenanceEdge } from "../../types/provenance";
 import type { ProvenancePosition } from "./layout";
+import { shouldBatchSelectedEdges } from "./scenePolicy";
 import { edgeVisual } from "./visualEncoding";
 
 interface TraceEdgesProps {
@@ -23,6 +24,38 @@ interface EdgeBatch {
   opacity: number;
 }
 
+function trimEdge(
+  source: ProvenancePosition,
+  target: ProvenancePosition,
+): [ProvenancePosition, ProvenancePosition] {
+  const distance = Math.hypot(
+    target.x - source.x,
+    target.y - source.y,
+    target.z - source.z,
+  );
+  const ratio = Math.min(0.22, 0.95 / Math.max(distance, 0.001));
+  const lerp = (start: number, end: number, amount: number) =>
+    start + (end - start) * amount;
+  return [
+    {
+      x: lerp(source.x, target.x, ratio),
+      y: lerp(source.y, target.y, ratio),
+      z: lerp(source.z, target.z, ratio),
+    },
+    {
+      x: lerp(source.x, target.x, 1 - ratio),
+      y: lerp(source.y, target.y, 1 - ratio),
+      z: lerp(source.z, target.z, 1 - ratio),
+    },
+  ];
+}
+
+function hasNodeHit(event: ThreeEvent<MouseEvent>): boolean {
+  return event.intersections.some(
+    (intersection) => intersection.object instanceof THREE.InstancedMesh,
+  );
+}
+
 export function TraceEdges({
   edges,
   positions,
@@ -32,11 +65,13 @@ export function TraceEdges({
   const { batches, selected } = useMemo(() => {
     const batchMap = new Map<string, EdgeBatch>();
     const selectedItems: ProvenanceEdge[] = [];
+    const batchSelected = shouldBatchSelectedEdges(selectedEdgeIds.size);
     for (const edge of edges) {
       const source = positions.get(edge.source_id);
       const target = positions.get(edge.target_id);
       if (!source || !target) continue;
-      if (selectedEdgeIds.has(edge.id)) {
+      const [lineSource, lineTarget] = trimEdge(source, target);
+      if (selectedEdgeIds.has(edge.id) && !batchSelected) {
         selectedItems.push(edge);
         continue;
       }
@@ -58,7 +93,14 @@ export function TraceEdges({
       const values = Array.from(
         batch.geometry.getAttribute("position")?.array ?? [],
       ) as number[];
-      values.push(source.x, source.y, source.z, target.x, target.y, target.z);
+      values.push(
+        lineSource.x,
+        lineSource.y,
+        lineSource.z,
+        lineTarget.x,
+        lineTarget.y,
+        lineTarget.z,
+      );
       batch.geometry.setAttribute("position", new THREE.Float32BufferAttribute(values, 3));
       if (visual.dashed) {
         const distances = Array.from(
@@ -66,7 +108,11 @@ export function TraceEdges({
         ) as number[];
         distances.push(
           0,
-          Math.hypot(target.x - source.x, target.y - source.y, target.z - source.z),
+          Math.hypot(
+            lineTarget.x - lineSource.x,
+            lineTarget.y - lineSource.y,
+            lineTarget.z - lineSource.z,
+          ),
         );
         batch.geometry.setAttribute(
           "lineDistance",
@@ -91,13 +137,7 @@ export function TraceEdges({
           key={batch.key}
           geometry={batch.geometry}
           onClick={(event: ThreeEvent<MouseEvent>) => {
-            if (
-              event.intersections.some(
-                (intersection) => intersection.object instanceof THREE.InstancedMesh,
-              )
-            ) {
-              return;
-            }
+            if (hasNodeHit(event)) return;
             event.stopPropagation();
             const segmentIndex = Math.floor((event.index ?? 0) / 2);
             const edgeId = batch.edgeIds[segmentIndex];
@@ -120,13 +160,14 @@ export function TraceEdges({
       {selected.map((edge) => {
         const source = positions.get(edge.source_id)!;
         const target = positions.get(edge.target_id)!;
+        const [lineSource, lineTarget] = trimEdge(source, target);
         const visual = edgeVisual(edge, selectedEdgeIds);
         return (
           <Line
             key={edge.id}
             points={[
-              [source.x, source.y, source.z],
-              [target.x, target.y, target.z],
+              [lineSource.x, lineSource.y, lineSource.z],
+              [lineTarget.x, lineTarget.y, lineTarget.z],
             ]}
             color={visual.color}
             lineWidth={2.3}
@@ -136,13 +177,7 @@ export function TraceEdges({
             transparent
             opacity={1}
             onClick={(event) => {
-              if (
-                event.intersections.some(
-                  (intersection) => intersection.object instanceof THREE.InstancedMesh,
-                )
-              ) {
-                return;
-              }
+              if (hasNodeHit(event)) return;
               event.stopPropagation();
               onSelectEdge(edge.id);
             }}

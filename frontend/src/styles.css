@@ -383,7 +383,8 @@ a {
   color: #e2e8f0;
 }
 
-.provenance-fallback > [role="alert"] { display: flex; gap: 10px; padding: 12px; border: 1px solid #f59e0b; border-radius: 10px; background: #451a03; }
+.provenance-fallback > [role="alert"],
+.provenance-fallback > [role="status"] { display: flex; gap: 10px; padding: 12px; border: 1px solid #f59e0b; border-radius: 10px; background: #451a03; }
 .provenance-fallback__layers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
 .provenance-fallback__layers section { padding: 14px; border: 1px solid #334155; border-radius: 12px; background: #111f34; }
 .provenance-fallback ul { padding-left: 18px; }

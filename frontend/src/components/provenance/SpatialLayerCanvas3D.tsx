@@ -1,5 +1,6 @@
 import { Canvas, type RootState } from "@react-three/fiber";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
+import * as THREE from "three";
 
 import type { ProvenanceGraphResponse } from "../../types/provenance";
 import type { ProvenancePosition } from "./layout";
@@ -13,6 +14,11 @@ import {
 import { scenePolicy } from "./scenePolicy";
 import { useMotionPreference } from "./useMotionPreference";
 import { updateProvenanceDebug } from "./debug";
+
+const PROVENANCE_RAYCASTER_PARAMS: THREE.RaycasterParameters = {
+  ...new THREE.Raycaster().params,
+  Line: { threshold: 0.12 },
+};
 
 interface SpatialLayerCanvas3DProps {
   graph: ProvenanceGraphResponse;
@@ -92,6 +98,7 @@ export function SpatialLayerCanvas3D(props: SpatialLayerCanvas3DProps) {
         dpr={[1, policy.dpr]}
         camera={{ fov: 48, near: 0.1, far: 600, position: [22, 18, 28] }}
         gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
+        raycaster={{ params: PROVENANCE_RAYCASTER_PARAMS }}
         onCreated={markReadyAfterRender}
         onPointerMissed={(event) => {
           if (event.detail !== 2) return;

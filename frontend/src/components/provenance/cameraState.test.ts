@@ -25,7 +25,7 @@ describe("camera state", () => {
       focused.position[0] - 4,
       focused.position[1] - 9,
       focused.position[2] + 2,
-    )).toBeGreaterThanOrEqual(10);
+    )).toBeGreaterThanOrEqual(24);
   });
 
   it("round-trips URL state and rejects invalid values", () => {

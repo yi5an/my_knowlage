@@ -85,6 +85,43 @@ export function provenanceGraph(size: 100 | 500 | 2000): ProvenanceGraphResponse
   };
 }
 
+export function provenanceTrace(
+  graph: ProvenanceGraphResponse,
+  nodeId: string,
+): ProvenanceGraphResponse {
+  const nodeIds = new Set([nodeId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    graph.edges.forEach((edge) => {
+      if (nodeIds.has(edge.source_id) || nodeIds.has(edge.target_id)) {
+        const before = nodeIds.size;
+        nodeIds.add(edge.source_id);
+        nodeIds.add(edge.target_id);
+        changed ||= nodeIds.size !== before;
+      }
+    });
+  }
+  const nodes = graph.nodes.filter((item) => nodeIds.has(item.id));
+  const traceEdges = graph.edges.filter(
+    (edge) => nodeIds.has(edge.source_id) && nodeIds.has(edge.target_id),
+  );
+  return {
+    ...graph,
+    nodes,
+    edges: traceEdges,
+    clusters: graph.clusters
+      .map((cluster) => ({
+        ...cluster,
+        node_ids: cluster.node_ids.filter((id) => nodeIds.has(id)),
+        count: cluster.node_ids.filter((id) => nodeIds.has(id)).length,
+      }))
+      .filter((cluster) => cluster.count > 0),
+    total_nodes: nodes.length,
+    returned_nodes: nodes.length,
+  };
+}
+
 export function edgeDetail(edge: ProvenanceEdge): TraceEdgeDetail {
   return {
     ...edge,
