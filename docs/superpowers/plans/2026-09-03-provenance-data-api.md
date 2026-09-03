@@ -23,7 +23,7 @@ The canonical design is `docs/superpowers/specs/2026-09-03-event-conclusion-prov
 - Create: `backend/app/schemas/provenance.py`
 - Create: `backend/tests/test_provenance_schemas.py`
 
-- [ ] Write failing tests for each locator type, invalid ranges, graph enums, and the “AI edge requires evidence” invariant.
+- [x] Write failing tests for each locator type, invalid ranges, graph enums, and the “AI edge requires evidence” invariant.
 
 ```python
 from pydantic import ValidationError
@@ -59,13 +59,13 @@ def test_ai_link_requires_evidence_anchor_ids() -> None:
         )
 ```
 
-- [ ] Run the schema tests and verify the expected import failure.
+- [x] Run the schema tests and verify the expected import failure.
 
 Run: `cd backend && pytest tests/test_provenance_schemas.py -q`
 
 Expected: FAIL because `app.schemas.provenance` does not exist.
 
-- [ ] Add string enums and a discriminated locator union.
+- [x] Add string enums and a discriminated locator union.
 
 ```python
 class TraceLayer(StrEnum):
@@ -108,15 +108,15 @@ EvidenceLocator = Annotated[
 ]
 ```
 
-- [ ] Add `EvidenceAnchorCreate/Response`, `KnowledgeEventCreate/Response`, `ConclusionCreate/Response`, `ProvenanceNode`, `ProvenanceEdge`, `ProvenanceGraphResponse`, `TraceEdgeReviewRequest/Response`, `ProvenanceRebuildRequest/Response`, `FactEventExtractionOutput`, and `ConclusionLinkOutput`.
+- [x] Add `EvidenceAnchorCreate/Response`, `KnowledgeEventCreate/Response`, `ConclusionCreate/Response`, `ProvenanceNode`, `ProvenanceEdge`, `ProvenanceGraphResponse`, `TraceEdgeReviewRequest/Response`, `ProvenanceRebuildRequest/Response`, `FactEventExtractionOutput`, and `ConclusionLinkOutput`.
 
-- [ ] Make all confidence values `0..1`, all list fields use factories, and `ProvenanceGraphResponse` expose `graph_version`, `degraded`, `degraded_reason`, counts, `has_more`, and an optional cursor.
+- [x] Make all confidence values `0..1`, all list fields use factories, and `ProvenanceGraphResponse` expose `graph_version`, `degraded`, `degraded_reason`, counts, `has_more`, and an optional cursor.
 
-- [ ] Run: `cd backend && pytest tests/test_provenance_schemas.py -q`
+- [x] Run: `cd backend && pytest tests/test_provenance_schemas.py -q`
 
 Expected: PASS.
 
-- [ ] Commit: `git add backend/app/schemas/provenance.py backend/tests/test_provenance_schemas.py && git commit -m "feat: define provenance schemas"`
+- [x] Commit: `git add backend/app/schemas/provenance.py backend/tests/test_provenance_schemas.py && git commit -m "feat: define provenance schemas"`
 
 ## Task 2: Add the PostgreSQL source-of-truth models and migration
 
