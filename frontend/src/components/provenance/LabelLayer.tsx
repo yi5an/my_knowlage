@@ -38,7 +38,7 @@ export function LabelLayer({
             distanceFactor={18}
             style={{ pointerEvents: "none" }}
           >
-            <span className="provenance-node-label">
+            <span className="provenance-node-label" data-layer={node.layer}>
               {visual.glyph ? `${visual.glyph} ` : ""}
               {node.label}
             </span>

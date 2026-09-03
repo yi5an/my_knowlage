@@ -35,9 +35,9 @@ const edge = (overrides: Partial<ProvenanceEdge> = {}): ProvenanceEdge => ({
 
 describe("semantic visual encoding", () => {
   it("uses distinct layer colors", () => {
-    expect(nodeVisual(node("conclusion")).color).toBe("#a855f7");
-    expect(nodeVisual(node("event")).color).toBe("#3b82f6");
-    expect(nodeVisual(node("evidence")).color).toBe("#14b8a6");
+    expect(nodeVisual(node("conclusion")).color).toBe("#5b21b6");
+    expect(nodeVisual(node("event")).color).toBe("#1d4ed8");
+    expect(nodeVisual(node("evidence")).color).toBe("#0f766e");
   });
 
   it("encodes review and validation state with glyphs as well as color", () => {
@@ -47,8 +47,8 @@ describe("semantic visual encoding", () => {
   });
 
   it("maps relation semantics and selected-path opacity", () => {
-    expect(edgeVisual(edge()).color).toBe("#22c55e");
-    expect(edgeVisual(edge({ relation_type: "qualifies" })).color).toBe("#f59e0b");
+    expect(edgeVisual(edge()).color).toBe("#15803d");
+    expect(edgeVisual(edge({ relation_type: "qualifies" })).color).toBe("#b45309");
     expect(edgeVisual(edge({ relation_type: "refutes" })).marker).toBe("conflict");
     expect(edgeVisual(edge({ review_status: "pending_review" })).dashed).toBe(true);
     expect(edgeVisual(edge(), new Set(["edge"])).opacity).toBe(1);

@@ -124,7 +124,7 @@ a {
   max-width: 1680px;
   min-height: calc(100vh - 124px);
   margin: 0 auto;
-  color: #e5edf7;
+  color: #172033;
 }
 
 .provenance-page__header {
@@ -165,17 +165,17 @@ a {
 .provenance-page__stats button,
 .provenance-stage__toolbar,
 .provenance-legend {
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  border: 1px solid #cbd5e1;
   border-radius: 12px;
-  background: rgba(10, 22, 39, 0.86);
-  box-shadow: 0 12px 28px rgba(2, 8, 23, 0.16);
-  backdrop-filter: blur(14px);
+  background: rgba(248, 250, 252, 0.94);
+  box-shadow: 0 12px 28px rgba(51, 65, 85, 0.16);
+  backdrop-filter: blur(12px);
 }
 
 .provenance-page__stats span,
 .provenance-page__stats button {
   padding: 9px 12px;
-  color: #dbeafe;
+  color: #172033;
 }
 
 .provenance-page__stats button,
@@ -183,22 +183,22 @@ a {
 .provenance-stage__toolbar button,
 .provenance-stage__toolbar select {
   cursor: pointer;
-  border: 1px solid rgba(148, 163, 184, 0.35);
+  border: 1px solid #94a3b8;
   border-radius: 8px;
-  background: #111f34;
-  color: #e5edf7;
+  background: #ffffff;
+  color: #172033;
 }
 
 .provenance-stage {
   position: relative;
   min-height: 720px;
   overflow: hidden;
-  border: 1px solid #22324a;
+  border: 1px solid #b7c2d0;
   border-radius: 20px;
   background:
-    radial-gradient(circle at 50% 15%, rgba(59, 130, 246, 0.16), transparent 36%),
-    #07111f;
-  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+    radial-gradient(circle at 50% 15%, rgba(147, 197, 253, 0.28), transparent 38%),
+    #eef2f6;
+  box-shadow: 0 24px 70px rgba(51, 65, 85, 0.2);
 }
 
 .provenance-canvas {
@@ -209,7 +209,7 @@ a {
 }
 
 .provenance-canvas:focus-visible {
-  box-shadow: inset 0 0 0 3px #60a5fa;
+  box-shadow: inset 0 0 0 3px #4f46e5;
 }
 
 .provenance-stage__toolbar {
@@ -227,7 +227,7 @@ a {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #cbd5e1;
+  color: #334155;
   font-size: 12px;
 }
 
@@ -243,8 +243,9 @@ a {
 }
 
 .provenance-mode-toolbar button[aria-pressed="true"] {
-  border-color: #60a5fa;
+  border-color: #1d4ed8;
   background: #1d4ed8;
+  color: #ffffff;
 }
 
 .provenance-legend {
@@ -254,7 +255,7 @@ a {
   bottom: 16px;
   width: 190px;
   padding: 12px 14px;
-  color: #dbeafe;
+  color: #172033;
   font-size: 12px;
 }
 
@@ -276,38 +277,43 @@ a {
   width: 18px;
   height: 3px;
   border-radius: 4px;
-  background: #22c55e;
+  background: #15803d;
 }
 
-.provenance-legend__swatch--inference { background: repeating-linear-gradient(90deg, #94a3b8 0 5px, transparent 5px 8px); }
-.provenance-legend__swatch--conflict { background: #ef4444; }
-.provenance-legend__swatch--qualified { background: #f59e0b; }
-.provenance-legend__swatch--stale { background: #f97316; }
+.provenance-legend__swatch--inference { background: repeating-linear-gradient(90deg, #475569 0 5px, transparent 5px 8px); }
+.provenance-legend__swatch--conflict { background: #b91c1c; }
+.provenance-legend__swatch--qualified { background: #b45309; }
+.provenance-legend__swatch--stale { background: #c2410c; }
 
 .provenance-layer-label {
   padding: 5px 9px;
   white-space: nowrap;
   border: 1px solid currentColor;
   border-radius: 999px;
-  background: rgba(7, 17, 31, 0.8);
-  color: #93c5fd;
+  background: rgba(255, 255, 255, 0.9);
+  color: #1e40af;
   font-size: 11px;
   font-weight: 800;
+  box-shadow: 0 3px 10px rgba(51, 65, 85, 0.16);
 }
 
-.provenance-layer-label--conclusion { color: #d8b4fe; }
-.provenance-layer-label--evidence { color: #5eead4; }
+.provenance-layer-label--conclusion { color: #5b21b6; }
+.provenance-layer-label--evidence { color: #0f766e; }
 
 .provenance-node-label {
   display: block;
   max-width: 190px;
   overflow: hidden;
   padding: 3px 7px;
-  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.72);
+  border-radius: 5px;
+  background: rgba(248, 250, 252, 0.92);
+  color: #172033;
   font-size: 10px;
   line-height: 1.25;
   text-overflow: ellipsis;
-  text-shadow: 0 1px 4px #020617;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 7px rgba(51, 65, 85, 0.18);
   white-space: nowrap;
 }
 
@@ -317,25 +323,26 @@ a {
   max-width: 720px;
   margin: 76px auto -66px;
   padding: 10px 14px;
-  border: 1px solid #60a5fa;
+  border: 1px solid #4f46e5;
   border-radius: 10px;
-  background: rgba(30, 64, 175, 0.9);
-  color: white;
+  background: rgba(238, 242, 255, 0.96);
+  color: #312e81;
+  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.15);
   text-align: center;
 }
 
 .provenance-banner + .provenance-banner { margin-top: 72px; }
-.provenance-banner--warning { border-color: #f59e0b; background: rgba(146, 64, 14, 0.92); }
+.provenance-banner--warning { border-color: #b45309; background: rgba(255, 247, 237, 0.97); color: #7c2d12; }
 
 .provenance-state {
   display: grid;
   place-content: center;
   min-height: 720px;
-  color: #94a3b8;
+  color: #475569;
   text-align: center;
 }
 
-.provenance-state--error { gap: 8px; color: #fecaca; }
+.provenance-state--error { gap: 8px; color: #991b1b; }
 
 .provenance-audit-drawer {
   position: fixed;
@@ -346,10 +353,10 @@ a {
   height: 100vh;
   overflow: auto;
   padding: 22px;
-  border-left: 1px solid #334155;
-  background: #0b1628;
-  color: #e2e8f0;
-  box-shadow: -24px 0 60px rgba(2, 6, 23, 0.48);
+  border-left: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #172033;
+  box-shadow: -24px 0 60px rgba(51, 65, 85, 0.22);
 }
 
 .provenance-audit-drawer header,
@@ -362,33 +369,33 @@ a {
 }
 
 .provenance-audit-drawer h2,
-.provenance-audit-drawer h3 { color: white; }
+.provenance-audit-drawer h3 { color: #172033; }
 .provenance-audit-drawer textarea { width: 100%; margin-top: 6px; }
 .provenance-audit-meta > div { margin-bottom: 10px; }
-.provenance-audit-meta dt { color: #94a3b8; font-size: 11px; }
+.provenance-audit-meta dt { color: #475569; font-size: 11px; }
 .provenance-audit-meta dd { margin: 3px 0 0; }
-.provenance-audit-conflict { padding: 10px; border-radius: 8px; background: #78350f; }
+.provenance-audit-conflict { padding: 10px; border-radius: 8px; background: #fee2e2; color: #991b1b; }
 .provenance-evidence-list { display: grid; gap: 10px; }
-.provenance-evidence-card { padding: 12px; border: 1px solid #334155; border-radius: 10px; background: #111f34; }
-.provenance-evidence-card blockquote { margin: 10px 0; color: white; }
-.provenance-evidence-card strong { color: #fdba74; font-size: 11px; }
-.provenance-evidence-card a { display: block; margin-top: 8px; color: #7dd3fc; }
+.provenance-evidence-card { padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px; background: #ffffff; }
+.provenance-evidence-card blockquote { margin: 10px 0; color: #172033; }
+.provenance-evidence-card strong { color: #9a3412; font-size: 11px; }
+.provenance-evidence-card a { display: block; margin-top: 8px; color: #1d4ed8; }
 .provenance-audit-actions { flex-wrap: wrap; margin-top: 12px; }
-.provenance-audit-actions button { padding: 7px 9px; border: 1px solid #475569; border-radius: 7px; background: #1e293b; color: white; }
+.provenance-audit-actions button { padding: 7px 9px; border: 1px solid #64748b; border-radius: 7px; background: #ffffff; color: #172033; }
 
 .provenance-fallback {
   min-height: 720px;
   overflow: auto;
   padding: 80px 22px 28px;
-  color: #e2e8f0;
+  color: #172033;
 }
 
 .provenance-fallback > [role="alert"],
-.provenance-fallback > [role="status"] { display: flex; gap: 10px; padding: 12px; border: 1px solid #f59e0b; border-radius: 10px; background: #451a03; }
+.provenance-fallback > [role="status"] { display: flex; gap: 10px; padding: 12px; border: 1px solid #b45309; border-radius: 10px; background: #fff7ed; color: #7c2d12; }
 .provenance-fallback__layers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
-.provenance-fallback__layers section { padding: 14px; border: 1px solid #334155; border-radius: 12px; background: #111f34; }
+.provenance-fallback__layers section { padding: 14px; border: 1px solid #cbd5e1; border-radius: 12px; background: #ffffff; box-shadow: 0 6px 18px rgba(51, 65, 85, 0.1); }
 .provenance-fallback ul { padding-left: 18px; }
-.provenance-fallback button { color: #dbeafe; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.provenance-fallback button { color: #1d4ed8; border: 0; background: transparent; text-align: left; cursor: pointer; }
 
 .provenance-sr-only {
   position: absolute;
