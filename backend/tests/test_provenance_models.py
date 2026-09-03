@@ -13,6 +13,9 @@ from app.infrastructure.models import (
     Conclusion,
     EvidenceAnchor,
     KnowledgeEvent,
+    InvestmentFact,
+    InvestmentItem,
+    InvestmentSignal,
     TraceEdge,
     TraceEdgeEvidence,
     TraceEdgeReview,
@@ -53,6 +56,114 @@ def _node(node_id: str, backing_id: str, layer: str) -> TraceNode:
         display_status="pending_review",
         properties={},
     )
+
+
+def _item(item_id: str, workspace_id: str = "ws") -> InvestmentItem:
+    return InvestmentItem(
+        id=item_id,
+        workspace_id=workspace_id,
+        dedupe_key=item_id,
+        title=item_id,
+        summary="Persisted source excerpt",
+        raw_payload={},
+    )
+
+
+def _fact(
+    fact_id: str,
+    item_id: str,
+    *,
+    workspace_id: str = "ws",
+    canonical_key: str | None = "same",
+    is_active: bool = True,
+    supersedes_id: str | None = None,
+) -> InvestmentFact:
+    return InvestmentFact(
+        id=fact_id,
+        workspace_id=workspace_id,
+        source_item_id=item_id,
+        fact_text=fact_id,
+        evidence_excerpt="Persisted source excerpt",
+        confidence=0.8,
+        canonical_key=canonical_key,
+        is_active=is_active,
+        supersedes_id=supersedes_id,
+    )
+
+
+def _signal(
+    signal_id: str,
+    *,
+    workspace_id: str = "ws",
+    canonical_key: str | None = "same",
+    is_active: bool = True,
+) -> InvestmentSignal:
+    now = datetime.now(UTC)
+    return InvestmentSignal(
+        id=signal_id,
+        workspace_id=workspace_id,
+        title=signal_id,
+        summary=signal_id,
+        first_seen_at=now,
+        last_seen_at=now,
+        confidence=0.7,
+        canonical_key=canonical_key,
+        is_active=is_active,
+    )
+
+
+def test_active_fact_key_is_unique_per_workspace(session: Session) -> None:
+    session.add(_item("item"))
+    session.flush()
+    session.add_all([_fact("f1", "item"), _fact("f2", "item")])
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_active_signal_key_is_unique_per_workspace(session: Session) -> None:
+    session.add_all([_signal("s1"), _signal("s2")])
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_nullable_and_inactive_domain_keys_preserve_history(session: Session) -> None:
+    session.add(_item("item"))
+    session.flush()
+    first = _fact("f1", "item", canonical_key="versioned")
+    session.add(first)
+    session.flush()
+    session.add_all(
+        [
+            _fact("legacy-1", "item", canonical_key=None),
+            _fact("legacy-2", "item", canonical_key=None),
+            _fact(
+                "superseded",
+                "item",
+                canonical_key="versioned",
+                is_active=False,
+                supersedes_id=first.id,
+            ),
+        ]
+    )
+    session.commit()
+
+
+def test_domain_keys_can_repeat_across_workspaces(session: Session) -> None:
+    session.add(Workspace(id="other", name="Other"))
+    session.flush()
+    session.add_all([_item("item-ws"), _item("item-other", "other")])
+    session.flush()
+    session.add_all(
+        [
+            _fact("fact-ws", "item-ws", canonical_key="shared"),
+            _fact("fact-other", "item-other", workspace_id="other", canonical_key="shared"),
+            _signal("signal-ws", canonical_key="shared"),
+            _signal("signal-other", workspace_id="other", canonical_key="shared"),
+        ]
+    )
+    session.commit()
 
 
 def test_trace_node_backing_identity_is_unique(session: Session) -> None:

@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -964,6 +965,14 @@ class InvestmentFact(UpdatedTimestampMixin, Base):
         Index("idx_investment_fact_item", "workspace_id", "source_item_id"),
         Index("idx_investment_fact_watchlist", "workspace_id", "watchlist_id"),
         Index("idx_investment_fact_status", "workspace_id", "verification_status"),
+        Index(
+            "uq_investment_fact_active_canonical",
+            "workspace_id",
+            "canonical_key",
+            unique=True,
+            postgresql_where=text("canonical_key IS NOT NULL AND is_active"),
+            sqlite_where=text("canonical_key IS NOT NULL AND is_active = 1"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -981,6 +990,9 @@ class InvestmentFact(UpdatedTimestampMixin, Base):
     verification_status: Mapped[str] = mapped_column(
         String(32), default="pending", server_default="pending"
     )
+    canonical_key: Mapped[str | None] = mapped_column(String(64))
+    is_active: Mapped[bool] = mapped_column(Boolean(), default=True, server_default="true")
+    supersedes_id: Mapped[str | None] = mapped_column(ForeignKey("investment_fact.id"))
 
 
 class InvestmentSignal(UpdatedTimestampMixin, Base):
@@ -991,6 +1003,14 @@ class InvestmentSignal(UpdatedTimestampMixin, Base):
         Index("idx_investment_signal_watchlist", "workspace_id", "watchlist_id"),
         Index("idx_investment_signal_status", "workspace_id", "status"),
         Index("idx_investment_signal_seen", "workspace_id", "last_seen_at"),
+        Index(
+            "uq_investment_signal_active_canonical",
+            "workspace_id",
+            "canonical_key",
+            unique=True,
+            postgresql_where=text("canonical_key IS NOT NULL AND is_active"),
+            sqlite_where=text("canonical_key IS NOT NULL AND is_active = 1"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -1022,6 +1042,9 @@ class InvestmentSignal(UpdatedTimestampMixin, Base):
         String(32), default="weak_signal", server_default="weak_signal"
     )
     score_breakdown: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
+    canonical_key: Mapped[str | None] = mapped_column(String(64))
+    is_active: Mapped[bool] = mapped_column(Boolean(), default=True, server_default="true")
+    supersedes_id: Mapped[str | None] = mapped_column(ForeignKey("investment_signal.id"))
 
 
 class InvestmentSourceTrace(UpdatedTimestampMixin, Base):
