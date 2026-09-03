@@ -160,7 +160,14 @@ class EvidenceAnchorCreate(BaseModel):
     def anchor_type_matches_locator(self) -> Self:
         if self.anchor_type.value != self.locator.type:
             raise ValueError("anchor_type must match locator.type")
-        if self.version_id is None and self.source_item_id is None:
+        if (
+            self.version_id is None
+            and self.source_item_id is None
+            and not (
+                self.anchor_type is EvidenceAnchorType.web_fragment
+                and self.source_uri_snapshot
+            )
+        ):
             raise ValueError("version_id or source_item_id is required")
         return self
 

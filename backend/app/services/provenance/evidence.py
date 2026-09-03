@@ -185,7 +185,11 @@ class EvidenceAnchorService:
         if isinstance(locator, ImageRegionLocator):
             return
         if isinstance(locator, WebFragmentLocator):
-            if source_item is None or quote not in _investment_item_text(source_item):
+            if source_item is None:
+                if locator.text_quote != quote:
+                    self._raise_mismatch()
+                return
+            if quote not in _investment_item_text(source_item):
                 self._raise_mismatch()
 
     def _anchor_still_matches(self, anchor: EvidenceAnchor) -> bool:

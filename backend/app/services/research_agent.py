@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -13,19 +14,39 @@ from app.infrastructure.models import (
     Document,
     DocumentChunk,
     DocumentVersion,
+    EvidenceAnchor,
+    KnowledgeEvent,
     ResearchSource,
     ResearchTask,
     TaskJob,
+)
+from app.schemas.provenance import (
+    ConclusionCreate,
+    EvidenceAnchorCreate,
+    EvidenceAnchorType,
+    MediaSegmentLocator,
+    OriginType,
+    PdfRegionLocator,
+    ReviewStatus,
+    TextSpanLocator,
+    TraceRelationType,
+    ValidationStatus,
+    WebFragmentLocator,
 )
 from app.schemas.research import (
     CrossCheckedClaims,
     ExtractedClaims,
     ResearchClaim,
+    ResearchEvidenceReference,
     ResearchPlan,
     ResearchReport,
     ResearchSourceItem,
     ResearchTaskCreateRequest,
 )
+from app.services.provenance.conclusions import ConclusionService
+from app.services.provenance.evidence import EvidenceAnchorService
+from app.services.provenance.links import TraceLinkService
+from app.services.provenance.registry import TraceRegistrationService
 from app.services.research_prompts import (
     build_cross_check_prompt,
     build_extract_claims_prompt,
@@ -71,6 +92,7 @@ class DatabaseLocalKnowledgeSearchClient:
                 source_type="local",
                 title=document.title,
                 doc_id=document.id,
+                chunk_id=chunk.id,
                 snippet=chunk.content,
                 credibility_score=0.85,
             )
@@ -419,6 +441,7 @@ class ResearchAgentService:
         self._complete_step(
             state.task, "CrossCheckNode", {"claim_count": len(claims)}
         )
+        self._persist_claim_provenance(state.task, claims, state.all_sources)
         return _with(state, claims=claims)
 
     def _generate_report(self, state: WorkflowState) -> WorkflowState:
@@ -444,23 +467,286 @@ class ResearchAgentService:
         self.session.commit()
         return _with(state, report=report)
 
+    def _persist_claim_provenance(
+        self,
+        task: ResearchTask,
+        claims: list[ResearchClaim],
+        sources: list[Any],
+    ) -> None:
+        """Persist research claims as normalized events and conclusions.
+
+        Only references that resolve to a stored ``ResearchSource`` and an
+        exact local/web quote create supporting edges. Claims without such a
+        reference remain visible as insufficient evidence.
+        """
+        source_records = {
+            source.id: source
+            for source in self.session.scalars(
+                select(ResearchSource).where(ResearchSource.research_task_id == task.id)
+            )
+        }
+        for source in sources:
+            source_id = getattr(source, "source_id", None)
+            if source_id and source_id in source_records:
+                continue
+            if hasattr(source, "id") and getattr(source, "research_task_id", None) == task.id:
+                source_records[source.id] = source
+
+        claim_metadata: list[dict[str, Any]] = []
+        for claim in claims:
+            refs = list(claim.evidence_refs)
+            refs_material = "|".join(
+                f"{ref.source_id}:{ref.stance}:{ref.quote}" for ref in refs
+            )
+            claim_key = sha256(
+                f"{task.id}|{claim.text.strip().casefold()}|{refs_material}".encode()
+            ).hexdigest()
+            event = self.session.scalar(
+                select(KnowledgeEvent).where(
+                    KnowledgeEvent.workspace_id == task.workspace_id,
+                    KnowledgeEvent.canonical_key == claim_key,
+                )
+            )
+            if event is None:
+                event = KnowledgeEvent(
+                    id=f"event_{claim_key[:32]}",
+                    workspace_id=task.workspace_id,
+                    event_type="research_claim",
+                    title=claim.text[:240],
+                    summary=claim.text,
+                    subject_entity_ids=[],
+                    action="states",
+                    object_entity_ids=[],
+                    canonical_key=claim_key,
+                    confidence=claim.confidence,
+                    review_status=ReviewStatus.ai_generated.value,
+                    validation_status=ValidationStatus.insufficient_evidence.value,
+                    origin_type=OriginType.ai.value,
+                    model_metadata={
+                        "workflow": "deep_research",
+                        "schema_version": "research_claim.v2",
+                    },
+                )
+                self.session.add(event)
+                self.session.flush()
+            else:
+                event.title = claim.text[:240]
+                event.summary = claim.text
+                event.confidence = claim.confidence
+
+            event_node = TraceRegistrationService(self.session).register(
+                workspace_id=task.workspace_id,
+                backing_type="knowledge_event",
+                backing_id=event.id,
+                layer="event",
+                node_type="research_claim",
+                label=event.title,
+                display_status=event.review_status,
+                confidence=event.confidence,
+                properties={"canonical_key": claim_key},
+            )
+            valid_by_stance: dict[str, list[tuple[EvidenceAnchor, str]]] = {}
+            for ref in refs:
+                source = source_records.get(ref.source_id)
+                if source is None:
+                    continue
+                anchor = self._research_anchor(task, source, ref)
+                if anchor is None:
+                    continue
+                anchor_node = TraceRegistrationService(self.session).register(
+                    workspace_id=task.workspace_id,
+                    backing_type="evidence_anchor",
+                    backing_id=anchor.id,
+                    layer="evidence",
+                    node_type=anchor.anchor_type,
+                    label=anchor.quote[:240],
+                    display_status=anchor.validation_state,
+                    confidence=anchor.source_quality,
+                    properties={"research_source_id": source.id},
+                )
+                TraceLinkService(self.session).create(
+                    workspace_id=task.workspace_id,
+                    source_node_id=anchor_node.id,
+                    target_node_id=event_node.id,
+                    relation_type=TraceRelationType.derived_from,
+                    origin_type=OriginType.imported,
+                    confidence=claim.confidence,
+                    rationale="Research claim cites an exact captured source quote.",
+                    evidence_anchor_ids=[anchor.id],
+                    model_metadata={"workflow": "deep_research"},
+                    review_status="confirmed",
+                    validation_status="supported",
+                )
+                valid_by_stance.setdefault(ref.stance, []).append((anchor, ref.quote))
+
+            validation = _claim_validation(valid_by_stance)
+            if valid_by_stance:
+                event.validation_status = validation
+            conclusion = ConclusionService(self.session).create(
+                workspace_id=task.workspace_id,
+                request=ConclusionCreate(
+                    conclusion_type="research",
+                    conclusion_subtype="claim",
+                    title=claim.text[:240],
+                    body=claim.text,
+                    confidence=claim.confidence,
+                    review_status=ReviewStatus.pending_review,
+                    validation_status=ValidationStatus(validation),
+                    origin_type=OriginType.ai,
+                    model_metadata={
+                        "workflow": "deep_research",
+                        "schema_version": "research_claim.v2",
+                    },
+                    source_object_type="knowledge_event",
+                    source_object_id=event.id,
+                ),
+            )
+            conclusion_node = TraceRegistrationService(self.session).register(
+                workspace_id=task.workspace_id,
+                backing_type="conclusion",
+                backing_id=conclusion.id,
+                layer="conclusion",
+                node_type="research",
+                label=conclusion.title,
+                display_status=conclusion.review_status,
+                confidence=conclusion.confidence,
+                properties={"validation_status": conclusion.validation_status},
+            )
+            for stance, values in valid_by_stance.items():
+                TraceLinkService(self.session).create(
+                    workspace_id=task.workspace_id,
+                    source_node_id=event_node.id,
+                    target_node_id=conclusion_node.id,
+                    relation_type=TraceRelationType(stance),
+                    origin_type=OriginType.ai,
+                    confidence=claim.confidence,
+                    rationale="; ".join(quote for _, quote in values),
+                    evidence_anchor_ids=[anchor.id for anchor, _ in values],
+                    model_metadata={"workflow": "deep_research"},
+                    review_status="pending_review",
+                    validation_status=validation,
+                )
+            claim_metadata.append(
+                {
+                    "event_id": event.id,
+                    "conclusion_id": conclusion.id,
+                    "evidence_refs": [ref.model_dump() for ref in refs],
+                    "validation_status": validation,
+                }
+            )
+        metadata = dict(task.metadata_ or {})
+        metadata["provenance_claims"] = claim_metadata
+        task.metadata_ = metadata
+        self.session.flush()
+
+    def _research_anchor(
+        self,
+        task: ResearchTask,
+        source: Any,
+        reference: ResearchEvidenceReference,
+    ) -> EvidenceAnchor | None:
+        quote = reference.quote
+        if source.source_type == "web":
+            snippet = str(source.snippet or "")
+            if not source.url or not snippet or quote not in snippet:
+                return None
+            captured_at = _captured_at(source)
+            web_locator = WebFragmentLocator(
+                fragment_id=source.id,
+                selector=source.url,
+                text_quote=quote,
+                captured_at=captured_at,
+            )
+            request = EvidenceAnchorCreate(
+                anchor_type=EvidenceAnchorType.web_fragment,
+                locator=web_locator,
+                quote=quote,
+                source_uri_snapshot=source.url,
+                source_quality=source.credibility_score,
+                created_by_type=OriginType.ai,
+                created_by_id=task.id,
+            )
+            return EvidenceAnchorService(self.session).create(
+                workspace_id=task.workspace_id,
+                request=request,
+            )
+        if not source.doc_id:
+            return None
+        document = self.session.get(Document, source.doc_id)
+        chunk_id = (source.metadata_ or {}).get("chunk_id")
+        chunk = self.session.get(DocumentChunk, chunk_id) if chunk_id else None
+        if document is None or chunk is None or document.workspace_id != task.workspace_id:
+            return None
+        start = chunk.content.find(quote)
+        if start < 0 or chunk.content.find(quote, start + 1) >= 0:
+            return None
+        local_locator: Any
+        if document.source_type == "youtube":
+            if chunk.start_offset is None or chunk.end_offset is None:
+                return None
+            local_locator = MediaSegmentLocator(
+                start_ms=chunk.start_offset * 1_000,
+                end_ms=chunk.end_offset * 1_000,
+                chunk_id=chunk.id,
+            )
+        elif chunk.page_no is not None:
+            raw_bbox = (chunk.metadata_ or {}).get("normalized_bbox")
+            if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) != 4:
+                return None
+            local_locator = PdfRegionLocator(
+                page_no=chunk.page_no,
+                bbox=tuple(float(value) for value in raw_bbox),  # type: ignore[arg-type]
+                chunk_id=chunk.id,
+            )
+        else:
+            local_locator = TextSpanLocator(
+                chunk_id=chunk.id,
+                start_offset=start,
+                end_offset=start + len(quote),
+            )
+        request = EvidenceAnchorCreate(
+            document_id=document.id,
+            version_id=chunk.version_id,
+            anchor_type=EvidenceAnchorType(local_locator.type),
+            locator=local_locator,
+            quote=quote,
+            source_uri_snapshot=document.source_uri,
+            source_quality=source.credibility_score,
+            created_by_type=OriginType.ai,
+            created_by_id=task.id,
+        )
+        return EvidenceAnchorService(self.session).create(
+            workspace_id=task.workspace_id,
+            request=request,
+        )
+
     # --- persistence helpers ----------------------------------------------
 
     def _store_sources(self, task_id: str, sources: list[ResearchSourceItem]) -> None:
         for source in sources:
-            self.session.add(
-                ResearchSource(
-                    id=f"rsrc_{uuid4().hex}",
-                    research_task_id=task_id,
-                    source_type=source.source_type,
-                    title=source.title,
-                    url=source.url,
-                    doc_id=source.doc_id,
-                    snippet=source.snippet,
-                    credibility_score=source.credibility_score,
-                    used_in_report=True,
-                )
-            )
+            source_id = _research_source_id(task_id, source)
+            source.source_id = source_id
+            existing = self.session.get(ResearchSource, source_id)
+            if existing is None:
+                existing = ResearchSource(id=source_id, research_task_id=task_id)
+                self.session.add(existing)
+            existing.source_type = source.source_type
+            existing.title = source.title
+            existing.url = source.url
+            existing.doc_id = source.doc_id
+            existing.snippet = source.snippet
+            existing.credibility_score = source.credibility_score
+            existing.used_in_report = True
+            existing.metadata_ = {
+                **dict(existing.metadata_ or {}),
+                **({"chunk_id": source.chunk_id} if source.chunk_id else {}),
+                **(
+                    {"captured_at": datetime.now(UTC).isoformat()}
+                    if source.source_type == "web"
+                    and not (existing.metadata_ or {}).get("captured_at")
+                    else {}
+                ),
+            }
         self.session.flush()
 
     def _fail_task(self, task: ResearchTask, exc: Exception) -> None:
@@ -513,6 +799,42 @@ def _retrieval_queries(state: WorkflowState) -> list[str]:
     if state.plan and state.plan.queries:
         return state.plan.queries
     return [state.task.question]
+
+
+def _research_source_id(task_id: str, source: ResearchSourceItem) -> str:
+    material = "|".join(
+        [
+            task_id,
+            source.source_type,
+            source.url or "",
+            source.doc_id or "",
+            source.chunk_id or "",
+            source.snippet,
+        ]
+    )
+    return f"rsrc_{sha256(material.encode()).hexdigest()[:32]}"
+
+
+def _captured_at(source: ResearchSource) -> datetime:
+    value = (source.metadata_ or {}).get("captured_at")
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+            return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+        except ValueError:
+            pass
+    return source.created_at or datetime.now(UTC)
+
+
+def _claim_validation(valid_by_stance: dict[str, Any]) -> str:
+    stances = set(valid_by_stance)
+    if "supports" in stances and "refutes" in stances:
+        return ValidationStatus.conflicted.value
+    if "refutes" in stances:
+        return ValidationStatus.refuted.value
+    if "supports" in stances:
+        return ValidationStatus.supported.value
+    return ValidationStatus.insufficient_evidence.value
 
 
 def _current_node_name(steps: list[dict[str, Any]]) -> str:

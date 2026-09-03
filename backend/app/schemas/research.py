@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -48,12 +48,21 @@ class ResearchSourceItem(BaseModel):
     snippet: str
     url: str | None = None
     doc_id: str | None = None
+    chunk_id: str | None = None
+    source_id: str | None = None
     credibility_score: float = Field(default=0.7, ge=0, le=1)
 
 
+class ResearchEvidenceReference(BaseModel):
+    source_id: str = Field(min_length=1)
+    quote: str = Field(min_length=1)
+    stance: Literal["supports", "refutes", "qualifies"] = "supports"
+
+
 class ResearchClaim(BaseModel):
-    text: str
+    text: str = Field(min_length=1)
     evidence: list[str] = Field(default_factory=list)
+    evidence_refs: list[ResearchEvidenceReference] = Field(default_factory=list)
     confidence: float = Field(ge=0, le=1)
 
 
