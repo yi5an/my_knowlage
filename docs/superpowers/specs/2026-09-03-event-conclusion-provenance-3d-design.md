@@ -1,6 +1,6 @@
 # KnowPilot 事件—结论溯源真 3D 图设计
 
-状态：用户已确认设计，待实现计划
+状态：用户已确认设计与实现计划，待执行
 
 日期：2026-09-03
 
@@ -213,6 +213,8 @@ created_at, updated_at
 | 现有对象 | 三层映射 | 处理方式 |
 |---|---|---|
 | `DocumentChunk` | 证据来源 | 生成 `EvidenceAnchor`，保留版本与偏移 |
+| `ReadingInsight` | 研究结论 | 映射为 `Conclusion(research)`，复用现有段落偏移、置信度与审核状态 |
+| `ReadingCorroboration` | 关系证据 | 将 `supports/contradicts/contextualizes` 映射为边证据及 `supports/refutes/qualifies` 关系 |
 | `VideoFrameAnalysis` | 图片证据来源 | 生成图片区域锚点，引用帧、区域框和 OCR 块 |
 | YouTube transcript chunk | 音视频证据来源 | 生成时间段锚点 |
 | `InvestmentItem` | 来源上下文 | 由锚点引用，不直接替代证据节点 |
@@ -326,6 +328,7 @@ GET  /provenance/jobs/{job_id}
 5. 无法归并的事件保留为候选，不静默丢弃。
 6. 单个来源或单条记录失败不回滚其他已完成记录。
 7. 重跑应幂等，并保留用户审核结果。
+8. 证据候选检索复用现有 `ReadingEvidenceAdapter`；溯源服务负责把候选升级为不可变锚点和可审核关系，不重复实现检索聚合。
 
 ## 10. 前端页面与组件
 
