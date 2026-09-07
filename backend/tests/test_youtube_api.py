@@ -1623,7 +1623,7 @@ def test_timeline_endpoint_returns_cursor_and_excludes_live(
     assert [item["video_id"] for item in body["items"]] == ["timeline_a"]
     assert body["next_cursor"] is None
     assert body["channels"][0]["channel_name"] == "时间轴博主"
-    assert body["status_counts"]["fetched"] == 1
+    assert body["status_counts"]["processing"] == 1
 
 
 def test_timeline_endpoint_rejects_malformed_cursor(

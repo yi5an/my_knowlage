@@ -11,15 +11,15 @@ def test_production_backend_uses_container_reachable_proxy_default() -> None:
 
     assert (
         environment["YOUTUBE_PROXY_URL"]
-        == "${KNOWPILOT_PROD_YOUTUBE_PROXY_URL:-http://192.168.1.12:7892}"
+        == "${KNOWPILOT_PROD_YOUTUBE_PROXY_URL:-http://mihomo:7890}"
     )
     assert (
         environment["HTTP_PROXY"]
-        == "${KNOWPILOT_PROD_HTTP_PROXY:-http://192.168.1.12:7892}"
+        == "${KNOWPILOT_PROD_HTTP_PROXY:-http://mihomo:7890}"
     )
     assert (
         environment["HTTPS_PROXY"]
-        == "${KNOWPILOT_PROD_HTTPS_PROXY:-http://192.168.1.12:7892}"
+        == "${KNOWPILOT_PROD_HTTPS_PROXY:-http://mihomo:7890}"
     )
     assert "host.docker.internal:7890" not in "\n".join(environment.values())
 
