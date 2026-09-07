@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.api.v1.youtube import get_youtube_cookie_store
 from app.main import app
 from app.services.youtube.cookies import (
+    MAX_COOKIE_BYTES,
     YouTubeCookieStore,
     YouTubeCookieValidationError,
 )
@@ -87,6 +88,26 @@ def test_cookie_api_persists_without_returning_secret(client: TestClient) -> Non
     assert status.json()["configured"] is True
     assert "secret-cookie-value" not in saved.text
     assert "secret-cookie-value" not in status.text
+
+
+def test_cookie_api_does_not_echo_oversized_secret(client: TestClient) -> None:
+    secret_marker = "must-not-be-echoed"
+    oversized_cookie = (
+        "# Netscape HTTP Cookie File\n"
+        ".youtube.com\tTRUE\t/\tTRUE\t0\tSID\t"
+        + secret_marker
+        + ("x" * MAX_COOKIE_BYTES)
+        + "\n"
+    )
+
+    response = client.put(
+        "/api/v1/youtube/cookies",
+        json={"cookies_text": oversized_cookie},
+    )
+
+    assert response.status_code == 422
+    assert secret_marker not in response.text
+    assert len(response.content) < 4096
 
 
 def test_cookie_api_test_uses_configured_file_without_exposing_path(

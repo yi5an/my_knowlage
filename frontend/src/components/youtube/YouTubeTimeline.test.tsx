@@ -90,6 +90,10 @@ describe("YouTubeTimeline", () => {
       "style",
       expect.stringContaining("display: grid"),
     );
+    expect(screen.getByTestId("youtube-timeline-scroll")).toHaveAttribute(
+      "style",
+      expect.stringContaining("overflow: auto"),
+    );
   });
 
   it("retries a failed card", async () => {
@@ -192,5 +196,43 @@ describe("YouTubeTimeline", () => {
     render(<YouTubeTimeline />, { wrapper: MemoryRouter });
 
     expect(await screen.findByText("2026-08-31 · 平台时间")).toBeInTheDocument();
+  });
+
+  it("shows the matching lane when a filter returns a channel outside the default six", async () => {
+    const channels = [
+      ...timelinePage.channels,
+      ...Array.from({ length: 5 }, (_, index) => ({
+        channel_id: `channel_${index + 3}`,
+        channel_name: `博主 ${index + 3}`,
+        latest_effective_time: `2026-08-${String(26 - index).padStart(2, "0")}T00:00:00Z`,
+        item_count: 1,
+      })),
+    ];
+    const filteredPage: TimelinePage = {
+      ...timelinePage,
+      items: [
+        {
+          ...timelinePage.items[0],
+          video_id: "filtered_channel_7",
+          title: "第七博主的筛选结果",
+          channel_id: "channel_7",
+          channel_name: "博主 7",
+        },
+      ],
+      channels,
+      total: 1,
+    };
+    vi.mocked(getYouTubeTimeline)
+      .mockReset()
+      .mockResolvedValueOnce({ ...timelinePage, channels })
+      .mockResolvedValue(filteredPage);
+
+    render(<YouTubeTimeline />, { wrapper: MemoryRouter });
+    await screen.findByText("已完成视频");
+    fireEvent.mouseDown(screen.getByText("全部月份"));
+    fireEvent.click(await screen.findByText("2026-08 (2)"));
+
+    expect(await screen.findByText("第七博主的筛选结果")).toBeInTheDocument();
+    expect(screen.getByText("博主 7")).toBeInTheDocument();
   });
 });

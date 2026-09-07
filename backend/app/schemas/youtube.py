@@ -272,7 +272,9 @@ class YouTubeCookieStatus(BaseModel):
 
 
 class YouTubeCookieUpdate(BaseModel):
-    cookies_text: str = Field(min_length=1, max_length=1024 * 1024)
+    # Enforce the byte limit in YouTubeCookieStore. Pydantic validation errors
+    # include the rejected input, which would echo the entire Cookie secret.
+    cookies_text: str = Field(min_length=1)
 
 
 class YouTubeCookieTestResponse(BaseModel):

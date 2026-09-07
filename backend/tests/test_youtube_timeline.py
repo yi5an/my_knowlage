@@ -209,6 +209,43 @@ def test_unknown_channel_filter_and_navigation_metadata_are_stable(
     assert page.status_counts == {"processing": 2}
 
 
+def test_channel_rename_keeps_one_lane_with_the_latest_name(
+    db_session: Session,
+) -> None:
+    db_session.add_all(
+        [
+            Video(
+                id="db_old_channel_name",
+                workspace_id="ws_default",
+                video_id="old_channel_name",
+                title="old_channel_name",
+                channel_id="channel_renamed",
+                channel_name="旧频道名",
+                created_at=datetime(2026, 7, 1, tzinfo=UTC),
+                fetch_status="pending",
+            ),
+            Video(
+                id="db_new_channel_name",
+                workspace_id="ws_default",
+                video_id="new_channel_name",
+                title="new_channel_name",
+                channel_id="channel_renamed",
+                channel_name="新频道名",
+                created_at=datetime(2026, 8, 1, tzinfo=UTC),
+                fetch_status="pending",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    page = query_timeline(db_session, "ws_default")
+
+    assert len(page.channels) == 1
+    assert page.channels[0].channel_id == "channel_renamed"
+    assert page.channels[0].channel_name == "新频道名"
+    assert page.channels[0].item_count == 2
+
+
 def test_document_summary_failure_returns_error_and_summary_stage(
     db_session: Session,
 ) -> None:

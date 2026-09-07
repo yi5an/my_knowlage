@@ -228,17 +228,36 @@ def query_timeline(
         next_cursor = encode_cursor(last_time, last_video.video_id)
 
     channel_name = func.coalesce(Video.channel_name, "未识别博主")
-    latest_effective_time = func.max(effective_time)
-    channel_rows = session.execute(
+    channel_ranked = (
         select(
-            Video.channel_id,
-            channel_name,
-            latest_effective_time,
-            func.count(Video.id),
+            Video.channel_id.label("channel_id"),
+            channel_name.label("channel_name"),
+            effective_time.label("latest_effective_time"),
+            func.count(Video.id)
+            .over(partition_by=Video.channel_id)
+            .label("item_count"),
+            func.row_number()
+            .over(
+                partition_by=Video.channel_id,
+                order_by=(effective_time.desc(), Video.video_id.desc()),
+            )
+            .label("channel_rank"),
         )
         .where(*base_filters)
-        .group_by(Video.channel_id, channel_name)
-        .order_by(latest_effective_time.desc(), channel_name.desc())
+        .subquery()
+    )
+    channel_rows = session.execute(
+        select(
+            channel_ranked.c.channel_id,
+            channel_ranked.c.channel_name,
+            channel_ranked.c.latest_effective_time,
+            channel_ranked.c.item_count,
+        )
+        .where(channel_ranked.c.channel_rank == 1)
+        .order_by(
+            channel_ranked.c.latest_effective_time.desc(),
+            channel_ranked.c.channel_name.desc(),
+        )
     ).all()
     channels = [
         TimelineChannel(

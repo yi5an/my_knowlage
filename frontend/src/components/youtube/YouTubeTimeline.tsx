@@ -17,7 +17,8 @@ const ALL = "";
 const UNKNOWN_CHANNEL_ID = "__unknown__";
 
 const shellStyle: CSSProperties = {
-  overflowX: "auto",
+  overflow: "auto",
+  maxHeight: "70vh",
   border: "1px solid #f0f0f0",
   borderRadius: 8,
   background: "#f8fafc",
@@ -164,10 +165,17 @@ export function YouTubeTimeline({ workspaceId = "ws_default" }: YouTubeTimelineP
     return () => observer.disconnect();
   }, [loadPage, loading, loadingMore, nextCursor]);
 
-  const visibleChannels = useMemo(
-    () => (showAll ? channels : channels.slice(0, 6)),
-    [channels, showAll],
-  );
+  const visibleChannels = useMemo(() => {
+    if (showAll) return channels;
+    if (selectedChannel) {
+      return channels.filter((channel) => channelKey(channel) === selectedChannel);
+    }
+    if (selectedStatus || selectedMonth) {
+      const activeChannels = new Set(items.map((item) => channelKey(item)));
+      return channels.filter((channel) => activeChannels.has(channelKey(channel)));
+    }
+    return channels.slice(0, 6);
+  }, [channels, items, selectedChannel, selectedMonth, selectedStatus, showAll]);
   const grouped = useMemo(() => {
     const byDate = new Map<string, Map<string, TimelineItem[]>>();
     for (const item of items) {
@@ -243,7 +251,7 @@ export function YouTubeTimeline({ workspaceId = "ws_default" }: YouTubeTimelineP
         </Space>
       )}
       {loading && items.length === 0 ? <Spin /> : items.length === 0 ? <Empty description="暂无 YouTube 采集记录" /> : (
-        <div style={shellStyle}>
+        <div data-testid="youtube-timeline-scroll" style={shellStyle}>
           <div
             data-testid="youtube-timeline-grid"
             style={{
