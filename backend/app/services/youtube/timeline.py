@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
 from datetime import UTC, datetime
+from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, extract, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.infrastructure.models import Document, Video
@@ -18,6 +18,15 @@ from app.schemas.youtube_timeline import (
     encode_cursor,
 )
 
+TimelineTimeSource = Literal["published_at", "created_at"]
+UNKNOWN_CHANNEL_ID = "__unknown__"
+_TERMINAL_FETCH_STATUSES = {
+    "failed",
+    "no_transcript",
+    "access_denied",
+    "ignored_live",
+}
+
 
 class TimelineQueryError(ValueError):
     """Raised when timeline query parameters cannot be interpreted safely."""
@@ -29,7 +38,7 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-def _effective_time(video: Video) -> tuple[datetime, str]:
+def _effective_time(video: Video) -> tuple[datetime, TimelineTimeSource]:
     if video.published_at is not None:
         return _as_utc(video.published_at), "published_at"
     if video.created_at is not None:
@@ -40,10 +49,12 @@ def _effective_time(video: Video) -> tuple[datetime, str]:
 
 
 def _status(video: Video, document: Document | None) -> str:
-    if video.fetch_status in {"failed", "no_transcript", "access_denied", "ignored_live"}:
+    if video.fetch_status in _TERMINAL_FETCH_STATUSES:
         return video.fetch_status
     if document is None:
-        return video.fetch_status
+        return "processing"
+    if document.parse_status in {"pending", "processing"}:
+        return "processing"
     return document.parse_status
 
 
@@ -84,8 +95,13 @@ def _to_item(video: Video, document: Document | None) -> TimelineItem:
     effective_time, time_source = _effective_time(video)
     tldr, tags, is_unread = _summary_fields(document)
     status = _status(video, document)
-    terminal = status in {"failed", "no_transcript", "access_denied"}
-    error = video.error_message if terminal else (document.ai_summary if document else None)
+    if video.fetch_status in _TERMINAL_FETCH_STATUSES:
+        raw_error = video.error_message
+    elif document is not None and document.parse_status == "failed":
+        raw_error = document.ai_summary
+    else:
+        raw_error = None
+    error = " ".join(raw_error.split())[:240] if raw_error else None
     return TimelineItem(
         video_id=video.video_id,
         document_id=document.id if document is not None else "",
@@ -119,6 +135,17 @@ def _validate_month(year_month: str | None) -> None:
         raise TimelineQueryError("year_month must use YYYY-MM format")
 
 
+def _month_bounds(year_month: str | None) -> tuple[datetime, datetime] | None:
+    if year_month is None:
+        return None
+    start = datetime.strptime(year_month, "%Y-%m").replace(tzinfo=UTC)
+    if start.month == 12:
+        end = start.replace(year=start.year + 1, month=1)
+    else:
+        end = start.replace(month=start.month + 1)
+    return start, end
+
+
 def query_timeline(
     session: Session,
     workspace_id: str,
@@ -140,77 +167,117 @@ def query_timeline(
         except ValueError as exc:
             raise TimelineQueryError("invalid timeline cursor") from exc
 
-    rows = session.execute(
+    effective_time = func.coalesce(Video.published_at, Video.created_at)
+    normalized_status = case(
+        (Video.fetch_status.in_(_TERMINAL_FETCH_STATUSES), Video.fetch_status),
+        (Document.id.is_(None), "processing"),
+        (Document.parse_status.in_({"pending", "processing"}), "processing"),
+        else_=Document.parse_status,
+    )
+    base_filters = [
+        Video.workspace_id == workspace_id,
+        Video.fetch_status != "ignored_live",
+    ]
+    item_filters = list(base_filters)
+    if channel_id == UNKNOWN_CHANNEL_ID:
+        item_filters.append(Video.channel_id.is_(None))
+    elif channel_id is not None:
+        item_filters.append(Video.channel_id == channel_id)
+    if status is not None:
+        item_filters.append(normalized_status == status)
+    month_bounds = _month_bounds(year_month)
+    if month_bounds is not None:
+        month_start, month_end = month_bounds
+        item_filters.extend(
+            [effective_time >= month_start, effective_time < month_end]
+        )
+
+    total = session.scalar(
+        select(func.count(func.distinct(Video.id)))
+        .select_from(Video)
+        .outerjoin(Document, Document.video_id == Video.id)
+        .where(*item_filters)
+    ) or 0
+
+    page_filters = list(item_filters)
+    if cursor_key is not None:
+        cursor_time, cursor_video_id = cursor_key
+        page_filters.append(
+            or_(
+                effective_time < cursor_time,
+                and_(
+                    effective_time == cursor_time,
+                    Video.video_id < cursor_video_id,
+                ),
+            )
+        )
+    page_rows = session.execute(
         select(Video, Document)
         .outerjoin(Document, Document.video_id == Video.id)
-        .where(
-            Video.workspace_id == workspace_id,
-            Video.fetch_status != "ignored_live",
-        )
+        .where(*page_filters)
+        .order_by(effective_time.desc(), Video.video_id.desc())
+        .limit(limit + 1)
     ).all()
-
-    filtered_rows: list[tuple[Video, Document | None, datetime, str]] = []
-    for video, document in rows:
-        if channel_id is not None and video.channel_id != channel_id:
-            continue
-        item_status = _status(video, document)
-        if status is not None and item_status != status:
-            continue
-        effective, source = _effective_time(video)
-        if year_month is not None and effective.strftime("%Y-%m") != year_month:
-            continue
-        filtered_rows.append((video, document, effective, source))
-
-    candidates: list[tuple[Video, Document | None, datetime, str]] = []
-    for video, document, effective, source in filtered_rows:
-        if cursor_key is not None:
-            cursor_time, cursor_video_id = cursor_key
-            if effective > cursor_time or (
-                effective == cursor_time and video.video_id >= cursor_video_id
-            ):
-                continue
-        candidates.append((video, document, effective, source))
-
-    candidates.sort(key=lambda row: (row[2], row[0].video_id), reverse=True)
-    page_rows = candidates[:limit]
-    items = [_to_item(video, document) for video, document, _, _ in page_rows]
+    has_more = len(page_rows) > limit
+    page_rows = page_rows[:limit]
+    items = [_to_item(video, document) for video, document in page_rows]
     next_cursor = None
-    if len(candidates) > limit and page_rows:
-        last_video, _, last_time, _ = page_rows[-1]
+    if has_more and page_rows:
+        last_video, _ = page_rows[-1]
+        last_time, _ = _effective_time(last_video)
         next_cursor = encode_cursor(last_time, last_video.video_id)
 
-    channel_rows: dict[tuple[str | None, str], list[datetime]] = defaultdict(list)
-    month_counts: Counter[str] = Counter()
-    status_counts: Counter[str] = Counter()
-    for video, document, effective, _ in filtered_rows:
-        channel_rows[(video.channel_id, video.channel_name or "未识别博主")].append(effective)
-        month_counts[effective.strftime("%Y-%m")] += 1
-        status_counts[_status(video, document)] += 1
+    channel_name = func.coalesce(Video.channel_name, "未识别博主")
+    latest_effective_time = func.max(effective_time)
+    channel_rows = session.execute(
+        select(
+            Video.channel_id,
+            channel_name,
+            latest_effective_time,
+            func.count(Video.id),
+        )
+        .where(*base_filters)
+        .group_by(Video.channel_id, channel_name)
+        .order_by(latest_effective_time.desc(), channel_name.desc())
+    ).all()
     channels = [
         TimelineChannel(
             channel_id=channel_id_value,
             channel_name=channel_name,
-            latest_effective_time=max(times),
-            item_count=len(times),
+            latest_effective_time=latest_time,
+            item_count=item_count,
         )
-        for (channel_id_value, channel_name), times in channel_rows.items()
+        for channel_id_value, channel_name, latest_time, item_count in channel_rows
     ]
-    channels.sort(
-        key=lambda channel: (
-            channel.latest_effective_time or datetime.min.replace(tzinfo=UTC),
-            channel.channel_name,
-        ),
-        reverse=True,
-    )
+
+    year_part = extract("year", effective_time)
+    month_part = extract("month", effective_time)
+    month_rows = session.execute(
+        select(year_part, month_part, func.count(Video.id))
+        .where(*base_filters)
+        .group_by(year_part, month_part)
+        .order_by(year_part.desc(), month_part.desc())
+    ).all()
     months = [
-        TimelineMonth(year_month=month, item_count=count)
-        for month, count in sorted(month_counts.items(), reverse=True)
+        TimelineMonth(
+            year_month=f"{int(year):04d}-{int(month):02d}",
+            item_count=item_count,
+        )
+        for year, month, item_count in month_rows
     ]
+
+    status_rows = session.execute(
+        select(normalized_status, func.count(func.distinct(Video.id)))
+        .select_from(Video)
+        .outerjoin(Document, Document.video_id == Video.id)
+        .where(*base_filters)
+        .group_by(normalized_status)
+    ).all()
     return TimelinePage(
         items=items,
         next_cursor=next_cursor,
         channels=channels,
         months=months,
-        total=len(candidates),
-        status_counts=dict(status_counts),
+        total=total,
+        status_counts={row_status: count for row_status, count in status_rows},
     )
