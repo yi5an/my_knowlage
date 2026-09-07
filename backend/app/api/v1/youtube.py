@@ -49,7 +49,11 @@ from app.schemas.youtube import (
     VisualMindmapUpdateRequest,
     YouTubeAutoRetrySettings,
     YouTubeAutoRetrySettingsUpdate,
+    YouTubeCookieStatus,
+    YouTubeCookieTestResponse,
+    YouTubeCookieUpdate,
 )
+from app.schemas.youtube_timeline import TimelinePage
 from app.services.document_visibility import (
     KNOWLEDGE_BASE_IMPORTED_KEY,
     is_imported_to_knowledge_base,
@@ -60,6 +64,7 @@ from app.services.structured_output import (
 )
 from app.services.workspace_settings import WorkspaceSettingsService
 from app.services.youtube.asr import build_asr_service_from_settings
+from app.services.youtube.cookies import YouTubeCookieStore, YouTubeCookieValidationError
 from app.services.youtube.fetcher import (
     FetcherError,
     YouTubeFetcher,
@@ -72,6 +77,7 @@ from app.services.youtube.summary_job_handler import (
     enqueue_visual_analysis_retry_job,
     enqueue_youtube_summary_job,
 )
+from app.services.youtube.timeline import TimelineQueryError, query_timeline
 from app.services.youtube.transcript import TranscriptExtractor
 from app.services.youtube.translation import TranslationService
 from app.services.youtube.urls import UnparseableTargetError, parse_target
@@ -163,6 +169,17 @@ OrchestratorDep = Annotated[VideoSummaryOrchestrator, Depends(get_orchestrator)]
 SessionDep = Annotated[Session, Depends(get_db_session)]
 
 
+def get_youtube_cookie_store() -> YouTubeCookieStore:
+    settings = get_settings()
+    return YouTubeCookieStore(
+        settings.youtube_cookies_file,
+        proxy_url=settings.youtube_proxy_url,
+    )
+
+
+CookieStoreDep = Annotated[YouTubeCookieStore, Depends(get_youtube_cookie_store)]
+
+
 def _subscription_response(sub: Subscription) -> SubscriptionResponse:
     return SubscriptionResponse(
         id=sub.id,
@@ -232,6 +249,34 @@ async def update_auto_retry_settings(
         workspace_id,
         payload,
     )
+
+
+@router.get("/cookies", response_model=YouTubeCookieStatus)
+async def get_youtube_cookies(store: CookieStoreDep) -> YouTubeCookieStatus:
+    return store.status()
+
+
+@router.put("/cookies", response_model=YouTubeCookieStatus)
+async def save_youtube_cookies(
+    payload: YouTubeCookieUpdate,
+    store: CookieStoreDep,
+) -> YouTubeCookieStatus:
+    try:
+        return store.save(payload.cookies_text)
+    except YouTubeCookieValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail="Unable to store YouTube Cookie") from exc
+
+
+@router.delete("/cookies", response_model=YouTubeCookieStatus)
+async def delete_youtube_cookies(store: CookieStoreDep) -> YouTubeCookieStatus:
+    return store.delete()
+
+
+@router.post("/cookies/test", response_model=YouTubeCookieTestResponse)
+async def test_youtube_cookies(store: CookieStoreDep) -> YouTubeCookieTestResponse:
+    return store.test_current_cookie()
 
 
 # --- Manual summary --------------------------------------------------------
@@ -786,6 +831,31 @@ async def get_summary_status_by_video(
 
 
 # --- Summary list + dashboard stats ----------------------------------------
+
+
+@router.get("/timeline", response_model=TimelinePage)
+async def get_youtube_timeline(
+    session: SessionDep,
+    workspace_id: Annotated[str, Query()] = "ws_default",
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+    channel_id: Annotated[str | None, Query()] = None,
+    status: Annotated[str | None, Query()] = None,
+    year_month: Annotated[str | None, Query()] = None,
+) -> TimelinePage:
+    """Return cursor-paginated YouTube history grouped by timeline metadata."""
+    try:
+        return query_timeline(
+            session,
+            workspace_id,
+            limit=limit,
+            cursor=cursor,
+            channel_id=channel_id,
+            status=status,
+            year_month=year_month,
+        )
+    except TimelineQueryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 class SummaryListItem(BaseModel):

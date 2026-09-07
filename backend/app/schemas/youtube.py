@@ -262,6 +262,25 @@ class YouTubeAutoRetrySettingsUpdate(BaseModel):
     batch_size: int = Field(default=1, ge=1, le=20)
 
 
+class YouTubeCookieStatus(BaseModel):
+    """Metadata about the server-side Cookie file; never contains its text."""
+
+    configured: bool
+    updated_at: datetime | None = None
+    file_size: int | None = Field(default=None, ge=0)
+    validation_status: Literal["valid", "not_configured"]
+
+
+class YouTubeCookieUpdate(BaseModel):
+    cookies_text: str = Field(min_length=1, max_length=1024 * 1024)
+
+
+class YouTubeCookieTestResponse(BaseModel):
+    success: bool
+    status: Literal["ok", "not_configured", "test_failed"]
+    message: str
+
+
 class ManualSummaryRequest(BaseModel):
     """Manual one-off summary: paste a URL, get a summary card."""
 

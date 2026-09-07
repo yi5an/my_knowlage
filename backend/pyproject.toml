@@ -23,7 +23,9 @@ dependencies = [
   "google-api-python-client>=2.130,<3.0",
   "isodate>=0.6,<1.0",
   "openai>=1.30,<2.0",
-  "yt-dlp>=2024.0,<2027.0",
+  # YouTube GVS requests started requiring the newer extractor behavior in
+  # August 2026; older releases can list formats but fail with HTTP 403.
+  "yt-dlp[default]>=2026.08.19,<2027.0",
   "Pillow>=10.0,<12.0",
   "imagehash>=4.3,<5.0",
   # Investment information system: real HTTP data sources (SEC / RSS / BLS / FRED).

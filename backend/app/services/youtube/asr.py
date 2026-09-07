@@ -139,6 +139,7 @@ class GlmAsrService:
         workspace: str = "./storage/asr",
         language: str | None = None,
         proxy_url: str | None = None,
+        cookies_file: str | None = None,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -148,6 +149,7 @@ class GlmAsrService:
         # Hint for the model (e.g. "zh", "en"). None lets the model autodetect.
         self.language = language
         self.proxy_url = proxy_url
+        self.cookies_file = cookies_file
 
     # ------------------------------------------------------------------ public
 
@@ -214,6 +216,8 @@ class GlmAsrService:
         }
         if self.proxy_url:
             ydl_opts["proxy"] = self.proxy_url
+        if self.cookies_file:
+            ydl_opts["cookiefile"] = self.cookies_file
         url = f"https://www.youtube.com/watch?v={video_id}"
         last_exc: Exception | None = None
         for attempt in range(1, _AUDIO_DOWNLOAD_ATTEMPTS + 1):
@@ -526,6 +530,9 @@ def build_asr_service_from_settings(session: Session | None = None) -> AsrServic
     from app.core.config import get_settings
 
     settings = get_settings()
+    from app.services.youtube.cookies import YouTubeCookieStore
+
+    cookies_file = YouTubeCookieStore(settings.youtube_cookies_file).cookiefile()
     if session is not None:
         from app.services.model_runtime import ModelRuntimeResolver
 
@@ -541,6 +548,7 @@ def build_asr_service_from_settings(session: Session | None = None) -> AsrServic
                 workspace=settings.asr_audio_workspace,
                 language=settings.asr_language,
                 proxy_url=settings.youtube_proxy_url,
+                cookies_file=cookies_file,
             )
     if not settings.asr_enabled or not settings.asr_api_key:
         return None
@@ -552,6 +560,7 @@ def build_asr_service_from_settings(session: Session | None = None) -> AsrServic
         workspace=settings.asr_audio_workspace,
         language=settings.asr_language,
         proxy_url=settings.youtube_proxy_url,
+        cookies_file=cookies_file,
     )
     if not settings.asr_fallback_base_url or not settings.asr_fallback_model:
         return primary
@@ -563,6 +572,7 @@ def build_asr_service_from_settings(session: Session | None = None) -> AsrServic
         workspace=settings.asr_audio_workspace,
         language=settings.asr_language,
         proxy_url=settings.youtube_proxy_url,
+        cookies_file=cookies_file,
     )
     return FallbackAsrService(
         primary=primary,

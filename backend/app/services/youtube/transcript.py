@@ -63,8 +63,9 @@ class YouTubeTranscriptExtractor:
     the optional dep), and so tests can monkeypatch it.
     """
 
-    def __init__(self, proxy_url: str | None = None) -> None:
+    def __init__(self, proxy_url: str | None = None, cookies_file: str | None = None) -> None:
         self.proxy_url = proxy_url
+        self.cookies_file = cookies_file
 
     def extract(self, video_id: str, preferred_language: str | None = None) -> Transcript:
         from youtube_transcript_api import (  # type: ignore[import-untyped]
@@ -150,8 +151,9 @@ class YtDlpTranscriptExtractor:
     start ms + duration), which is easier to parse robustly than VTT.
     """
 
-    def __init__(self, proxy_url: str | None = None) -> None:
+    def __init__(self, proxy_url: str | None = None, cookies_file: str | None = None) -> None:
         self.proxy_url = proxy_url
+        self.cookies_file = cookies_file
 
     def extract(self, video_id: str, preferred_language: str | None = None) -> Transcript:
         import json
@@ -190,6 +192,8 @@ class YtDlpTranscriptExtractor:
             }
             if self.proxy_url:
                 ydl_opts["proxy"] = self.proxy_url
+            if self.cookies_file:
+                ydl_opts["cookiefile"] = self.cookies_file
             url = f"https://www.youtube.com/watch?v={video_id}"
             try:
                 with YoutubeDL(ydl_opts) as ydl:
@@ -293,8 +297,11 @@ class ChainedTranscriptExtractor:
             from app.core.config import get_settings
 
             proxy_url = get_settings().youtube_proxy_url
+            from app.services.youtube.cookies import YouTubeCookieStore
+
+            cookies_file = YouTubeCookieStore(get_settings().youtube_cookies_file).cookiefile()
             extractors = [
-                YtDlpTranscriptExtractor(proxy_url=proxy_url),
+                YtDlpTranscriptExtractor(proxy_url=proxy_url, cookies_file=cookies_file),
                 YouTubeTranscriptExtractor(proxy_url=proxy_url),
             ]
         self.extractors = extractors

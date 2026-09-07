@@ -22,34 +22,37 @@ services:
       - .env
     environment:
       # YouTube/Google APIs are not directly reachable from the server network.
-      # Route backend HTTP clients through the verified LAN proxy. Do not use
-      # host.docker.internal here: the host proxy binds to loopback in
-      # production, which is unreachable from containers.
+      # Route backend HTTP clients through the reachable mihomo service on the
+      # compose network. The old LAN address was a stale workstation endpoint.
       # Keep production network-critical endpoints out of the legacy .env key
       # names. env_file may still contain old LLM_BASE_URL / NO_PROXY values;
       # these explicit container envs intentionally override them on every
       # redeploy.
-      YOUTUBE_PROXY_URL: ${KNOWPILOT_PROD_YOUTUBE_PROXY_URL:-http://192.168.1.12:7892}
-      HTTP_PROXY: ${KNOWPILOT_PROD_HTTP_PROXY:-http://192.168.1.12:7892}
-      HTTPS_PROXY: ${KNOWPILOT_PROD_HTTPS_PROXY:-http://192.168.1.12:7892}
-      ALL_PROXY: ${KNOWPILOT_PROD_ALL_PROXY:-http://192.168.1.12:7892}
-      NO_PROXY: ${KNOWPILOT_PROD_NO_PROXY:-localhost,127.0.0.1,host.docker.internal,172.16.28.250,172.16.0.0/12,10.0.0.0/8,192.168.1.12,192.168.0.0/16,backend,frontend,postgres,redis,museum_pg,tavily-proxy,paddleocr,asr-nano,knowpilot-asr-nano}
-      http_proxy: ${KNOWPILOT_PROD_HTTP_PROXY:-http://192.168.1.12:7892}
-      https_proxy: ${KNOWPILOT_PROD_HTTPS_PROXY:-http://192.168.1.12:7892}
-      all_proxy: ${KNOWPILOT_PROD_ALL_PROXY:-http://192.168.1.12:7892}
-      no_proxy: ${KNOWPILOT_PROD_NO_PROXY:-localhost,127.0.0.1,host.docker.internal,172.16.28.250,172.16.0.0/12,10.0.0.0/8,192.168.1.12,192.168.0.0/16,backend,frontend,postgres,redis,museum_pg,tavily-proxy,paddleocr,asr-nano,knowpilot-asr-nano}
+      YOUTUBE_PROXY_URL: ${KNOWPILOT_PROD_YOUTUBE_PROXY_URL:-http://mihomo:7890}
+      HTTP_PROXY: ${KNOWPILOT_PROD_HTTP_PROXY:-http://mihomo:7890}
+      HTTPS_PROXY: ${KNOWPILOT_PROD_HTTPS_PROXY:-http://mihomo:7890}
+      ALL_PROXY: ${KNOWPILOT_PROD_ALL_PROXY:-http://mihomo:7890}
+      NO_PROXY: ${KNOWPILOT_PROD_NO_PROXY:-localhost,127.0.0.1,host.docker.internal,172.16.28.250,172.16.0.0/12,10.0.0.0/8,192.168.1.12,192.168.0.0/16,backend,frontend,postgres,redis,museum_pg,tavily-proxy,paddleocr,asr-nano,knowpilot-asr-nano,mihomo}
+      http_proxy: ${KNOWPILOT_PROD_HTTP_PROXY:-http://mihomo:7890}
+      https_proxy: ${KNOWPILOT_PROD_HTTPS_PROXY:-http://mihomo:7890}
+      all_proxy: ${KNOWPILOT_PROD_ALL_PROXY:-http://mihomo:7890}
+      no_proxy: ${KNOWPILOT_PROD_NO_PROXY:-localhost,127.0.0.1,host.docker.internal,172.16.28.250,172.16.0.0/12,10.0.0.0/8,192.168.1.12,192.168.0.0/16,backend,frontend,postgres,redis,museum_pg,tavily-proxy,paddleocr,asr-nano,knowpilot-asr-nano,mihomo}
       LLM_BASE_URL: ${KNOWPILOT_PROD_LLM_BASE_URL:-http://192.168.1.12:8317/v1}
       LLM_MODEL: ${KNOWPILOT_PROD_LLM_MODEL:-glm-5.2}
       LLM_TIMEOUT_SECONDS: ${KNOWPILOT_PROD_LLM_TIMEOUT_SECONDS:-300}
       GLM_ASR_BASE_URL: ${KNOWPILOT_PROD_ASR_BASE_URL:-http://asr-nano:8052/v1}
       GLM_ASR_MODEL: ${KNOWPILOT_PROD_ASR_MODEL:-fun-asr-nano}
       YOUTUBE_VISUAL_ANALYSIS_ENABLED: ${KNOWPILOT_PROD_YOUTUBE_VISUAL_ANALYSIS_ENABLED:-true}
+      # Persisted browser-session Cookie text is written only by the backend
+      # through Settings → YouTube 访问 Cookie. Do not place its value in .env.
+      YOUTUBE_COOKIES_FILE: /app/private/youtube-cookies.txt
       OCR_BASE_URL: ${KNOWPILOT_PROD_OCR_BASE_URL:-http://host.docker.internal:8126}
       YOUTUBE_LOCAL_VIDEO_DIR: ${KNOWPILOT_PROD_YOUTUBE_LOCAL_VIDEO_DIR:-/mnt/knowpilot-nas/youtube}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - backend_storage:/app/storage
+      - backend_private:/app/private
       - /mnt/knowpilot-nas/youtube:/mnt/knowpilot-nas/youtube
     # Bind to loopback only for direct debugging; nginx reaches it via the
     # compose network using the service name.
@@ -82,3 +85,4 @@ services:
 
 volumes:
   backend_storage:
+  backend_private:

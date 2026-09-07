@@ -413,6 +413,41 @@ def test_glm_asr_audio_download_passes_proxy(
     assert captured["urls"] == ["https://www.youtube.com/watch?v=abc123"]
 
 
+def test_glm_asr_audio_download_passes_cookie_file(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeYoutubeDL:
+        def __init__(self, opts: dict[str, object]) -> None:
+            captured.update(opts)
+
+        def __enter__(self) -> "FakeYoutubeDL":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def download(self, _urls: list[str]) -> None:
+            outtmpl = str(captured["outtmpl"])
+            with open(outtmpl.replace("%(ext)s", "webm"), "wb") as fh:
+                fh.write(b"fake audio")
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", FakeYoutubeDL)
+    service = GlmAsrService(
+        api_key="key",
+        workspace=str(tmp_path),
+        cookies_file="/app/private/youtube-cookies.txt",
+    )
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+
+    service._download_audio("abc123", str(workdir))
+
+    assert captured["cookiefile"] == "/app/private/youtube-cookies.txt"
+
+
 def test_glm_asr_audio_download_retries_partial_download(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

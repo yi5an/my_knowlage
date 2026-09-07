@@ -38,6 +38,7 @@ class YtDlpLocalVideoDownloader:
         video_id: str,
         target_root: Path,
         proxy_url: str | None,
+        cookies_file: str | None = None,
     ) -> LocalVideoDownloadResult:
         target_dir = target_root / video_id
         temp_dir = target_root / f".{video_id}.{uuid4().hex}.tmp"
@@ -47,6 +48,8 @@ class YtDlpLocalVideoDownloader:
         output_template = str(temp_dir / "%(id)s.%(ext)s")
         cmd = [
             "yt-dlp",
+            "-t",
+            "sleep",
             "--no-playlist",
             "--merge-output-format",
             "mp4",
@@ -58,6 +61,8 @@ class YtDlpLocalVideoDownloader:
         ]
         if proxy_url:
             cmd[1:1] = ["--proxy", proxy_url]
+        if cookies_file:
+            cmd[1:1] = ["--cookies", cookies_file]
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60 * 60)
             mp4_files = sorted(temp_dir.glob("*.mp4"))
@@ -73,6 +78,11 @@ class YtDlpLocalVideoDownloader:
             )
         except subprocess.CalledProcessError as exc:
             detail = (exc.stderr or exc.stdout or str(exc)).strip()
+            if "sign in to confirm" in detail.casefold():
+                raise RuntimeError(
+                    "YouTube Cookie 已失效或未包含登录会话，请在设置中重新导出 Cookie，"
+                    "通过 Cookie 测试后再重试下载。"
+                ) from exc
             raise RuntimeError(f"yt-dlp failed: {detail}") from exc
         finally:
             if temp_dir.exists():
@@ -157,6 +167,7 @@ class YouTubeLocalVideoDownloadHandler(JobHandler):
             raise ValueError(f"video not found for task job {job.id}")
 
         settings = get_settings()
+        from app.services.youtube.cookies import YouTubeCookieStore
         video.local_video_status = "downloading"
         video.local_video_error = None
         session.commit()
@@ -166,6 +177,9 @@ class YouTubeLocalVideoDownloadHandler(JobHandler):
                 video_id=video.video_id,
                 target_root=Path(settings.youtube_local_video_dir),
                 proxy_url=settings.youtube_proxy_url,
+                cookies_file=YouTubeCookieStore(
+                    getattr(settings, "youtube_cookies_file", None)
+                ).cookiefile(),
             )
         except Exception as exc:
             video.local_video_status = "failed"

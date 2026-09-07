@@ -153,6 +153,16 @@ Use **设置 → 模型管理** to save provider addresses, models, default capa
 
 预约中和正在直播的 YouTube 视频会被忽略，不会创建历史记录或总结任务；已结束的直播回放会按普通视频处理。
 
+## YouTube Cookie 设置
+
+当 YouTube 提示“确认你不是机器人”时，在 **设置 → YouTube 访问 Cookie** 粘贴
+`youtube.com` 的 Netscape/Mozilla 格式 Cookie 文本。生产环境将其保存在仅后端可访问的
+`backend_private` Docker 命名卷中，前端、数据库、日志和 Git 都不会保存或回显 Cookie。
+
+建议使用专用 Google 账号的无痕浏览器窗口，在与服务器相同的代理出口完成验证后再导出
+Cookie。保存后可以使用“测试当前 Cookie”验证；Cookie 过期或代理出口变化时，替换为新导出的
+文本即可。
+
 ## 全局 AI 陪读
 
 点击页面右下角的 **AI 陪读** 可在不离开当前页面的情况下提问。阅读页、YouTube 总结详情页会自动绑定当前资料；在信息差系统中点击一条信号后，会绑定该信号。
