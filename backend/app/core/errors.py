@@ -43,6 +43,14 @@ def _error_payload(
     return ErrorResponse(error=error).model_dump()
 
 
+def _safe_validation_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
+    """Return useful locations/messages without reflecting request payloads."""
+    return [
+        {key: value for key, value in error.items() if key != "input"}
+        for error in exc.errors()
+    ]
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
@@ -66,5 +74,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-            content=_error_payload("validation_error", "Request validation failed.", exc.errors()),
+            content=_error_payload(
+                "validation_error",
+                "Request validation failed.",
+                _safe_validation_errors(exc),
+            ),
         )

@@ -106,7 +106,8 @@ export function YouTubeTimeline({ workspaceId = "ws_default" }: YouTubeTimelineP
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<Record<string, boolean>>({});
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
+  const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null);
   const requestRef = useRef(0);
 
   const loadPage = useCallback(async (cursor: string | null, replace: boolean) => {
@@ -156,14 +157,13 @@ export function YouTubeTimeline({ workspaceId = "ws_default" }: YouTubeTimelineP
   }, [loadPage]);
 
   useEffect(() => {
-    const node = sentinelRef.current;
-    if (!node || !nextCursor || loading || loadingMore) return;
-    const observer = new IntersectionObserver((entries) => {
+    if (!sentinelNode || !scrollRoot || !nextCursor || loading || loadingMore) return;
+    const observer = new window.IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) void loadPage(nextCursor, false);
-    });
-    observer.observe(node);
+    }, { root: scrollRoot, rootMargin: "0px 0px 120px 0px" });
+    observer.observe(sentinelNode);
     return () => observer.disconnect();
-  }, [loadPage, loading, loadingMore, nextCursor]);
+  }, [loadPage, loading, loadingMore, nextCursor, scrollRoot, sentinelNode]);
 
   const visibleChannels = useMemo(() => {
     if (showAll) return channels;
@@ -251,7 +251,11 @@ export function YouTubeTimeline({ workspaceId = "ws_default" }: YouTubeTimelineP
         </Space>
       )}
       {loading && items.length === 0 ? <Spin /> : items.length === 0 ? <Empty description="暂无 YouTube 采集记录" /> : (
-        <div data-testid="youtube-timeline-scroll" style={shellStyle}>
+        <div
+          ref={setScrollRoot}
+          data-testid="youtube-timeline-scroll"
+          style={shellStyle}
+        >
           <div
             data-testid="youtube-timeline-grid"
             style={{
@@ -303,9 +307,9 @@ export function YouTubeTimeline({ workspaceId = "ws_default" }: YouTubeTimelineP
               )),
             ])}
           </div>
+          <div data-testid="youtube-timeline-sentinel" ref={setSentinelNode} style={{ height: 1 }} />
         </div>
       )}
-      <div ref={sentinelRef} style={{ height: 1 }} />
       {loadingMore && <Spin size="small" tip="加载更早历史…" />}
       {showAll && visibleChannels.length < channels.length && <Text type="secondary">已展开全部 {visibleChannels.length} 位博主</Text>}
     </Space>

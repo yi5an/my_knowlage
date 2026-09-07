@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { YouTubeTimeline } from "./YouTubeTimeline";
 import { getYouTubeTimeline, retryVideo, type TimelinePage } from "../../services/youtubeApi";
@@ -76,6 +76,10 @@ describe("YouTubeTimeline", () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("renders blogger lanes and all statuses", async () => {
     render(<YouTubeTimeline />, { wrapper: MemoryRouter });
 
@@ -90,10 +94,12 @@ describe("YouTubeTimeline", () => {
       "style",
       expect.stringContaining("display: grid"),
     );
-    expect(screen.getByTestId("youtube-timeline-scroll")).toHaveAttribute(
+    const scrollContainer = screen.getByTestId("youtube-timeline-scroll");
+    expect(scrollContainer).toHaveAttribute(
       "style",
       expect.stringContaining("overflow: auto"),
     );
+    expect(scrollContainer).toContainElement(screen.getByTestId("youtube-timeline-sentinel"));
   });
 
   it("retries a failed card", async () => {
@@ -101,6 +107,38 @@ describe("YouTubeTimeline", () => {
     fireEvent.click(await screen.findByRole("button", { name: "重新处理" }));
 
     await waitFor(() => expect(retryVideo).toHaveBeenCalledWith("failed", "ws_default"));
+  });
+
+  it("observes pagination inside the timeline scroll container", async () => {
+    class FakeIntersectionObserver implements IntersectionObserver {
+      static roots: Array<Element | Document | null> = [];
+      readonly root: Element | Document | null;
+      readonly rootMargin: string;
+      readonly thresholds = [0];
+
+      constructor(_callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        this.root = options?.root ?? null;
+        this.rootMargin = options?.rootMargin ?? "0px";
+        FakeIntersectionObserver.roots.push(this.root);
+      }
+
+      disconnect() {}
+      observe() {}
+      takeRecords(): IntersectionObserverEntry[] { return []; }
+      unobserve() {}
+    }
+    vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+    expect(window.IntersectionObserver).toBe(FakeIntersectionObserver);
+    vi.mocked(getYouTubeTimeline).mockResolvedValue({
+      ...timelinePage,
+      next_cursor: "next-page",
+    });
+
+    render(<YouTubeTimeline />, { wrapper: MemoryRouter });
+    const scrollContainer = await screen.findByTestId("youtube-timeline-scroll");
+
+    expect(window.IntersectionObserver).toBe(FakeIntersectionObserver);
+    await waitFor(() => expect(FakeIntersectionObserver.roots).toContain(scrollContainer));
   });
 
   it("reloads the first page when a filter changes", async () => {

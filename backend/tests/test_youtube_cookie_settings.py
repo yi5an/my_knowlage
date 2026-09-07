@@ -110,6 +110,20 @@ def test_cookie_api_does_not_echo_oversized_secret(client: TestClient) -> None:
     assert len(response.content) < 4096
 
 
+def test_cookie_api_does_not_echo_secret_from_malformed_field_type(
+    client: TestClient,
+) -> None:
+    secret_marker = "malformed-secret-must-not-be-echoed"
+
+    response = client.put(
+        "/api/v1/youtube/cookies",
+        json={"cookies_text": [secret_marker]},
+    )
+
+    assert response.status_code == 422
+    assert secret_marker not in response.text
+
+
 def test_cookie_api_test_uses_configured_file_without_exposing_path(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
