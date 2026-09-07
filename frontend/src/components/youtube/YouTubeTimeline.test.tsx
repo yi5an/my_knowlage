@@ -85,6 +85,11 @@ describe("YouTubeTimeline", () => {
     expect(screen.getByText("转写失败视频")).toBeInTheDocument();
     expect(screen.getByText("已完成")).toBeInTheDocument();
     expect(screen.getByText("转写失败")).toBeInTheDocument();
+    expect(screen.getByText("asr: failed")).toBeInTheDocument();
+    expect(screen.getByTestId("youtube-timeline-grid")).toHaveAttribute(
+      "style",
+      expect.stringContaining("display: grid"),
+    );
   });
 
   it("retries a failed card", async () => {
@@ -105,5 +110,87 @@ describe("YouTubeTimeline", () => {
         expect.objectContaining({ yearMonth: "2026-08", cursor: null }),
       ),
     );
+  });
+
+  it("uses a stable unknown-channel key for filtering", async () => {
+    vi.mocked(getYouTubeTimeline).mockResolvedValue({
+      ...timelinePage,
+      items: [
+        {
+          ...timelinePage.items[0],
+          video_id: "unknown",
+          channel_id: null,
+          channel_name: "未识别博主",
+        },
+      ],
+      channels: [
+        {
+          channel_id: null,
+          channel_name: "未识别博主",
+          latest_effective_time: "2026-08-28T00:00:00Z",
+          item_count: 1,
+        },
+      ],
+    });
+    render(<YouTubeTimeline />, { wrapper: MemoryRouter });
+    await screen.findByText("未识别博主");
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "博主筛选" }));
+    const labels = await screen.findAllByText("未识别博主");
+    fireEvent.click(labels.at(-1)!);
+
+    await waitFor(() =>
+      expect(getYouTubeTimeline).toHaveBeenLastCalledWith(
+        expect.objectContaining({ channelId: "__unknown__", cursor: null }),
+      ),
+    );
+  });
+
+  it("keeps same-named channels in distinct lanes without duplicating cards", async () => {
+    vi.mocked(getYouTubeTimeline).mockResolvedValue({
+      ...timelinePage,
+      items: [
+        {
+          ...timelinePage.items[0],
+          video_id: "same_name_a",
+          title: "频道 A 视频",
+          channel_id: "channel_a",
+          channel_name: "同名博主",
+        },
+        {
+          ...timelinePage.items[0],
+          video_id: "same_name_b",
+          title: "频道 B 视频",
+          channel_id: "channel_b",
+          channel_name: "同名博主",
+        },
+      ],
+      channels: [
+        { channel_id: "channel_a", channel_name: "同名博主", latest_effective_time: "2026-08-28T00:00:00Z", item_count: 1 },
+        { channel_id: "channel_b", channel_name: "同名博主", latest_effective_time: "2026-08-28T00:00:00Z", item_count: 1 },
+      ],
+    });
+
+    render(<YouTubeTimeline />, { wrapper: MemoryRouter });
+
+    expect(await screen.findAllByText("频道 A 视频")).toHaveLength(1);
+    expect(screen.getAllByText("频道 B 视频")).toHaveLength(1);
+  });
+
+  it("uses one UTC date label and marks created-at fallback as platform time", async () => {
+    vi.mocked(getYouTubeTimeline).mockResolvedValue({
+      ...timelinePage,
+      items: [
+        {
+          ...timelinePage.items[0],
+          effective_time: "2026-08-31T17:00:00Z",
+          time_source: "created_at",
+        },
+      ],
+    });
+
+    render(<YouTubeTimeline />, { wrapper: MemoryRouter });
+
+    expect(await screen.findByText("2026-08-31 · 平台时间")).toBeInTheDocument();
   });
 });

@@ -14,6 +14,7 @@ import {
 
 const { Text, Paragraph } = Typography;
 const ALL = "";
+const UNKNOWN_CHANNEL_ID = "__unknown__";
 
 const shellStyle: CSSProperties = {
   overflowX: "auto",
@@ -26,19 +27,12 @@ const dateStyle: CSSProperties = {
   position: "sticky",
   left: 0,
   zIndex: 2,
-  width: 92,
-  minWidth: 92,
   padding: "12px 10px",
   background: "#fff",
   borderRight: "1px solid #e5e7eb",
+  borderBottom: "1px solid #eef0f3",
   color: "#667085",
   fontSize: 12,
-};
-
-const laneStyle: CSSProperties = {
-  width: 250,
-  minWidth: 250,
-  borderRight: "1px solid #e5e7eb",
 };
 
 const laneHeaderStyle: CSSProperties = {
@@ -48,6 +42,7 @@ const laneHeaderStyle: CSSProperties = {
   height: 45,
   padding: "13px 12px",
   background: "#fff",
+  borderRight: "1px solid #e5e7eb",
   borderBottom: "1px solid #e5e7eb",
   fontWeight: 600,
 };
@@ -55,6 +50,7 @@ const laneHeaderStyle: CSSProperties = {
 const rowStyle: CSSProperties = {
   minHeight: 150,
   padding: 12,
+  borderRight: "1px solid #e5e7eb",
   borderBottom: "1px solid #eef0f3",
 };
 
@@ -72,16 +68,23 @@ function statusLabel(item: TimelineItem): { text: string; color: string } {
   if (item.failure_stage === "transcript" || item.summary_status === "no_transcript") {
     return { text: "转写失败", color: "red" };
   }
-  if (item.summary_status === "failed") return { text: "总结失败", color: "red" };
+  if (item.failure_stage === "capture") return { text: "采集失败", color: "red" };
+  if (item.failure_stage === "summary") return { text: "总结失败", color: "red" };
+  if (item.summary_status === "failed") return { text: "处理失败", color: "red" };
   return { text: "处理中", color: "gold" };
 }
 
 function effectiveDate(item: TimelineItem): string {
-  return new Date(item.effective_time).toLocaleDateString("zh-CN");
+  const date = dateKey(item);
+  return item.time_source === "created_at" ? `${date} · 平台时间` : date;
 }
 
 function dateKey(item: TimelineItem): string {
   return item.effective_time.slice(0, 10);
+}
+
+function channelKey(channel: Pick<TimelineChannel, "channel_id">): string {
+  return channel.channel_id ?? UNKNOWN_CHANNEL_ID;
 }
 
 export interface YouTubeTimelineProps {
@@ -169,9 +172,10 @@ export function YouTubeTimeline({ workspaceId = "ws_default" }: YouTubeTimelineP
     const byDate = new Map<string, Map<string, TimelineItem[]>>();
     for (const item of items) {
       const byChannel = byDate.get(dateKey(item)) ?? new Map<string, TimelineItem[]>();
-      const list = byChannel.get(item.channel_name) ?? [];
+      const key = channelKey(item);
+      const list = byChannel.get(key) ?? [];
       list.push(item);
-      byChannel.set(item.channel_name, list);
+      byChannel.set(key, list);
       byDate.set(dateKey(item), byChannel);
     }
     return Array.from(byDate.entries()).sort(([a], [b]) => b.localeCompare(a));
@@ -192,8 +196,9 @@ export function YouTubeTimeline({ workspaceId = "ws_default" }: YouTubeTimelineP
 
   const channelOptions = channels.map((channel) => ({
     label: channel.channel_name,
-    value: channel.channel_id ?? channel.channel_name,
+    value: channelKey(channel),
   }));
+  const gridTemplateColumns = `92px repeat(${visibleChannels.length}, 250px)`;
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       <Space wrap>
@@ -239,14 +244,28 @@ export function YouTubeTimeline({ workspaceId = "ws_default" }: YouTubeTimelineP
       )}
       {loading && items.length === 0 ? <Spin /> : items.length === 0 ? <Empty description="暂无 YouTube 采集记录" /> : (
         <div style={shellStyle}>
-          <div style={{ display: "flex", minWidth: 92 + visibleChannels.length * 250 }}>
-            <div style={dateStyle}><div style={{ height: 33 }}>日期</div>{grouped.map(([date]) => <div key={date} style={{ ...rowStyle, paddingLeft: 0 }}>{date}</div>)}</div>
+          <div
+            data-testid="youtube-timeline-grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns,
+              minWidth: 92 + visibleChannels.length * 250,
+            }}
+          >
+            <div style={{ ...dateStyle, top: 0, zIndex: 3, height: 45 }}>日期</div>
             {visibleChannels.map((channel) => (
-              <div key={channel.channel_id ?? channel.channel_name} style={laneStyle}>
-                <div style={laneHeaderStyle}>{channel.channel_name}<Text type="secondary" style={{ float: "right", fontSize: 12 }}>{channel.item_count}</Text></div>
-                {grouped.map(([date, byChannel]) => (
-                  <div key={date} style={rowStyle}>
-                    {(byChannel.get(channel.channel_name) ?? []).map((item) => {
+              <div key={channelKey(channel)} style={laneHeaderStyle}>
+                {channel.channel_name}
+                <Text type="secondary" style={{ float: "right", fontSize: 12 }}>
+                  {channel.item_count}
+                </Text>
+              </div>
+            ))}
+            {grouped.flatMap(([date, byChannel]) => [
+              <div key={`${date}:date`} style={dateStyle}>{date}</div>,
+              ...visibleChannels.map((channel) => (
+                <div key={`${date}:${channelKey(channel)}`} style={rowStyle}>
+                    {(byChannel.get(channelKey(channel)) ?? []).map((item) => {
                       const status = statusLabel(item);
                       const body = <>
                         {item.thumbnail_url && (
@@ -260,21 +279,21 @@ export function YouTubeTimeline({ workspaceId = "ws_default" }: YouTubeTimelineP
                         )}
                         <Text strong ellipsis={{ tooltip: item.title }} style={{ display: "block" }}>{item.title}</Text>
                         <Space size={4}>
-                          <Text type="secondary" style={{ fontSize: 12 }}>{effectiveDate(item)} ·</Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{effectiveDate(item)}</Text>
                           <Tag color={status.color}>{status.text}</Tag>
                         </Space>
                         {item.tldr && <Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ margin: "5px 0 0", fontSize: 12 }}>{item.tldr}</Paragraph>}
+                        {item.error && <Paragraph type="danger" ellipsis={{ rows: 2 }} style={{ margin: "5px 0 0", fontSize: 12 }}>{item.error}</Paragraph>}
                         <Space wrap size={[2, 2]} style={{ marginTop: 4 }}>{item.tags.slice(0, 3).map((tag) => <Tag key={tag}>#{tag}</Tag>)}</Space>
                         {item.retryable && <Button size="small" type="link" loading={retrying[item.video_id]} onClick={() => void handleRetry(item)} style={{ padding: 0, height: 22 }}>重新处理</Button>}
                       </>;
-                      return <div key={item.video_id} style={{ ...cardStyle, borderLeft: `3px solid ${status.color === "green" ? "#52c41a" : status.color === "red" ? "#ff4d4f" : "#faad14"}` }}>
+                      return <div key={item.video_id} style={{ ...cardStyle, marginBottom: 8, borderLeft: `3px solid ${status.color === "green" ? "#52c41a" : status.color === "red" ? "#ff4d4f" : status.color === "default" ? "#8c8c8c" : "#faad14"}` }}>
                         {item.summary_status === "completed" && item.document_id ? <Link to={`/youtube/summary/${item.document_id}`}>{body}</Link> : body}
                       </div>;
                     })}
-                  </div>
-                ))}
-              </div>
-            ))}
+                </div>
+              )),
+            ])}
           </div>
         </div>
       )}
