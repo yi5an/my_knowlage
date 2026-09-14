@@ -108,4 +108,4 @@ def test_refresh_api_accepts_visible_unconfigured_search_state(client: TestClien
         "/api/v1/investment/account-recommendations/refresh?workspace_id=ws_default"
     )
     assert response.status_code == 200
-    assert all("搜索服务未配置" not in item["reason"] for item in response.json())
+    assert any("搜索服务未配置" in item["reason"] for item in response.json())
