@@ -168,3 +168,39 @@ Cookie。保存后可以使用“测试当前 Cookie”验证；Cookie 过期或
 点击页面右下角的 **AI 陪读** 可在不离开当前页面的情况下提问。阅读页、YouTube 总结详情页会自动绑定当前资料；在信息差系统中点击一条信号后，会绑定该信号。
 
 对话按内容对象持久保存；点击 **新一轮** 会写入一个轮次分界，方便围绕同一资料重新开始讨论。回答和主动提示均附带当前内容的原始证据，并会检索同一工作区内匹配的资料作为平台内佐证；没有证据时，助手会明确说明资料不足，而不会把推测当作结论。
+
+## 投资机会回填与运行观测
+
+机会发现回填默认按工作区执行，输出一行 JSON（`created`、`skipped`、`failed`、`seen` 和 `failure_reasons`），可安全重复运行。`--dry-run` 只计算将要创建的任务/候选，不写入数据库；`--as-of` 是 ISO-8601 截止时间，历史回填不会读取截止时间之后的资料。
+
+```bash
+cd backend
+python -m scripts.backfill_person_impact \
+  --workspace-id ws_default --limit 500 \
+  --as-of 2026-09-15T00:00:00+00:00 --dry-run
+python -m scripts.backfill_opportunity_candidates \
+  --workspace-id ws_default --limit 500 --dry-run
+```
+
+人物影响只接受 `human_source`/`expert_opinion` 中带有真实 `person_source_id` 和唯一显式 `symbol`/`ticker` 的条目；不会从正文猜账号或从主题推断股票。机会候选只接受来源快照中完整填写的 `catalyst`、`risk_flags`、`invalidation_conditions` 等 gate 字段，缺失时计入 `skipped`，不会生成虚假假设。失败会保留在 JSON 的 `failure_reasons` 中，并在 `TaskJob.error_message` 中显示。
+
+### 数据提供商与任务
+
+人物事件研究默认使用 Stooq 日线接口（`MARKET_DATA_BASE_URL`，默认 `https://stooq.com`），交易所时区默认 `America/New_York`。日线数据通常有收盘后延迟；每个事件保存 provider、请求区间、时区、缺失交易日、复权价是否为原始价和 `complete`/`partial`/`missing`/`stale`/`invalid` 质量状态。常见可见失败信息包括 `market provider error`（超时或限流）、`market bars missing`、`未能确定唯一标的` 和 `搜索服务未配置`。
+
+`person_impact_refresh` 是异步 `TaskJob` 类型；机会候选回填是受 gate 保护的同步命令；推荐校准由 `OutcomeService.recalculate_recommendation_weights` 执行，并只使用 `observed_at <= as_of` 的结果。暂停推荐请在推荐记录上使用 `dismissed`/`paused` 状态，保留其来源、事件和结果证据，不要删除行。
+
+### 迁移回滚与历史重建
+
+上线前先在备份数据库执行：
+
+```bash
+cd backend
+alembic upgrade 202609140002
+# 回滚机会/人物影响/推荐表（不会删除旧投资资料）
+alembic downgrade 202609030002
+# 需要恢复时
+alembic upgrade 202609140002
+```
+
+要重建历史人物 profile，使用相同 `--workspace-id` 和 `--as-of` 运行 `backfill_person_impact`，让新任务携带截止时间并通过 worker 处理；digest 快照则在截止时间对应的数据库连接上调用 `InvestmentService.create_digest_snapshot`。快照是追加写入的，旧快照不会被覆盖；回填前请记录 JSON 输出和失败原因以便审计。
