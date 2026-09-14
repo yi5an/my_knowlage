@@ -13,12 +13,12 @@ function renderRoute(path = "/") {
 }
 
 describe("App shell", () => {
-  it("renders the global shell and dashboard", () => {
+  it("renders the global shell and intelligence flow", () => {
     renderRoute();
 
     expect(screen.getByText("KnowPilot")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "仪表盘" })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/搜索文档/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "情报流" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/搜索情报/)).toBeInTheDocument();
   });
 
   it("makes primary pages reachable by route", () => {
