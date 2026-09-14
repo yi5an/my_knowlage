@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -14,7 +12,6 @@ from app.infrastructure.models import (
     InvestmentFact,
     InvestmentPersonImpactProfile,
     InvestmentPersonSource,
-    InvestmentSource,
     InvestmentTheme,
     TaskJob,
     Workspace,
@@ -112,6 +109,27 @@ def test_recommendation_reason_mentions_evidence_and_sample_count(session: Sessi
     }
 
 
+def test_refresh_preserves_calibration_snapshot(session: Session) -> None:
+    service = AccountRecommendationService(session, web_search=FakeWebSearch([]))
+    recommendation = service.refresh("ws_default")[0]
+    calibration = {
+        "version": 2,
+        "as_of": "2026-09-20T00:00:00+00:00",
+        "reason": "基于历史结果完成校准",
+        "weights": {"validated_rate": 0.75},
+    }
+    recommendation.score_breakdown = {
+        **recommendation.score_breakdown,
+        "calibration": calibration,
+    }
+    session.commit()
+    session.expire_all()
+
+    refreshed = service.refresh("ws_default")
+
+    assert refreshed[0].score_breakdown["calibration"] == calibration
+
+
 def test_refresh_does_not_fabricate_candidates_without_search_provider(session: Session) -> None:
     session.delete(session.get(InvestmentPersonSource, "person_timiraos"))
     session.commit()
@@ -130,7 +148,9 @@ def test_follow_is_idempotent_and_never_calls_external_follow_api(session: Sessi
     assert first.config["username"] == "NickTimiraos"
     jobs = list(
         session.scalars(
-            select(TaskJob).where(TaskJob.target_id == first.id, TaskJob.job_type == "x_web_collect")
+            select(TaskJob).where(
+                TaskJob.target_id == first.id, TaskJob.job_type == "x_web_collect"
+            )
         )
     )
     assert len(jobs) == 1

@@ -148,7 +148,15 @@ class AccountRecommendationService:
                 existing.sample_count, existing.evidence_count, existing.score_breakdown = (
                     sample,
                     evidence,
-                    scores,
+                    {
+                        **scores,
+                        **(
+                            {"calibration": existing.score_breakdown["calibration"]}
+                            if isinstance(existing.score_breakdown, dict)
+                            and isinstance(existing.score_breakdown.get("calibration"), dict)
+                            else {}
+                        ),
+                    },
                 )
             out.append(existing)
         self.session.commit()
