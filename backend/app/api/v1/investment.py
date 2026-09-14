@@ -17,6 +17,9 @@ from app.schemas.investment import (
     InvestmentClaimStatusAction,
     InvestmentClaimUpdate,
     InvestmentDashboardResponse,
+    InvestmentDigestOpportunityResponse,
+    InvestmentDigestOutcomeResponse,
+    InvestmentDigestPersonImpactEventResponse,
     InvestmentDigestResponse,
     InvestmentDigestSnapshotResponse,
     InvestmentFactResponse,
@@ -360,6 +363,18 @@ async def digest(
         ],
         pending_facts=[
             InvestmentFactResponse.model_validate(fact) for fact in data["pending_facts"]
+        ],
+        opportunities=[
+            InvestmentDigestOpportunityResponse.model_validate(candidate)
+            for candidate in data.get("opportunities", [])
+        ],
+        person_impact_events=[
+            InvestmentDigestPersonImpactEventResponse.model_validate(event)
+            for event in data.get("person_impact_events", [])
+        ],
+        outcomes=[
+            InvestmentDigestOutcomeResponse.model_validate(outcome)
+            for outcome in data.get("outcomes", [])
         ],
     )
 

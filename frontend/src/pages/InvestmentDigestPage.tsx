@@ -18,6 +18,8 @@ import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { ImpactTag } from "../components/investment/ImpactTag";
 import { InfoLayerTag } from "../components/investment/InfoLayerTag";
+import { OpportunityCandidateCard } from "../components/investment/OpportunityCandidateCard";
+import { OutcomeTimeline } from "../components/investment/OutcomeTimeline";
 import { ReviewStatusTag } from "../components/investment/ReviewStatusTag";
 import { ApiError } from "../services/client";
 import {
@@ -44,6 +46,9 @@ const EMPTY: InvestmentDigest = {
   challenged_items: [],
   early_signals: [],
   pending_facts: [],
+  opportunities: [],
+  person_impact_events: [],
+  outcomes: [],
 };
 
 export function InvestmentDigestPage() {
@@ -90,6 +95,10 @@ export function InvestmentDigestPage() {
       setSaving(false);
     }
   };
+
+  const opportunities = digest.opportunities ?? [];
+  const personImpactEvents = digest.person_impact_events ?? [];
+  const outcomes = digest.outcomes ?? [];
 
   return (
     <main className="page">
@@ -230,6 +239,63 @@ export function InvestmentDigestPage() {
         </Row>
 
         <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+          <Col span={24}>
+            <Card
+              title="高优先机会"
+              extra={<Typography.Text type="secondary">证据驱动 · 仅作研究假设</Typography.Text>}
+            >
+              {opportunities.length === 0 ? (
+                <Empty description="暂无高优先机会候选" />
+              ) : (
+                <div className="opportunity-card-grid">
+                  {opportunities.slice(0, 5).map((candidate) => (
+                    <OpportunityCandidateCard key={candidate.id} candidate={candidate} />
+                  ))}
+                </div>
+              )}
+            </Card>
+          </Col>
+          <Col span={12}>
+            <Card title="人物影响事件" style={{ height: "100%" }}>
+              {personImpactEvents.length === 0 ? (
+                <Empty description="暂无人物影响事件" />
+              ) : (
+                <List
+                  dataSource={personImpactEvents}
+                  renderItem={(event) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={
+                          <Space wrap>
+                            <Typography.Text strong>
+                              {event.symbol} · {event.event_status}
+                            </Typography.Text>
+                            <Tag color="blue">置信度 {Math.round(event.confidence * 100)}%</Tag>
+                          </Space>
+                        }
+                        description={
+                          <Space direction="vertical" size={2}>
+                            <Typography.Text type="secondary">
+                              {new Date(event.event_at).toLocaleDateString("zh-CN")} · 基准 {event.benchmark_symbol}
+                            </Typography.Text>
+                            <Typography.Text>{event.reason ?? "暂无结论"}</Typography.Text>
+                          </Space>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              )}
+            </Card>
+          </Col>
+          <Col span={12}>
+            <Card title="结果复盘" style={{ height: "100%" }}>
+              <OutcomeTimeline outcomes={outcomes} />
+            </Card>
+          </Col>
+        </Row>
+
+        <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
           <Col span={12}>
             <Card title="早期信号" style={{ height: "100%" }}>
               {digest.early_signals.length === 0 ? (
@@ -324,9 +390,11 @@ export function InvestmentDigestPage() {
                         <Typography.Text type="secondary">
                           {new Date(snapshot.digest_date).toLocaleString("zh-CN")}
                         </Typography.Text>
-                        <Tag>重点 {snapshot.digest.today_highlights.length}</Tag>
-                        <Tag>信号 {snapshot.digest.early_signals.length}</Tag>
-                        <Tag>事实 {snapshot.digest.pending_facts.length}</Tag>
+                        <Tag>重点 {snapshot.digest.today_highlights?.length ?? 0}</Tag>
+                        <Tag>信号 {snapshot.digest.early_signals?.length ?? 0}</Tag>
+                        <Tag>事实 {snapshot.digest.pending_facts?.length ?? 0}</Tag>
+                        <Tag>机会 {snapshot.digest.opportunities?.length ?? 0}</Tag>
+                        <Tag>复盘 {snapshot.digest.outcomes?.length ?? 0}</Tag>
                       </Space>
                     }
                   />

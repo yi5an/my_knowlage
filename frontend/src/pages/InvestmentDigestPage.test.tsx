@@ -254,4 +254,111 @@ describe("InvestmentDigestPage", () => {
       expect(screen.getAllByText("每日简报").length).toBeGreaterThanOrEqual(2);
     });
   });
+
+  it("shows opportunity, person impact, and outcome sections in the digest", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/investment/digest/snapshots")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (u.includes("/investment/digest")) {
+          return new Response(
+            JSON.stringify({
+              counts: {
+                pending_review_count: 0,
+                pending_claims_count: 0,
+                theses_challenged_count: 0,
+                today_primary_count: 0,
+                today_macro_count: 0,
+                untranslated_count: 0,
+                unextracted_count: 0,
+                unsignaled_count: 0,
+                failed_job_count: 0,
+              },
+              today_highlights: [],
+              pending_claims: [],
+              challenged_items: [],
+              early_signals: [],
+              pending_facts: [],
+              opportunities: [
+                {
+                  id: "opp_digest_ui",
+                  workspace_id: "ws_default",
+                  title: "AI capex inflection",
+                  asset_symbols: ["NVDA"],
+                  opportunity_type: "earnings_inflection",
+                  change_summary: "Capex moved higher",
+                  expected_case: "Demand remains above consensus",
+                  market_case: "Price has not fully reacted",
+                  impact_path: "Orders to revenue",
+                  catalyst: "Next earnings",
+                  next_action: "Verify guidance",
+                  risk_flags: ["valuation"],
+                  invalidation_conditions: ["Guidance cut"],
+                  evidence_refs: ["item_digest"],
+                  confidence: 0.82,
+                  status: "new",
+                  priority: "high_priority_research",
+                  market_reaction_state: "partially_reacted",
+                  score_breakdown: {},
+                  outcome: {},
+                },
+              ],
+              person_impact_events: [
+                {
+                  id: "impact_digest_ui",
+                  workspace_id: "ws_default",
+                  person_source_id: "person_digest",
+                  source_item_id: "item_digest",
+                  symbol: "NVDA",
+                  benchmark_symbol: "SPY",
+                  event_at: "2026-09-14T00:00:00Z",
+                  event_cluster_id: "cluster_digest",
+                  window_overlap: false,
+                  event_status: "computed",
+                  data_quality: "complete",
+                  windows: {
+                    "1d": { "excess_return": 0.02 },
+                    "3d": { "excess_return": 0.04 },
+                    "5d": { "excess_return": 0.06 },
+                  },
+                  concurrent_events: [],
+                  confidence: 0.7,
+                  reason: "事件研究已完成",
+                },
+              ],
+              outcomes: [
+                {
+                  id: "outcome_digest_ui",
+                  workspace_id: "ws_default",
+                  opportunity_id: "opp_digest_ui",
+                  adopted: true,
+                  outcome_status: "invalidated",
+                  outcome_note: "Guidance was cut",
+                  observed_at: "2026-09-20T00:00:00Z",
+                  failure_reason: "Guidance was cut",
+                  catalyst_result: "invalidated",
+                  reason: "Guidance was cut",
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (u.includes("/investment/watchlist")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("AI capex inflection")).toBeInTheDocument();
+    expect(screen.getByText("人物影响事件")).toBeInTheDocument();
+    expect(screen.getByText("结果复盘")).toBeInTheDocument();
+    expect(screen.getByText(/Guidance was cut/)).toBeInTheDocument();
+  });
 });

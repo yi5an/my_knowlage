@@ -21,6 +21,7 @@ import { ApiError } from "../services/client";
 import {
   investmentApi,
   type InvestmentClaim,
+  type OpportunityCandidate,
   type InvestmentThesis,
   type InvestmentWatchlist,
   type VerificationStatus,
@@ -59,6 +60,7 @@ export function InvestmentClaimsPage() {
   const [claims, setClaims] = useState<InvestmentClaim[]>([]);
   const [watchlists, setWatchlists] = useState<InvestmentWatchlist[]>([]);
   const [theses, setTheses] = useState<InvestmentThesis[]>([]);
+  const [opportunities, setOpportunities] = useState<OpportunityCandidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -69,14 +71,16 @@ export function InvestmentClaimsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [c, w, t] = await Promise.all([
+      const [c, w, t, o] = await Promise.all([
         investmentApi.listClaims(),
         investmentApi.listWatchlist(),
         investmentApi.listTheses(),
+        investmentApi.listOpportunityCandidates({ limit: 100 }).catch(() => []),
       ]);
       setClaims(c);
       setWatchlists(w);
       setTheses(t);
+      setOpportunities(o);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -102,6 +106,21 @@ export function InvestmentClaimsPage() {
     form.resetFields();
     void load();
   };
+
+  const evidenceGroup = (claim: InvestmentClaim): string => {
+    if (claim.verification_status === "verified") return "支持";
+    if (claim.verification_status === "refuted") return "冲突";
+    if (claim.verification_status === "ignored") return "无关";
+    if (claim.verification_status === "local_only") return "削弱";
+    return "还不确定";
+  };
+
+  const linkedOpportunity = (claim: InvestmentClaim): OpportunityCandidate | undefined =>
+    opportunities.find(
+      (candidate) =>
+        candidate.evidence_refs.includes(claim.id) ||
+        (claim.source_item_id ? candidate.evidence_refs.includes(claim.source_item_id) : false),
+    );
 
   const handleVerify = async (claim: InvestmentClaim) => {
     setVerifying((current) => ({ ...current, [claim.id]: true }));
@@ -196,6 +215,7 @@ export function InvestmentClaimsPage() {
                         <Tag color={VERIF_COLOR[c.verification_status]}>
                           {VERIF_LABEL[c.verification_status]}
                         </Tag>
+                        <Tag>{evidenceGroup(c)}</Tag>
                         <Typography.Text>{c.claim_text}</Typography.Text>
                       </Space>
                     }
@@ -207,6 +227,11 @@ export function InvestmentClaimsPage() {
                         {c.verification_summary && <span>{c.verification_summary}</span>}
                         {c.evidence_doc_ids?.length > 0 && (
                           <span>证据文档：{c.evidence_doc_ids.length} 篇</span>
+                        )}
+                        {linkedOpportunity(c) && (
+                          <span>
+                            关联机会：{linkedOpportunity(c)?.title}
+                          </span>
                         )}
                         {theses.length > 0 && (
                           <Space size={8}>

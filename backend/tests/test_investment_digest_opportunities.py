@@ -10,14 +10,15 @@ from sqlalchemy.pool import StaticPool
 
 from app.infrastructure.database import Base
 from app.infrastructure.models import (
+    InvestmentItem,
     InvestmentOpportunityCandidate,
     InvestmentPersonImpactEvent,
     InvestmentRecommendationOutcome,
     InvestmentSource,
-    InvestmentItem,
     Workspace,
 )
 from app.services.investment.digest_service import InvestmentDigestService
+from app.services.investment.service import InvestmentService
 
 
 def _session() -> Session:
@@ -29,10 +30,12 @@ def _session() -> Session:
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     session = factory()
-    session.add_all([
-        Workspace(id="ws_default", name="Default"),
-        Workspace(id="ws_other", name="Other"),
-    ])
+    session.add_all(
+        [
+            Workspace(id="ws_default", name="Default"),
+            Workspace(id="ws_other", name="Other"),
+        ]
+    )
     session.commit()
     return session
 
@@ -166,3 +169,8 @@ def test_digest_is_workspace_scoped_and_keeps_historical_snapshots() -> None:
 
     assert [item["id"] for item in first["opportunities"]] == ["opp_default"]
     assert [item["id"] for item in second["opportunities"]] == ["opp_other"]
+
+    aggregate = InvestmentService(session).digest("ws_default")
+    assert "today_highlights" in aggregate
+    assert "early_signals" in aggregate
+    assert [item["id"] for item in aggregate["opportunities"]] == ["opp_default"]

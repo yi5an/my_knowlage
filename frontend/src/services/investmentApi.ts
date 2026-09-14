@@ -285,6 +285,23 @@ export interface InvestmentDigest {
   challenged_items: InvestmentItem[];
   early_signals: InvestmentSignal[];
   pending_facts: InvestmentFact[];
+  opportunities: OpportunityCandidate[];
+  person_impact_events: PersonImpactDigestEvent[];
+  outcomes: DigestOutcome[];
+}
+
+export interface PersonImpactDigestEvent extends PersonImpactEvent {
+  reason?: string | null;
+}
+
+export interface DigestOutcome extends RecommendationOutcome {
+  reason?: string | null;
+  failure_reason?: string | null;
+  opportunity_title?: string | null;
+  catalyst_result?: string | null;
+  realized_1d?: number | null;
+  realized_3d?: number | null;
+  realized_5d?: number | null;
 }
 
 export interface InformationEdgeDigest {
@@ -760,6 +777,15 @@ export const investmentApi = {
   },
   createRecommendationOutcome(payload: RecommendationOutcomeCreate): Promise<RecommendationOutcome> {
     return apiRequest("/investment/recommendation-outcomes", { method: "POST", body: payload });
+  },
+  listOpportunityOutcomes(
+    opportunityId: string,
+    workspaceId = WS,
+  ): Promise<RecommendationOutcome[]> {
+    const q = buildQuery({ workspace_id: workspaceId });
+    return apiRequest(
+      `/investment/opportunities/${encodeURIComponent(opportunityId)}/outcomes${q}`,
+    );
   },
 
   // items

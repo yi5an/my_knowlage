@@ -44,6 +44,9 @@ from app.schemas.investment import (
     InvestmentClaimStatusAction,
     InvestmentClaimUpdate,
     InvestmentDashboardResponse,
+    InvestmentDigestOpportunityResponse,
+    InvestmentDigestOutcomeResponse,
+    InvestmentDigestPersonImpactEventResponse,
     InvestmentDigestResponse,
     InvestmentFactResponse,
     InvestmentFetchJobResponse,
@@ -1350,7 +1353,7 @@ class InvestmentService:
                 ).limit(10)
             )
         )
-        return {
+        digest_data = {
             "counts": counts,
             "today_highlights": today_highlights,
             "pending_claims": pending_claims,
@@ -1358,6 +1361,17 @@ class InvestmentService:
             "early_signals": early_signals,
             "pending_facts": pending_facts,
         }
+        # Keep the original information/signal/claim/fact sections intact and
+        # append the evidence-first opportunity loop as a read-only projection.
+        from app.services.investment.digest_service import InvestmentDigestService
+
+        digest_data.update(
+            InvestmentDigestService(self.session).build(
+                workspace_id=workspace_id,
+                watchlist_id=watchlist_id,
+            )
+        )
+        return digest_data
 
     def create_digest_snapshot(
         self,
@@ -1418,5 +1432,17 @@ def _digest_response_from_data(data: dict[str, Any]) -> InvestmentDigestResponse
         ],
         pending_facts=[
             InvestmentFactResponse.model_validate(fact) for fact in data["pending_facts"]
+        ],
+        opportunities=[
+            InvestmentDigestOpportunityResponse.model_validate(candidate)
+            for candidate in data.get("opportunities", [])
+        ],
+        person_impact_events=[
+            InvestmentDigestPersonImpactEventResponse.model_validate(event)
+            for event in data.get("person_impact_events", [])
+        ],
+        outcomes=[
+            InvestmentDigestOutcomeResponse.model_validate(outcome)
+            for outcome in data.get("outcomes", [])
         ],
     )

@@ -751,6 +751,11 @@ class InvestmentDigestResponse(BaseModel):
     challenged_items: list[InvestmentItemResponse] = Field(default_factory=list)
     early_signals: list[InvestmentSignalResponse] = Field(default_factory=list)
     pending_facts: list[InvestmentFactResponse] = Field(default_factory=list)
+    opportunities: list[InvestmentDigestOpportunityResponse] = Field(default_factory=list)
+    person_impact_events: list[InvestmentDigestPersonImpactEventResponse] = Field(
+        default_factory=list
+    )
+    outcomes: list[InvestmentDigestOutcomeResponse] = Field(default_factory=list)
 
 
 class InformationEdgeDigestResponse(BaseModel):
@@ -1031,3 +1036,34 @@ class RecommendationOutcomeResponse(RecommendationOutcomeCreate):
 
     id: str
     created_at: datetime | None = None
+
+
+class InvestmentDigestOpportunityResponse(OpportunityCandidateResponse):
+    """Evidence-first opportunity projection used by the daily digest."""
+
+    reason: str
+
+
+class InvestmentDigestPersonImpactEventResponse(PersonImpactEventResponse):
+    """Person-impact event projection with a human-readable status reason."""
+
+    reason: str
+
+
+class InvestmentDigestOutcomeResponse(RecommendationOutcomeResponse):
+    """Outcome projection enriched for review timelines."""
+
+    failure_reason: str | None = None
+    opportunity_title: str | None = None
+    catalyst_result: str | None = None
+    realized_1d: float | None = None
+    realized_3d: float | None = None
+    realized_5d: float | None = None
+    reason: str = ""
+
+
+# ``InvestmentDigestResponse`` is declared alongside the legacy digest
+# schemas, while the opportunity/event/outcome projections depend on the
+# contracts declared later in this module.  Rebuild the model once all
+# forward-referenced contracts are available.
+InvestmentDigestResponse.model_rebuild()
