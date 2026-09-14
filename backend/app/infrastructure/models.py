@@ -1118,6 +1118,205 @@ class InvestmentDigestSnapshot(UpdatedTimestampMixin, Base):
     digest: Mapped[JsonObject] = mapped_column(JsonType, default=dict)
 
 
+class InvestmentOpportunityCandidate(UpdatedTimestampMixin, Base):
+    """A researchable opportunity candidate promoted from an investment signal."""
+
+    __tablename__ = "investment_opportunity_candidate"
+    __table_args__ = (
+        Index(
+            "idx_investment_opportunity_workspace_status",
+            "workspace_id",
+            "status",
+        ),
+        Index("idx_investment_opportunity_priority", "workspace_id", "priority"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    signal_id: Mapped[str | None] = mapped_column(ForeignKey("investment_signal.id"))
+    title: Mapped[str] = mapped_column(Text(), nullable=False)
+    asset_symbols: Mapped[JsonArray] = mapped_column(JsonType, default=list, nullable=False)
+    theme_id: Mapped[str | None] = mapped_column(ForeignKey("investment_theme.id"))
+    watchlist_id: Mapped[str | None] = mapped_column(ForeignKey("investment_watchlist.id"))
+    opportunity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    change_summary: Mapped[str] = mapped_column(Text(), nullable=False)
+    expected_case: Mapped[str] = mapped_column(Text(), nullable=False)
+    market_case: Mapped[str] = mapped_column(Text(), nullable=False)
+    impact_path: Mapped[str] = mapped_column(Text(), nullable=False)
+    catalyst: Mapped[str] = mapped_column(Text(), nullable=False)
+    time_window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    time_window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    risk_flags: Mapped[JsonArray] = mapped_column(JsonType, default=list, nullable=False)
+    invalidation_conditions: Mapped[JsonArray] = mapped_column(
+        JsonType, default=list, nullable=False
+    )
+    evidence_refs: Mapped[JsonArray] = mapped_column(JsonType, default=list, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="new", server_default="new")
+    priority: Mapped[str] = mapped_column(String(32), default="research", server_default="research")
+    market_reaction_state: Mapped[str] = mapped_column(
+        String(32), default="unknown", server_default="unknown"
+    )
+    score_breakdown: Mapped[JsonObject] = mapped_column(JsonType, default=dict, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    outcome: Mapped[JsonObject] = mapped_column(JsonType, default=dict, nullable=False)
+
+
+class InvestmentPersonImpactEvent(TimestampMixin, Base):
+    """An event-study observation for a person source statement and an asset."""
+
+    __tablename__ = "investment_person_impact_event"
+    __table_args__ = (
+        Index(
+            "idx_person_impact_person_time",
+            "workspace_id",
+            "person_source_id",
+            "event_at",
+        ),
+        Index("idx_person_impact_symbol_time", "workspace_id", "symbol", "event_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    person_source_id: Mapped[str] = mapped_column(
+        ForeignKey("investment_person_source.id"), nullable=False
+    )
+    source_item_id: Mapped[str] = mapped_column(ForeignKey("investment_item.id"), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    benchmark_symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    event_cluster_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    window_overlap: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    event_status: Mapped[str] = mapped_column(
+        String(32), default="pending", server_default="pending", nullable=False
+    )
+    data_quality: Mapped[str] = mapped_column(
+        String(32), default="missing", server_default="missing", nullable=False
+    )
+    windows: Mapped[JsonObject] = mapped_column(JsonType, default=dict, nullable=False)
+    concurrent_events: Mapped[JsonArray] = mapped_column(JsonType, default=list, nullable=False)
+    exclusion_reason: Mapped[str | None] = mapped_column(Text())
+    confidence: Mapped[float] = mapped_column(
+        Float, default=0.0, server_default="0", nullable=False
+    )
+
+
+class InvestmentPersonImpactProfile(UpdatedTimestampMixin, Base):
+    """Aggregated, uncertainty-aware impact statistics for a person source."""
+
+    __tablename__ = "investment_person_impact_profile"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "person_source_id",
+            name="uq_person_impact_profile",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    person_source_id: Mapped[str] = mapped_column(
+        ForeignKey("investment_person_source.id"), nullable=False
+    )
+    sample_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    valid_sample_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    excluded_sample_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    positive_event_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    negative_event_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    neutral_event_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    hit_rate: Mapped[float | None] = mapped_column(Float)
+    average_lead_time_hours: Mapped[float | None] = mapped_column(Float)
+    average_excess_return_1d: Mapped[float | None] = mapped_column(Float)
+    stability_score: Mapped[float | None] = mapped_column(Float)
+    uncertainty: Mapped[str] = mapped_column(
+        Text(), default="样本不足", server_default="样本不足", nullable=False
+    )
+
+
+class InvestmentAccountRecommendation(UpdatedTimestampMixin, Base):
+    """A recommendation for an X, YouTube, or institutional account to follow."""
+
+    __tablename__ = "investment_account_recommendation"
+    __table_args__ = (
+        Index("idx_account_recommendation_workspace_status", "workspace_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    handle: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255))
+    role_type: Mapped[str] = mapped_column(String(64), default="other", server_default="other")
+    theme_ids: Mapped[JsonArray] = mapped_column(JsonType, default=list, nullable=False)
+    recommendation_label: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str] = mapped_column(Text(), nullable=False)
+    score_breakdown: Mapped[JsonObject] = mapped_column(JsonType, default=dict, nullable=False)
+    sample_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    evidence_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(32), default="new", server_default="new")
+    source_id: Mapped[str | None] = mapped_column(ForeignKey("investment_source.id"))
+
+
+class InvestmentRecommendationOutcome(TimestampMixin, Base):
+    """Append-only observation of a recommendation or opportunity outcome."""
+
+    __tablename__ = "investment_recommendation_outcome"
+    __table_args__ = (
+        Index("idx_recommendation_outcome_workspace_time", "workspace_id", "observed_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    recommendation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("investment_account_recommendation.id")
+    )
+    opportunity_id: Mapped[str | None] = mapped_column(
+        ForeignKey("investment_opportunity_candidate.id")
+    )
+    adopted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    outcome_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome_note: Mapped[str | None] = mapped_column(Text())
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class InvestmentUserContext(UpdatedTimestampMixin, Base):
+    """Workspace-scoped investment preferences used to rank opportunities."""
+
+    __tablename__ = "investment_user_context"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            name="uq_investment_user_context_workspace",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    markets: Mapped[JsonArray] = mapped_column(JsonType, default=list, nullable=False)
+    horizons: Mapped[JsonArray] = mapped_column(JsonType, default=list, nullable=False)
+    focus_theme_ids: Mapped[JsonArray] = mapped_column(JsonType, default=list, nullable=False)
+    excluded_watchlist_ids: Mapped[JsonArray] = mapped_column(
+        JsonType, default=list, nullable=False
+    )
+    min_liquidity: Mapped[str] = mapped_column(String(32), default="any", server_default="any")
+    exposure_notes: Mapped[str | None] = mapped_column(Text())
+
+
 class MacroEvent(UpdatedTimestampMixin, Base):
     """A macro data point (CPI / rate / employment ...) for the calendar view."""
 
