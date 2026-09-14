@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
@@ -35,6 +36,21 @@ def test_event_study_uses_next_trading_day_and_adjusted_close() -> None:
     assert result.windows["1d"]["excess_return"] == pytest.approx(0.02)
     assert result.provider_name is None
     assert result.exchange_timezone == "America/New_York"
+
+
+def test_complete_window_reports_volume_ratio_and_realized_volatility() -> None:
+    result = compute_event_windows(
+        event_at=datetime(2026, 9, 12, 20, tzinfo=UTC),
+        asset_bars=_bars("TSLA", [100, 103, 105, 106, 107, 108]),
+        benchmark_bars=_bars("XLY", [200, 202, 203, 204, 205, 206]),
+        event_cluster_id="cluster_metrics",
+    )
+
+    assert result.data_quality == "complete"
+    assert result.windows["3d"]["volume_ratio"] == pytest.approx(1.0)
+    assert result.windows["3d"]["realized_volatility"] == pytest.approx(
+        0.010240026264162552
+    )
 
 
 def test_five_day_window_requires_fifth_following_trading_day() -> None:
@@ -96,12 +112,33 @@ def test_missing_benchmark_bar_only_omits_affected_windows() -> None:
         asset_bars=asset,
         benchmark_bars=benchmark,
         event_cluster_id="cluster_missing",
+        provider_name="fixture",
+        query_start=date(2026, 9, 14),
+        query_end=date(2026, 9, 18),
     )
 
     assert result.data_quality == "partial"
     assert "1d" not in result.windows
     assert "3d" in result.windows
     assert date(2026, 9, 15) in result.missing_dates
+    assert result.provider_name == "fixture"
+    assert result.query_start == date(2026, 9, 14)
+    assert result.query_end == date(2026, 9, 18)
+
+
+def test_event_study_preserves_raw_adjusted_close_provenance() -> None:
+    asset = [
+        replace(bar, adjusted_close_is_raw=True)
+        for bar in _bars("TSLA", [100, 103, 105, 106, 107, 108])
+    ]
+    result = compute_event_windows(
+        event_at=datetime(2026, 9, 12, 20, tzinfo=UTC),
+        asset_bars=asset,
+        benchmark_bars=_bars("XLY", [200, 202, 203, 204, 205, 206]),
+        event_cluster_id="cluster_raw",
+    )
+
+    assert result.adjusted_close_is_raw is True
 
 
 def test_intermediate_missing_bar_disables_volatility_but_keeps_window_returns() -> None:

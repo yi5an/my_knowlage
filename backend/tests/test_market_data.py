@@ -48,6 +48,17 @@ def test_stooq_provider_marks_raw_close_when_adjusted_column_is_missing() -> Non
     assert bars[0].adjusted_close_is_raw is True
 
 
+def test_stooq_provider_rejects_negative_volume() -> None:
+    response = httpx.Response(
+        200,
+        text="Date,Open,High,Low,Close,Volume\n2026-09-14,100,105,99,103,-1\n",
+    )
+    provider = _provider_with_response(response)
+
+    with pytest.raises(MarketDataError, match="volume"):
+        provider.daily_bars("TSLA", date(2026, 9, 14), date(2026, 9, 14))
+
+
 @pytest.mark.parametrize(
     "csv_text",
     [
