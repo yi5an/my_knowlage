@@ -683,7 +683,7 @@ class InvestmentSignalResponse(BaseModel):
     lead_time_hours: float | None = None
     information_edge_score: float = 0.0
     actionability: str = Field(default="weak_signal")
-    score_breakdown: dict[str, float] = Field(default_factory=dict)
+    score_breakdown: dict[str, JsonValue] = Field(default_factory=dict)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -976,7 +976,7 @@ class AccountRecommendationResponse(BaseModel):
     theme_ids: list[str] = Field(default_factory=list)
     recommendation_label: str
     reason: str
-    score_breakdown: dict[str, float] = Field(default_factory=dict)
+    score_breakdown: dict[str, JsonValue] = Field(default_factory=dict)
     sample_count: int = Field(ge=0)
     evidence_count: int = Field(ge=0)
     status: RecommendationStatus

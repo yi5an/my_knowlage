@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: E501
+
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
@@ -204,6 +206,17 @@ class OutcomeService:
                 .order_by(InvestmentAccountRecommendation.updated_at.desc())
             )
         if target is not None:
+            existing = target.score_breakdown or {}
+            if isinstance(existing.get(CALIBRATION_KEY), dict):
+                target = InvestmentAccountRecommendation(
+                    id=f"rec_{uuid4().hex}", workspace_id=target.workspace_id,
+                    platform=target.platform, handle=target.handle,
+                    display_name=target.display_name, role_type=target.role_type,
+                    theme_ids=list(target.theme_ids or []), recommendation_label=target.recommendation_label,
+                    reason=target.reason, score_breakdown=dict(existing), sample_count=target.sample_count,
+                    evidence_count=target.evidence_count, status=target.status, source_id=target.source_id,
+                )
+                self.session.add(target)
             score_breakdown = dict(target.score_breakdown or {})
             score_breakdown[CALIBRATION_KEY] = {
                 "version": version,
@@ -214,4 +227,6 @@ class OutcomeService:
             }
             target.score_breakdown = score_breakdown
             self.session.commit()
+        if target is None:
+            return CalibrationResult(False, previous_version, previous_weights, "无可更新的推荐目标")
         return CalibrationResult(True, version, weights, reason)
