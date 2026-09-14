@@ -449,6 +449,26 @@ class InvestmentService:
         self.session.refresh(job)
         return job
 
+    def refresh_account_recommendations(self, workspace_id: str, theme_id: str | None = None):
+        from app.services.investment.account_recommendation import AccountRecommendationService
+
+        return AccountRecommendationService(self.session).refresh(workspace_id, theme_id)
+
+    def list_account_recommendations(self, workspace_id: str, platform: str | None = None):
+        from app.services.investment.account_recommendation import AccountRecommendationService
+
+        return AccountRecommendationService(self.session).list(workspace_id, platform)
+
+    def dismiss_account_recommendation(self, rec_id: str, workspace_id: str):
+        from app.services.investment.account_recommendation import AccountRecommendationService
+
+        return AccountRecommendationService(self.session).dismiss(rec_id, workspace_id)
+
+    def follow_account_recommendation(self, rec_id: str, workspace_id: str, payload):
+        from app.services.investment.account_recommendation import AccountRecommendationService
+
+        return AccountRecommendationService(self.session).follow(rec_id, workspace_id, payload)
+
     # --- opportunity candidates ------------------------------------------
 
     def promote_signal_to_opportunity(

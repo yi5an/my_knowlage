@@ -5,9 +5,12 @@ fetch job (returns job id immediately); ``GET /jobs/{id}`` projects the
 ``TaskJob`` row for frontend polling (spec §1.2, §3.2).
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
+from app.infrastructure.models import InvestmentAccountRecommendation
 from app.schemas.investment import (
+    AccountRecommendationResponse,
+    FollowRecommendationRequest,
     InformationEdgeDigestResponse,
     InvestmentClaimCreate,
     InvestmentClaimResponse,
@@ -60,6 +63,62 @@ from app.services.investment.x_web import XWebInvestmentService
 
 router = APIRouter(prefix="/investment", tags=["investment"])
 SERVICE_DEPENDENCY = Depends(get_investment_service)
+
+
+@router.post("/account-recommendations/refresh", response_model=list[AccountRecommendationResponse])
+async def refresh_account_recommendations(
+    workspace_id: str = "ws_default",
+    theme_id: str | None = Query(default=None),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+):
+    return [
+        AccountRecommendationResponse.model_validate(x)
+        for x in service.refresh_account_recommendations(workspace_id, theme_id)
+    ]
+
+
+@router.get("/account-recommendations", response_model=list[AccountRecommendationResponse])
+async def list_account_recommendations(
+    workspace_id: str = "ws_default",
+    platform: str | None = Query(default=None),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+):
+    return [
+        AccountRecommendationResponse.model_validate(x)
+        for x in service.list_account_recommendations(workspace_id, platform)
+    ]
+
+
+@router.post(
+    "/account-recommendations/{recommendation_id}/dismiss",
+    response_model=AccountRecommendationResponse,
+)
+async def dismiss_account_recommendation(
+    recommendation_id: str,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+):
+    return AccountRecommendationResponse.model_validate(
+        service.dismiss_account_recommendation(recommendation_id, workspace_id)
+    )
+
+
+@router.post(
+    "/account-recommendations/{recommendation_id}/follow", response_model=InvestmentSourceResponse
+)
+async def follow_account_recommendation(
+    recommendation_id: str,
+    payload: FollowRecommendationRequest,
+    workspace_id: str = "ws_default",
+    response: Response = None,
+    service: InvestmentService = SERVICE_DEPENDENCY,
+):
+    rec = service.session.get(InvestmentAccountRecommendation, recommendation_id)
+    was_followed = bool(rec and rec.workspace_id == workspace_id and rec.source_id)
+    source = service.follow_account_recommendation(recommendation_id, workspace_id, payload)
+    if response is not None and not was_followed:
+        response.status_code = 201
+    return InvestmentSourceResponse.model_validate(source)
 
 
 # --- theme ----------------------------------------------------------------
