@@ -68,9 +68,9 @@ def _build_polling_scheduler() -> IntervalScheduler | None:
             # page, retry failed summary documents and failed Video rows with
             # bounded attempts/backoff. Shares the same real orchestrator and
             # LLM client as subscription polling.
-            for retry_settings in (
-                WorkspaceSettingsService(session).list_enabled_youtube_auto_retry()
-            ):
+            for retry_settings in WorkspaceSettingsService(
+                session
+            ).list_enabled_youtube_auto_retry():
                 report = YouTubeAutoRetryScanner(
                     session=session,
                     orchestrator=orchestrator,
@@ -87,9 +87,7 @@ def _build_polling_scheduler() -> IntervalScheduler | None:
         finally:
             session.close()
 
-    return IntervalScheduler(
-        interval_seconds=settings.youtube_default_poll_interval, task=poll
-    )
+    return IntervalScheduler(interval_seconds=settings.youtube_default_poll_interval, task=poll)
 
 
 def _build_task_worker_scheduler() -> IntervalScheduler | None:
@@ -110,9 +108,7 @@ def _build_task_worker_scheduler() -> IntervalScheduler | None:
     def poll() -> None:
         processor.run_once(batch_size=settings.task_worker_batch_size)
 
-    return IntervalScheduler(
-        interval_seconds=settings.task_worker_interval_seconds, task=poll
-    )
+    return IntervalScheduler(interval_seconds=settings.task_worker_interval_seconds, task=poll)
 
 
 def _build_investment_scheduler() -> IntervalScheduler | None:
@@ -223,6 +219,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # so the generic TaskJobProcessor can dispatch investment_fetch jobs.
     from app.services.companion.worker import register as register_companion_handler
     from app.services.investment.fetch_job_handler import register as register_investment_handler
+    from app.services.investment.person_impact_job_handler import (
+        register as register_person_impact_handler,
+    )
     from app.services.provenance.rebuild_job import register as register_provenance_handler
     from app.services.reading_companion import register as register_reading_companion_handler
     from app.services.youtube.local_video import register as register_youtube_local_video_handler
@@ -230,6 +229,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     register_companion_handler()
     register_investment_handler()
+    register_person_impact_handler()
     register_reading_companion_handler()
     register_provenance_handler()
     register_youtube_handler()

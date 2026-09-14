@@ -25,6 +25,8 @@ from app.infrastructure.models import (
     InvestmentDigestSnapshot,
     InvestmentFact,
     InvestmentItem,
+    InvestmentPersonImpactEvent,
+    InvestmentPersonImpactProfile,
     InvestmentPersonSource,
     InvestmentSignal,
     InvestmentSource,
@@ -387,6 +389,61 @@ class InvestmentService:
         self.session.commit()
         self.session.refresh(person)
         return person
+
+    # --- person impact ----------------------------------------------------
+
+    def list_person_impact_events(
+        self, workspace_id: str, person_source_id: str, limit: int = 100
+    ) -> list[InvestmentPersonImpactEvent]:
+        from app.services.investment.person_impact import PersonImpactService
+
+        return PersonImpactService.from_settings(self.session).list_events(
+            workspace_id, person_source_id, limit=limit
+        )
+
+    def get_person_impact_profile(
+        self, workspace_id: str, person_source_id: str
+    ) -> InvestmentPersonImpactProfile:
+        from app.services.investment.person_impact import PersonImpactService
+
+        return PersonImpactService.from_settings(self.session).get_profile(
+            workspace_id, person_source_id
+        )
+
+    def refresh_person_impact(self, workspace_id: str, person_source_id: str) -> TaskJob:
+        person = self.session.scalar(
+            select(InvestmentPersonSource).where(
+                InvestmentPersonSource.id == person_source_id,
+                InvestmentPersonSource.workspace_id == workspace_id,
+            )
+        )
+        if person is None:
+            raise AppError("not_found", "person source not found", 404)
+        from app.services.investment.person_impact import PERSON_IMPACT_REFRESH_JOB_TYPE
+
+        existing = self.session.scalar(
+            select(TaskJob).where(
+                TaskJob.workspace_id == workspace_id,
+                TaskJob.job_type == PERSON_IMPACT_REFRESH_JOB_TYPE,
+                TaskJob.target_id == person_source_id,
+                TaskJob.status.in_(("pending", "running")),
+            )
+        )
+        if existing is not None:
+            return existing
+        job = TaskJob(
+            id=_new_id("job"),
+            workspace_id=workspace_id,
+            job_type=PERSON_IMPACT_REFRESH_JOB_TYPE,
+            target_type="investment_person_source",
+            target_id=person_source_id,
+            status="pending",
+            input={"person_source_id": person_source_id},
+        )
+        self.session.add(job)
+        self.session.commit()
+        self.session.refresh(job)
+        return job
 
     # --- source ------------------------------------------------------------
 

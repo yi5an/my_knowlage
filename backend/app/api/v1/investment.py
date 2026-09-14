@@ -34,6 +34,8 @@ from app.schemas.investment import (
     InvestmentWatchlistCreate,
     InvestmentWatchlistResponse,
     InvestmentWatchlistUpdate,
+    PersonImpactEventResponse,
+    PersonImpactProfileResponse,
     PersonSourceCreate,
     PersonSourceResponse,
     PersonSourceUpdate,
@@ -65,8 +67,7 @@ async def list_themes(
     service: InvestmentService = SERVICE_DEPENDENCY,
 ) -> list[InvestmentThemeResponse]:
     return [
-        InvestmentThemeResponse.model_validate(theme)
-        for theme in service.list_themes(workspace_id)
+        InvestmentThemeResponse.model_validate(theme) for theme in service.list_themes(workspace_id)
     ]
 
 
@@ -145,9 +146,64 @@ async def update_person_source(
     payload: PersonSourceUpdate,
     service: InvestmentService = SERVICE_DEPENDENCY,
 ) -> PersonSourceResponse:
-    return PersonSourceResponse.model_validate(
-        service.update_person_source(person_id, payload)
+    return PersonSourceResponse.model_validate(service.update_person_source(person_id, payload))
+
+
+@router.get(
+    "/person-sources/{person_id}/impact-events",
+    response_model=list[PersonImpactEventResponse],
+)
+async def list_person_impact_events(
+    person_id: str,
+    workspace_id: str = "ws_default",
+    limit: int = Query(default=50, ge=1, le=200),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[PersonImpactEventResponse]:
+    return [
+        PersonImpactEventResponse.model_validate(event)
+        for event in service.list_person_impact_events(workspace_id, person_id, limit=limit)
+    ]
+
+
+@router.get(
+    "/person-sources/{person_id}/impact-profile",
+    response_model=PersonImpactProfileResponse,
+)
+async def get_person_impact_profile(
+    person_id: str,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> PersonImpactProfileResponse:
+    profile = service.get_person_impact_profile(workspace_id, person_id)
+    return PersonImpactProfileResponse(
+        person_source_id=profile.person_source_id,
+        sample_count=profile.sample_count,
+        valid_sample_count=profile.valid_sample_count,
+        excluded_sample_count=profile.excluded_sample_count,
+        sample_sufficient=profile.valid_sample_count >= 5,
+        positive_event_count=profile.positive_event_count,
+        negative_event_count=profile.negative_event_count,
+        neutral_event_count=profile.neutral_event_count,
+        hit_rate=profile.hit_rate,
+        average_lead_time_hours=profile.average_lead_time_hours,
+        average_excess_return_1d=profile.average_excess_return_1d,
+        stability_score=profile.stability_score,
+        uncertainty=profile.uncertainty,
     )
+
+
+@router.post(
+    "/person-sources/{person_id}/impact-refresh",
+    response_model=PollSourceResponse,
+    status_code=202,
+)
+async def refresh_person_impact(
+    person_id: str,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> PollSourceResponse:
+    job = service.refresh_person_impact(workspace_id, person_id)
+    return PollSourceResponse(job_id=job.id, status=job.status)
 
 
 # --- dashboard -------------------------------------------------------------
@@ -189,15 +245,12 @@ async def digest(
         today_highlights=[
             InvestmentItemResponse.model_validate(i) for i in data["today_highlights"]
         ],
-        pending_claims=[
-            InvestmentClaimResponse.model_validate(c) for c in data["pending_claims"]
-        ],
+        pending_claims=[InvestmentClaimResponse.model_validate(c) for c in data["pending_claims"]],
         challenged_items=[
             InvestmentItemResponse.model_validate(i) for i in data["challenged_items"]
         ],
         early_signals=[
-            InvestmentSignalResponse.model_validate(signal)
-            for signal in data["early_signals"]
+            InvestmentSignalResponse.model_validate(signal) for signal in data["early_signals"]
         ],
         pending_facts=[
             InvestmentFactResponse.model_validate(fact) for fact in data["pending_facts"]
@@ -246,8 +299,7 @@ async def list_watchlist(
     service: InvestmentService = SERVICE_DEPENDENCY,
 ) -> list[InvestmentWatchlistResponse]:
     return [
-        InvestmentWatchlistResponse.model_validate(w)
-        for w in service.list_watchlist(workspace_id)
+        InvestmentWatchlistResponse.model_validate(w) for w in service.list_watchlist(workspace_id)
     ]
 
 
@@ -463,8 +515,7 @@ async def list_item_facts(
     service: InvestmentService = SERVICE_DEPENDENCY,
 ) -> list[InvestmentFactResponse]:
     return [
-        InvestmentFactResponse.model_validate(fact)
-        for fact in service.list_item_facts(item_id)
+        InvestmentFactResponse.model_validate(fact) for fact in service.list_item_facts(item_id)
     ]
 
 
@@ -567,20 +618,17 @@ async def information_edge_digest(
     return InformationEdgeDigestResponse(
         generated_at=data["generated_at"],
         top_signals=[
-            InvestmentSignalResponse.model_validate(signal)
-            for signal in data["top_signals"]
+            InvestmentSignalResponse.model_validate(signal) for signal in data["top_signals"]
         ],
         source_traces=[
-            SourceTraceResponse.model_validate(trace)
-            for trace in data["source_traces"]
+            SourceTraceResponse.model_validate(trace) for trace in data["source_traces"]
         ],
         unvalidated_signals=[
             InvestmentSignalResponse.model_validate(signal)
             for signal in data["unvalidated_signals"]
         ],
         stale_or_noise=[
-            InvestmentSignalResponse.model_validate(signal)
-            for signal in data["stale_or_noise"]
+            InvestmentSignalResponse.model_validate(signal) for signal in data["stale_or_noise"]
         ],
     )
 
