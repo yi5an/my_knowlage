@@ -4,7 +4,19 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from sqlalchemy import (
+    Column,
+    ForeignKey,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    inspect,
+    select,
+    text,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -207,3 +219,93 @@ def test_person_source_reference_migration_revision_exists() -> None:
     spec.loader.exec_module(migration)
     assert migration.revision == "202609140002"
     assert migration.down_revision == "202609140001"
+
+
+def test_person_source_reference_migration_is_sqlite_safe_and_backfills_existing_rows() -> None:
+    engine = create_engine("sqlite://")
+    metadata = MetaData()
+    Table("workspace", metadata, Column("id", String(64), primary_key=True))
+    Table(
+        "investment_person_source",
+        metadata,
+        Column("id", String(64), primary_key=True),
+        Column("workspace_id", String(64), ForeignKey("workspace.id")),
+        Column("platform", String(32), nullable=False),
+        Column("handle", String(255), nullable=False),
+    )
+    Table(
+        "investment_account_recommendation",
+        metadata,
+        Column("id", String(64), primary_key=True),
+        Column("workspace_id", String(64), ForeignKey("workspace.id")),
+        Column("platform", String(32), nullable=False),
+        Column("handle", String(255), nullable=False),
+    )
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO workspace (id) VALUES ('ws_one'), ('ws_two')"))
+        connection.execute(
+            text(
+                "INSERT INTO investment_person_source "
+                "(id, workspace_id, platform, handle) VALUES "
+                "('person_one', 'ws_one', 'x', 'NickTimiraos'), "
+                "('person_two', 'ws_two', 'x', 'NickTimiraos')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO investment_account_recommendation "
+                "(id, workspace_id, platform, handle) VALUES "
+                "('rec_one', 'ws_one', 'X', '@NickTimiraos'), "
+                "('rec_two', 'ws_two', 'x', 'NickTimiraos'), "
+                "('rec_unmatched', 'ws_one', 'youtube', 'channel')"
+            )
+        )
+
+    migration_path = (
+        Path(__file__).parents[1]
+        / "alembic"
+        / "versions"
+        / "202609140002_account_recommendation_person_source.py"
+    )
+    spec = spec_from_file_location("account_recommendation_person_source_sqlite", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    with engine.begin() as connection:
+        context = MigrationContext.configure(connection)
+        migration.op = Operations(context)
+        migration.upgrade()
+        rows = connection.execute(
+            text(
+                "SELECT id, person_source_id FROM investment_account_recommendation "
+                "ORDER BY id"
+            )
+        ).all()
+        assert rows == [
+            ("rec_one", "person_one"),
+            ("rec_two", "person_two"),
+            ("rec_unmatched", None),
+        ]
+        assert "person_source_id" in {
+            column["name"]
+            for column in inspect(connection).get_columns("investment_account_recommendation")
+        }
+        assert "idx_account_recommendation_person_source" in {
+            index["name"]
+            for index in inspect(connection).get_indexes("investment_account_recommendation")
+        }
+
+        migration.downgrade()
+        assert "person_source_id" not in {
+            column["name"]
+            for column in inspect(connection).get_columns("investment_account_recommendation")
+        }
+        assert "idx_account_recommendation_person_source" not in {
+            index["name"]
+            for index in inspect(connection).get_indexes("investment_account_recommendation")
+        }
+        assert connection.execute(
+            text("SELECT COUNT(*) FROM investment_account_recommendation")
+        ).scalar_one() == 3
