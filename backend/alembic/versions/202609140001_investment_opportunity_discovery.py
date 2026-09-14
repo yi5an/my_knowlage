@@ -39,6 +39,7 @@ def upgrade() -> None:
         sa.Column("market_case", sa.Text(), nullable=False),
         sa.Column("impact_path", sa.Text(), nullable=False),
         sa.Column("catalyst", sa.Text(), nullable=False),
+        sa.Column("next_action", sa.Text(), nullable=False),
         sa.Column("time_window_start", sa.DateTime(timezone=True)),
         sa.Column("time_window_end", sa.DateTime(timezone=True)),
         sa.Column("risk_flags", JsonType, server_default="[]", nullable=False),

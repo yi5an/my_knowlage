@@ -49,6 +49,7 @@ def test_opportunity_candidate_persists_defaults_and_json_values(session: Sessio
         market_case="Price has not moved relative to SOXX.",
         impact_path="Orders -> revenue -> earnings revisions.",
         catalyst="Next earnings call",
+        next_action="Verify supplier lead times",
         confidence=0.72,
     )
     session.add(candidate)
@@ -64,6 +65,7 @@ def test_opportunity_candidate_persists_defaults_and_json_values(session: Sessio
     assert saved.priority == "research"
     assert saved.market_reaction_state == "unknown"
     assert saved.asset_symbols == ["NVDA"]
+    assert saved.next_action == "Verify supplier lead times"
     assert saved.risk_flags == []
     assert saved.score_breakdown == {}
     assert saved.outcome == {}

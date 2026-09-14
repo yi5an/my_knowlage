@@ -1144,6 +1144,7 @@ class InvestmentOpportunityCandidate(UpdatedTimestampMixin, Base):
     market_case: Mapped[str] = mapped_column(Text(), nullable=False)
     impact_path: Mapped[str] = mapped_column(Text(), nullable=False)
     catalyst: Mapped[str] = mapped_column(Text(), nullable=False)
+    next_action: Mapped[str] = mapped_column(Text(), nullable=False)
     time_window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     time_window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     risk_flags: Mapped[JsonArray] = mapped_column(JsonType, default=list, nullable=False)
