@@ -89,9 +89,11 @@ async def update_context(
     "/recommendation-outcomes", response_model=RecommendationOutcomeResponse, status_code=201
 )
 async def record_outcome(
-    payload: RecommendationOutcomeCreate, service: InvestmentService = SERVICE_DEPENDENCY
+    payload: RecommendationOutcomeCreate,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
 ):
-    return service.record_recommendation_outcome(payload)
+    return service.record_recommendation_outcome(payload, workspace_id=workspace_id)
 
 
 @router.get(
@@ -102,7 +104,7 @@ async def list_outcomes(
     workspace_id: str = "ws_default",
     service: InvestmentService = SERVICE_DEPENDENCY,
 ):
-    return service.list_recommendation_outcomes(opportunity_id, workspace_id)
+    return service.list_opportunity_outcomes(opportunity_id, workspace_id)
 
 
 @router.post("/account-recommendations/refresh", response_model=list[AccountRecommendationResponse])

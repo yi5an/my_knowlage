@@ -154,11 +154,16 @@ class InvestmentService:
     def update_user_context(self, workspace_id: str, payload: UserInvestmentContextUpdate):
         return OutcomeService(self.session).update_user_context(workspace_id, payload)
 
-    def record_recommendation_outcome(self, payload: RecommendationOutcomeCreate):
-        return OutcomeService(self.session).record(payload)
+    def record_recommendation_outcome(
+        self, payload: RecommendationOutcomeCreate, workspace_id: str | None = None
+    ):
+        return OutcomeService(self.session).record(payload, workspace_id=workspace_id)
+
+    def list_opportunity_outcomes(self, opportunity_id: str, workspace_id: str):
+        return OutcomeService(self.session).list_for_opportunity(opportunity_id, workspace_id)
 
     def list_recommendation_outcomes(self, opportunity_id: str, workspace_id: str):
-        return OutcomeService(self.session).list_for_opportunity(opportunity_id, workspace_id)
+        return self.list_opportunity_outcomes(opportunity_id, workspace_id)
 
     # --- watchlist ---------------------------------------------------------
 

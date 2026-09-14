@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from datetime import UTC, datetime
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -12,7 +10,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.infrastructure.database import Base, get_db_session
-from app.infrastructure.models import InvestmentOpportunityCandidate, InvestmentTheme, InvestmentWatchlist, Workspace
+from app.infrastructure.models import (
+    InvestmentOpportunityCandidate,
+    InvestmentTheme,
+    InvestmentWatchlist,
+    Workspace,
+)
 from app.main import app
 from app.services.investment.investment_dependencies import get_investment_service
 from app.services.investment.service import InvestmentService
@@ -34,7 +37,9 @@ def db_session() -> Generator[Session, None, None]:
                 Workspace(id="ws_default", name="Default"),
                 Workspace(id="ws_other", name="Other"),
                 InvestmentTheme(id="theme_ai", workspace_id="ws_default", name="AI"),
-                InvestmentWatchlist(id="wl_ai", workspace_id="ws_default", name="AI", ticker="NVDA"),
+                InvestmentWatchlist(
+                    id="wl_ai", workspace_id="ws_default", name="AI", ticker="NVDA"
+                ),
             ]
         )
         session.commit()
@@ -62,7 +67,8 @@ def test_context_round_trip_and_workspace_validation(client: TestClient) -> None
     )
     assert response.status_code == 200, response.text
     assert response.json()["markets"] == ["us"]
-    assert client.get("/api/v1/investment/context?workspace_id=ws_default").json()["min_liquidity"] == "high"
+    context = client.get("/api/v1/investment/context?workspace_id=ws_default")
+    assert context.json()["min_liquidity"] == "high"
 
     foreign = client.patch(
         "/api/v1/investment/context?workspace_id=ws_default",
@@ -71,7 +77,9 @@ def test_context_round_trip_and_workspace_validation(client: TestClient) -> None
     assert foreign.status_code == 404, foreign.text
 
 
-def test_outcome_api_is_append_only_and_workspace_scoped(client: TestClient, db_session: Session) -> None:
+def test_outcome_api_is_append_only_and_workspace_scoped(
+    client: TestClient, db_session: Session
+) -> None:
     db_session.add(
         InvestmentOpportunityCandidate(
             id="opp_api",
@@ -110,3 +118,41 @@ def test_outcome_api_is_append_only_and_workspace_scoped(client: TestClient, db_
     hidden = client.get("/api/v1/investment/opportunities/opp_api/outcomes?workspace_id=ws_other")
     assert hidden.status_code == 404
 
+
+def test_context_and_outcome_api_reject_unknown_or_mismatched_workspace(
+    client: TestClient, db_session: Session
+) -> None:
+    unknown = client.get("/api/v1/investment/context?workspace_id=missing")
+    assert unknown.status_code == 404
+
+    db_session.add(
+        InvestmentOpportunityCandidate(
+            id="opp_other_api",
+            workspace_id="ws_other",
+            title="Other opportunity",
+            asset_symbols=["TSLA"],
+            opportunity_type="catalyst",
+            change_summary="Change",
+            expected_case="Case",
+            market_case="Market",
+            impact_path="Path",
+            catalyst="Catalyst",
+            next_action="Verify",
+            risk_flags=[],
+            invalidation_conditions=[],
+            evidence_refs=[],
+            confidence=0.5,
+        )
+    )
+    db_session.commit()
+    mismatch = client.post(
+        "/api/v1/investment/recommendation-outcomes?workspace_id=ws_default",
+        json={
+            "workspace_id": "ws_other",
+            "opportunity_id": "opp_other_api",
+            "adopted": True,
+            "outcome_status": "validated",
+            "observed_at": "2026-09-20T00:00:00Z",
+        },
+    )
+    assert mismatch.status_code == 400

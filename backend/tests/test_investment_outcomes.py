@@ -12,11 +12,11 @@ from sqlalchemy.pool import StaticPool
 from app.core.errors import AppError
 from app.infrastructure.database import Base
 from app.infrastructure.models import (
+    InvestmentAccountRecommendation,
     InvestmentDigestSnapshot,
     InvestmentOpportunityCandidate,
     InvestmentRecommendationOutcome,
     InvestmentTheme,
-    InvestmentWatchlist,
     Workspace,
 )
 from app.schemas.investment import RecommendationOutcomeCreate, UserInvestmentContextUpdate
@@ -170,3 +170,76 @@ def test_calibration_uses_as_of_cutoff_and_minimum_ten_outcomes() -> None:
     assert repeat.version == changed.version
     assert repeat.weights == changed.weights
 
+
+def test_calibration_requires_ten_evaluated_outcomes_and_persists_version() -> None:
+    session = _session()
+    service = OutcomeService(session)
+    _opportunity(session)
+    recommendation = InvestmentAccountRecommendation(
+        id="rec_1",
+        workspace_id="ws_default",
+        platform="x",
+        handle="analyst",
+        role_type="analyst",
+        recommendation_label="值得学习",
+        reason="evidence",
+        score_breakdown={"source_quality": 0.5},
+    )
+    session.add(recommendation)
+    session.commit()
+    as_of = datetime(2026, 9, 20, tzinfo=UTC)
+    for index in range(9):
+        service.record(
+            RecommendationOutcomeCreate(
+                workspace_id="ws_default",
+                recommendation_id="rec_1",
+                adopted=True,
+                outcome_status="validated",
+                observed_at=as_of - timedelta(days=index + 1),
+            )
+        )
+    service.record(
+        RecommendationOutcomeCreate(
+            workspace_id="ws_default",
+            recommendation_id="rec_1",
+            adopted=True,
+            outcome_status="expired",
+            observed_at=as_of - timedelta(days=10),
+        )
+    )
+    insufficient = service.recalculate_recommendation_weights("ws_default", as_of)
+    assert insufficient.changed is False
+    assert insufficient.version == 0
+
+    service.record(
+        RecommendationOutcomeCreate(
+            workspace_id="ws_default",
+            recommendation_id="rec_1",
+            adopted=True,
+            outcome_status="validated",
+            observed_at=as_of,
+        )
+    )
+    changed = service.recalculate_recommendation_weights("ws_default", as_of)
+    assert changed.changed is True
+    assert changed.version == 1
+    assert recommendation.score_breakdown["calibration"]["version"] == 1
+    assert recommendation.score_breakdown["calibration"]["reason"] == changed.reason
+
+    later = as_of + timedelta(days=2)
+    service.record(
+        RecommendationOutcomeCreate(
+            workspace_id="ws_default",
+            recommendation_id="rec_1",
+            adopted=False,
+            outcome_status="invalidated",
+            observed_at=later,
+        )
+    )
+    prior = service.recalculate_recommendation_weights("ws_default", as_of)
+    assert prior.version == 1
+    assert prior.weights == changed.weights
+
+    next_version = service.recalculate_recommendation_weights("ws_default", later)
+    assert next_version.version == 2
+    assert recommendation.score_breakdown["calibration"]["version"] == 2
