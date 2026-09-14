@@ -155,9 +155,10 @@ def test_calibration_uses_as_of_cutoff_and_minimum_ten_outcomes() -> None:
         )
     )
     changed = service.recalculate_recommendation_weights("ws_default", as_of)
-    assert changed.changed is True
-    assert changed.version == 1
-    assert changed.weights
+    assert changed.changed is False
+    assert "无可更新" in changed.reason
+    assert changed.version == 0
+    assert changed.weights == {}
 
     # A later observation cannot retroactively affect an earlier calibration.
     service.record(
@@ -245,4 +246,14 @@ def test_calibration_requires_ten_evaluated_outcomes_and_persists_version() -> N
 
     next_version = service.recalculate_recommendation_weights("ws_default", later)
     assert next_version.version == 2
-    assert recommendation.score_breakdown["calibration"]["version"] == 2
+    assert recommendation.score_breakdown["calibration"]["version"] == 1
+    snapshots = list(
+        session.scalars(
+            select(InvestmentAccountRecommendation).where(
+                InvestmentAccountRecommendation.workspace_id == "ws_default"
+            )
+        )
+    )
+    assert any(
+        (r.score_breakdown or {}).get("calibration", {}).get("version") == 2 for r in snapshots
+    )
