@@ -142,6 +142,15 @@ class Settings(BaseSettings):
     bls_base_url: str = Field(
         default="https://api.bls.gov/publicAPI/v2", alias="BLS_BASE_URL"
     )
+    market_data_provider: str = Field(default="stooq", alias="MARKET_DATA_PROVIDER")
+    market_data_base_url: str = Field(
+        default="https://stooq.com", alias="MARKET_DATA_BASE_URL"
+    )
+    market_data_timeout_seconds: int = Field(default=30, alias="MARKET_DATA_TIMEOUT_SECONDS")
+    market_data_max_lookback_days: int = Field(default=30, alias="MARKET_DATA_MAX_LOOKBACK_DAYS")
+    market_data_exchange_timezone: str = Field(
+        default="America/New_York", alias="MARKET_DATA_EXCHANGE_TIMEZONE"
+    )
 
     model_config = SettingsConfigDict(
         env_file="../.env",
