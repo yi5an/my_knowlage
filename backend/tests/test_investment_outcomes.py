@@ -106,7 +106,10 @@ def test_outcome_is_append_only_and_workspace_scoped() -> None:
     )
     assert created.id
     assert service.list_for_opportunity("opp_1", "ws_default")[0].outcome_status == "invalidated"
-    assert session.get(InvestmentDigestSnapshot, "digest_1").digest["opportunities"][0]["priority"] == "research"
+    assert (
+        session.get(InvestmentDigestSnapshot, "digest_1").digest["opportunities"][0]["priority"]
+        == "research"
+    )
     assert session.scalar(select(InvestmentRecommendationOutcome.id)) == created.id
 
     with pytest.raises(AppError) as exc:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from uuid import uuid4
 from typing import cast
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from app.schemas.investment import RecommendationOutcomeCreate, UserInvestmentCo
 EVALUATED_OUTCOME_STATUSES = frozenset({"validated", "invalidated"})
 CALIBRATION_KEY = "calibration"
 MIN_EVALUATED_OUTCOMES = 10
+
 
 @dataclass
 class CalibrationResult:
