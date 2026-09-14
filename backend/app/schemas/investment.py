@@ -819,3 +819,211 @@ class PollSourceResponse(BaseModel):
 
     job_id: str
     status: str
+
+
+# --- opportunity discovery ------------------------------------------------
+
+
+class OpportunityStatus(StrEnum):
+    NEW = "new"
+    RESEARCHING = "researching"
+    WAITING_FOR_EVIDENCE = "waiting_for_evidence"
+    VALIDATED = "validated"
+    INVALIDATED = "invalidated"
+    PARKED = "parked"
+
+
+class OpportunityType(StrEnum):
+    CATALYST = "catalyst"
+    EARNINGS_INFLECTION = "earnings_inflection"
+    SUPPLY_DEMAND = "supply_demand"
+    POLICY_CHANGE = "policy_change"
+    COMPETITIVE_SHIFT = "competitive_shift"
+    SENTIMENT_DISLOCATION = "sentiment_dislocation"
+    VALUATION_REPRICING = "valuation_repricing"
+    OTHER = "other"
+
+
+class RecommendationStatus(StrEnum):
+    NEW = "new"
+    FOLLOWED = "followed"
+    DISMISSED = "dismissed"
+    EXPIRED = "expired"
+
+
+class PersonImpactEventStatus(StrEnum):
+    PENDING = "pending"
+    COMPUTED = "computed"
+    INSUFFICIENT_DATA = "insufficient_data"
+    EXCLUDED = "excluded"
+
+
+class MarketDataQuality(StrEnum):
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    MISSING = "missing"
+    STALE = "stale"
+    INVALID = "invalid"
+
+
+class OpportunityCandidateCreate(BaseModel):
+    workspace_id: str = Field(default="ws_default")
+    signal_id: str | None = None
+    title: str = Field(min_length=1, max_length=500)
+    asset_symbols: list[str] = Field(min_length=1)
+    theme_id: str | None = None
+    watchlist_id: str | None = None
+    opportunity_type: OpportunityType = OpportunityType.OTHER
+    change_summary: str = Field(min_length=1)
+    expected_case: str = Field(min_length=1)
+    market_case: str = Field(min_length=1)
+    impact_path: str = Field(min_length=1)
+    catalyst: str = Field(min_length=1)
+    time_window_start: datetime | None = None
+    time_window_end: datetime | None = None
+    risk_flags: list[str] = Field(min_length=1)
+    invalidation_conditions: list[str] = Field(min_length=1)
+    next_action: str = Field(min_length=1)
+    evidence_refs: list[str] = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_time_window(self) -> OpportunityCandidateCreate:
+        if (
+            self.time_window_start is not None
+            and self.time_window_end is not None
+            and self.time_window_start > self.time_window_end
+        ):
+            raise ValueError("time_window_start must be before time_window_end")
+        return self
+
+
+class OpportunityCandidateResponse(OpportunityCandidateCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    status: OpportunityStatus
+    priority: str
+    market_reaction_state: str
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
+    outcome: dict[str, object] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class OpportunityReviewAction(BaseModel):
+    status: OpportunityStatus
+    note: str | None = None
+
+
+class OpportunityPromotionResult(BaseModel):
+    created: bool
+    reason: str | None = None
+    opportunity: OpportunityCandidateResponse | None = None
+
+
+class PersonImpactEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    person_source_id: str
+    source_item_id: str
+    symbol: str
+    benchmark_symbol: str
+    event_at: datetime
+    event_cluster_id: str
+    window_overlap: bool
+    event_status: PersonImpactEventStatus
+    data_quality: MarketDataQuality
+    windows: dict[str, dict[str, float | str | None]]
+    concurrent_events: list[str] = Field(default_factory=list)
+    exclusion_reason: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+    created_at: datetime | None = None
+
+
+class PersonImpactProfileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    person_source_id: str
+    sample_count: int = Field(ge=0)
+    valid_sample_count: int = Field(ge=0)
+    excluded_sample_count: int = Field(ge=0)
+    sample_sufficient: bool
+    positive_event_count: int = Field(ge=0)
+    negative_event_count: int = Field(ge=0)
+    neutral_event_count: int = Field(ge=0)
+    hit_rate: float | None = None
+    average_lead_time_hours: float | None = None
+    average_excess_return_1d: float | None = None
+    stability_score: float | None = None
+    uncertainty: str | None = None
+
+
+class AccountRecommendationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workspace_id: str
+    platform: str
+    handle: str
+    display_name: str | None = None
+    role_type: str
+    theme_ids: list[str] = Field(default_factory=list)
+    recommendation_label: str
+    reason: str
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
+    sample_count: int = Field(ge=0)
+    evidence_count: int = Field(ge=0)
+    status: RecommendationStatus
+    source_id: str | None = None
+
+
+class FollowRecommendationRequest(BaseModel):
+    theme_ids: list[str] = Field(default_factory=list)
+    poll_interval_seconds: int = Field(default=900, ge=300, le=86400)
+
+
+class UserInvestmentContextResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    workspace_id: str
+    markets: list[str] = Field(default_factory=list)
+    horizons: list[str] = Field(default_factory=list)
+    focus_theme_ids: list[str] = Field(default_factory=list)
+    excluded_watchlist_ids: list[str] = Field(default_factory=list)
+    min_liquidity: str = "any"
+    exposure_notes: str | None = None
+
+
+class UserInvestmentContextUpdate(BaseModel):
+    markets: list[str] = Field(default_factory=list)
+    horizons: list[str] = Field(default_factory=list)
+    focus_theme_ids: list[str] = Field(default_factory=list)
+    excluded_watchlist_ids: list[str] = Field(default_factory=list)
+    min_liquidity: str = "any"
+    exposure_notes: str | None = None
+
+
+class RecommendationOutcomeCreate(BaseModel):
+    workspace_id: str = Field(default="ws_default")
+    recommendation_id: str | None = None
+    opportunity_id: str | None = None
+    adopted: bool
+    outcome_status: str = Field(min_length=1)
+    outcome_note: str | None = None
+    observed_at: datetime
+
+    @model_validator(mode="after")
+    def validate_target(self) -> RecommendationOutcomeCreate:
+        if not self.recommendation_id and not self.opportunity_id:
+            raise ValueError("recommendation_id or opportunity_id is required")
+        return self
+
+
+class RecommendationOutcomeResponse(RecommendationOutcomeCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime | None = None

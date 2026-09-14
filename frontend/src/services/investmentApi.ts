@@ -50,6 +50,30 @@ export type VerificationStatus =
   | "local_only"
   | "ignored";
 
+export type OpportunityStatus =
+  | "new"
+  | "researching"
+  | "waiting_for_evidence"
+  | "validated"
+  | "invalidated"
+  | "parked";
+export type OpportunityType =
+  | "catalyst"
+  | "earnings_inflection"
+  | "supply_demand"
+  | "policy_change"
+  | "competitive_shift"
+  | "sentiment_dislocation"
+  | "valuation_repricing"
+  | "other";
+export type RecommendationStatus = "new" | "followed" | "dismissed" | "expired";
+export type PersonImpactEventStatus =
+  | "pending"
+  | "computed"
+  | "insufficient_data"
+  | "excluded";
+export type MarketDataQuality = "complete" | "partial" | "missing" | "stale" | "invalid";
+
 export interface InvestmentItem {
   id: string;
   workspace_id: string;
@@ -295,6 +319,138 @@ export interface InvestmentFetchJob {
   last_error?: string | null;
 }
 
+export interface OpportunityCandidate {
+  id: string;
+  workspace_id: string;
+  signal_id?: string | null;
+  title: string;
+  asset_symbols: string[];
+  theme_id?: string | null;
+  watchlist_id?: string | null;
+  opportunity_type: OpportunityType;
+  change_summary: string;
+  expected_case: string;
+  market_case: string;
+  impact_path: string;
+  catalyst: string;
+  time_window_start?: string | null;
+  time_window_end?: string | null;
+  risk_flags: string[];
+  invalidation_conditions: string[];
+  next_action: string;
+  evidence_refs: string[];
+  confidence: number;
+  status: OpportunityStatus;
+  priority: string;
+  market_reaction_state: string;
+  score_breakdown: Record<string, number>;
+  outcome: Record<string, unknown>;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface OpportunityReviewAction {
+  status: OpportunityStatus;
+  note?: string | null;
+}
+
+export interface OpportunityPromotionResult {
+  created: boolean;
+  reason?: string | null;
+  opportunity?: OpportunityCandidate | null;
+}
+
+export interface PersonImpactEvent {
+  id: string;
+  workspace_id: string;
+  person_source_id: string;
+  source_item_id: string;
+  symbol: string;
+  benchmark_symbol: string;
+  event_at: string;
+  event_cluster_id: string;
+  window_overlap: boolean;
+  event_status: PersonImpactEventStatus;
+  data_quality: MarketDataQuality;
+  windows: Record<string, Record<string, number | string | null>>;
+  concurrent_events: string[];
+  exclusion_reason?: string | null;
+  confidence: number;
+  created_at?: string | null;
+}
+
+export interface PersonImpactProfile {
+  person_source_id: string;
+  sample_count: number;
+  valid_sample_count: number;
+  excluded_sample_count: number;
+  sample_sufficient: boolean;
+  positive_event_count: number;
+  negative_event_count: number;
+  neutral_event_count: number;
+  hit_rate?: number | null;
+  average_lead_time_hours?: number | null;
+  average_excess_return_1d?: number | null;
+  stability_score?: number | null;
+  uncertainty?: string | null;
+}
+
+export interface AccountRecommendation {
+  id: string;
+  workspace_id: string;
+  platform: string;
+  handle: string;
+  display_name?: string | null;
+  role_type: string;
+  theme_ids: string[];
+  recommendation_label: string;
+  reason: string;
+  score_breakdown: Record<string, number>;
+  sample_count: number;
+  evidence_count: number;
+  status: RecommendationStatus;
+  source_id?: string | null;
+}
+
+export interface FollowRecommendationRequest {
+  theme_ids?: string[];
+  poll_interval_seconds?: number;
+}
+
+export interface UserInvestmentContext {
+  workspace_id: string;
+  markets: string[];
+  horizons: string[];
+  focus_theme_ids: string[];
+  excluded_watchlist_ids: string[];
+  min_liquidity: string;
+  exposure_notes?: string | null;
+}
+
+export interface UserInvestmentContextUpdate {
+  markets?: string[];
+  horizons?: string[];
+  focus_theme_ids?: string[];
+  excluded_watchlist_ids?: string[];
+  min_liquidity?: string;
+  exposure_notes?: string | null;
+}
+
+export interface RecommendationOutcomeCreate {
+  workspace_id?: string;
+  recommendation_id?: string;
+  opportunity_id?: string;
+  adopted: boolean;
+  outcome_status: string;
+  outcome_note?: string | null;
+  observed_at: string;
+}
+
+export interface RecommendationOutcome extends RecommendationOutcomeCreate {
+  id: string;
+  created_at?: string | null;
+}
+
 // --- params / payloads ----------------------------------------------------
 
 export interface ListItemsParams {
@@ -515,6 +671,84 @@ export const investmentApi = {
       limit: params.limit ?? 50,
     });
     return apiRequest(`/investment/source-traces${q}`);
+  },
+
+  // opportunity discovery
+  listOpportunityCandidates(params: {
+    workspaceId?: string;
+    status?: OpportunityStatus;
+    limit?: number;
+  } = {}): Promise<OpportunityCandidate[]> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      status: params.status,
+      limit: params.limit,
+    });
+    return apiRequest(`/investment/opportunities${q}`);
+  },
+  reviewOpportunityCandidate(
+    id: string,
+    payload: OpportunityReviewAction,
+    workspaceId = WS,
+  ): Promise<OpportunityCandidate> {
+    const q = buildQuery({ workspace_id: workspaceId });
+    return apiRequest(`/investment/opportunities/${encodeURIComponent(id)}${q}`, {
+      method: "PATCH",
+      body: payload,
+    });
+  },
+  listAccountRecommendations(params: {
+    workspaceId?: string;
+    platform?: string;
+    themeId?: string;
+  } = {}): Promise<AccountRecommendation[]> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      platform: params.platform,
+      theme_id: params.themeId,
+    });
+    return apiRequest(`/investment/account-recommendations${q}`);
+  },
+  followAccountRecommendation(
+    id: string,
+    payload: FollowRecommendationRequest = {},
+    workspaceId = WS,
+  ): Promise<InvestmentSource> {
+    const q = buildQuery({ workspace_id: workspaceId });
+    return apiRequest(`/investment/account-recommendations/${encodeURIComponent(id)}/follow${q}`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+  listPersonImpactEvents(
+    personSourceId: string,
+    limit = 50,
+    workspaceId = WS,
+  ): Promise<PersonImpactEvent[]> {
+    const q = buildQuery({ workspace_id: workspaceId, limit });
+    return apiRequest(
+      `/investment/person-sources/${encodeURIComponent(personSourceId)}/impact-events${q}`,
+    );
+  },
+  getPersonImpactProfile(personSourceId: string, workspaceId = WS): Promise<PersonImpactProfile> {
+    const q = buildQuery({ workspace_id: workspaceId });
+    return apiRequest(
+      `/investment/person-sources/${encodeURIComponent(personSourceId)}/impact-profile${q}`,
+    );
+  },
+  getUserInvestmentContext(workspaceId = WS): Promise<UserInvestmentContext> {
+    const q = buildQuery({ workspace_id: workspaceId });
+    return apiRequest(`/investment/context${q}`);
+  },
+  updateUserInvestmentContext(
+    payload: UserInvestmentContextUpdate,
+    workspaceId = WS,
+  ): Promise<UserInvestmentContext> {
+    const q = buildQuery({ workspace_id: workspaceId });
+    return apiRequest(`/investment/context${q}`, { method: "PATCH", body: payload });
+  },
+  createRecommendationOutcome(payload: RecommendationOutcomeCreate): Promise<RecommendationOutcome> {
+    return apiRequest("/investment/recommendation-outcomes", { method: "POST", body: payload });
   },
 
   // items
