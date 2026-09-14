@@ -80,6 +80,7 @@ def _window_metrics(
     end_date: date,
     asset_by_date: dict[date, MarketBar],
     benchmark_by_date: dict[date, MarketBar],
+    intermediate_gap: bool,
 ) -> dict[str, float | str | None]:
     asset_start = asset_by_date[event_date]
     asset_end = asset_by_date[end_date]
@@ -93,13 +94,16 @@ def _window_metrics(
     if event_volume is not None and event_volume > 0 and endpoint_volume is not None:
         volume_ratio = endpoint_volume / event_volume
 
-    available_asset_bars = [
-        asset_by_date[trading_date]
-        for trading_date in window_dates
-        if trading_date in asset_by_date
-    ]
-    daily_returns = _daily_returns(available_asset_bars)
-    realized_volatility = stdev(daily_returns) if len(daily_returns) >= 2 else None
+    if intermediate_gap:
+        realized_volatility = None
+    else:
+        available_asset_bars = [
+            asset_by_date[trading_date]
+            for trading_date in window_dates
+            if trading_date in asset_by_date
+        ]
+        daily_returns = _daily_returns(available_asset_bars)
+        realized_volatility = stdev(daily_returns) if len(daily_returns) >= 2 else None
     return {
         "asset_return": asset_return,
         "benchmark_return": benchmark_return,
@@ -180,6 +184,7 @@ def compute_event_windows(
             end_date=all_dates[endpoint_index],
             asset_by_date=asset_by_date,
             benchmark_by_date=benchmark_by_date,
+            intermediate_gap=bool(missing_for_window - required_dates),
         )
 
     quality = "complete" if len(windows) == len(WINDOWS) and not missing_dates else "partial"

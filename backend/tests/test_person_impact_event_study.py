@@ -104,6 +104,24 @@ def test_missing_benchmark_bar_only_omits_affected_windows() -> None:
     assert date(2026, 9, 15) in result.missing_dates
 
 
+def test_intermediate_missing_bar_disables_volatility_but_keeps_window_returns() -> None:
+    asset = _bars("TSLA", [100, 103, 105, 106, 107, 108])
+    benchmark = _bars("XLY", [200, 202, 203, 204, 205, 206])
+    asset.pop(2)
+
+    result = compute_event_windows(
+        event_at=datetime(2026, 9, 12, 20, tzinfo=UTC),
+        asset_bars=asset,
+        benchmark_bars=benchmark,
+        event_cluster_id="cluster_intermediate_gap",
+    )
+
+    assert result.windows["3d"]["asset_return"] == pytest.approx(0.06)
+    assert result.windows["3d"]["benchmark_return"] == pytest.approx(0.02)
+    assert result.windows["3d"]["realized_volatility"] is None
+    assert result.windows["5d"]["realized_volatility"] is None
+
+
 def test_no_market_bars_is_explicitly_marked_missing() -> None:
     result = compute_event_windows(
         event_at=datetime(2026, 9, 12, tzinfo=UTC),
