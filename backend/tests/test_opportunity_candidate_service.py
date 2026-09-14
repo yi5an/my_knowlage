@@ -15,6 +15,8 @@ from app.infrastructure.database import Base
 from app.infrastructure.models import (
     InvestmentOpportunityCandidate,
     InvestmentSignal,
+    InvestmentTheme,
+    InvestmentWatchlist,
     Workspace,
 )
 from app.schemas.investment import OpportunityCandidateCreate, OpportunityReviewAction
@@ -171,6 +173,51 @@ def test_ambiguous_asset_mapping_is_not_promoted() -> None:
         signal_id="sig_1",
         workspace_id="ws_default",
         payload=valid_opportunity_payload(asset_symbols=["NVDA", "AMD"]),
+    )
+
+    assert result.created is False
+    assert result.reason == "ambiguous_asset_mapping"
+
+
+def test_foreign_watchlist_reference_is_not_promoted() -> None:
+    session = next(_session())
+    foreign_watchlist = InvestmentWatchlist(
+        id="wl_foreign",
+        workspace_id="ws_other",
+        name="Foreign watchlist",
+        watch_type="stock",
+        ticker="NVDA",
+    )
+    session.add(foreign_watchlist)
+    session.commit()
+    _signal(session)
+
+    result = OpportunityService(session).promote_signal(
+        signal_id="sig_1",
+        workspace_id="ws_default",
+        payload=valid_opportunity_payload(watchlist_id="wl_foreign"),
+    )
+
+    assert result.created is False
+    assert result.reason == "ambiguous_asset_mapping"
+
+
+def test_foreign_theme_reference_is_not_promoted() -> None:
+    session = next(_session())
+    foreign_theme = InvestmentTheme(
+        id="theme_foreign",
+        workspace_id="ws_other",
+        name="Foreign theme",
+        tickers=["NVDA"],
+    )
+    session.add(foreign_theme)
+    session.commit()
+    _signal(session)
+
+    result = OpportunityService(session).promote_signal(
+        signal_id="sig_1",
+        workspace_id="ws_default",
+        payload=valid_opportunity_payload(theme_id="theme_foreign"),
     )
 
     assert result.created is False

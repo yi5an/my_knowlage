@@ -294,27 +294,35 @@ class OpportunityService:
             return False
         watchlist_id = data.get("watchlist_id") or signal.watchlist_id
         theme_id = data.get("theme_id") or signal.theme_id
+        watchlist = None
+        if watchlist_id:
+            watchlist = self.session.get(InvestmentWatchlist, str(watchlist_id))
+            if watchlist is None or watchlist.workspace_id != signal.workspace_id:
+                return False
+        theme = None
+        if theme_id:
+            theme = self.session.get(InvestmentTheme, str(theme_id))
+            if theme is None or theme.workspace_id != signal.workspace_id:
+                return False
         if len(symbols) == 1:
-            if watchlist_id:
-                watchlist = self.session.get(InvestmentWatchlist, str(watchlist_id))
-                if watchlist is not None and watchlist.workspace_id == signal.workspace_id:
-                    ticker = (watchlist.ticker or "").strip().upper()
-                    if ticker and ticker != symbols[0]:
-                        return False
+            if watchlist is not None:
+                ticker = (watchlist.ticker or "").strip().upper()
+                if ticker and ticker != symbols[0]:
+                    return False
+            if theme is not None:
+                theme_symbols = {str(item).strip().upper() for item in (theme.tickers or [])}
+                if theme_symbols and symbols[0] not in theme_symbols:
+                    return False
             return True
         # Multiple symbols need an explicit workspace-scoped mapping. A
         # watchlist ticker or a theme ticker set is the evidence that this is a
         # deliberate basket rather than an unresolved mention.
-        if watchlist_id:
-            watchlist = self.session.get(InvestmentWatchlist, str(watchlist_id))
-            if watchlist is not None and watchlist.workspace_id == signal.workspace_id:
-                ticker = (watchlist.ticker or "").strip().upper()
-                return bool(ticker and ticker in symbols)
-        if theme_id:
-            theme = self.session.get(InvestmentTheme, str(theme_id))
-            if theme is not None and theme.workspace_id == signal.workspace_id:
-                theme_symbols = {str(item).strip().upper() for item in (theme.tickers or [])}
-                return bool(theme_symbols and set(symbols).issubset(theme_symbols))
+        if watchlist is not None:
+            ticker = (watchlist.ticker or "").strip().upper()
+            return bool(ticker and ticker in symbols)
+        if theme is not None:
+            theme_symbols = {str(item).strip().upper() for item in (theme.tickers or [])}
+            return bool(theme_symbols and set(symbols).issubset(theme_symbols))
         return False
 
     def _score(
@@ -357,7 +365,10 @@ class OpportunityService:
             "account_stability": source_quality,
             "expected_gap_clarity": 1.0,
             "catalyst_clarity": 1.0,
-            "downside_risk": min(1.0, len(risk_flags) / 3.0),
+            # This is a positive ordering score: explicitly listing more
+            # downside risks should reduce confidence in prioritization, not
+            # reward a candidate for having a longer risk list.
+            "downside_risk": 1.0 - min(1.0, len(risk_flags) / 3.0),
             "user_context_match": context_match,
         }
 
