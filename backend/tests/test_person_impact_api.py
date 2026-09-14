@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.infrastructure.database import Base, get_db_session
-from app.infrastructure.models import InvestmentItem, InvestmentPersonSource, TaskJob, Workspace
+from app.infrastructure.models import (
+    InvestmentItem,
+    InvestmentPersonImpactEvent,
+    InvestmentPersonSource,
+    TaskJob,
+    Workspace,
+)
 from app.main import app
 from app.services.investment.investment_dependencies import get_investment_service
 from app.services.investment.person_impact import PersonImpactService
@@ -138,3 +144,39 @@ def test_refresh_handler_writes_task_output_counts(
     assert output["person_source_id"] == "person_api"
     assert output["sample_count"] == 1
     assert output["insufficient"] == 0
+
+
+def test_api_lists_computed_event_with_provenance_metadata(
+    client: TestClient, db_session: Session
+) -> None:
+    db_session.add(
+        InvestmentPersonImpactEvent(
+            id="impact_api",
+            workspace_id="ws_default",
+            person_source_id="person_api",
+            source_item_id="item_api",
+            symbol="AAA",
+            benchmark_symbol="SPY",
+            event_at=datetime(2026, 9, 14, tzinfo=UTC),
+            event_cluster_id="cluster_api",
+            event_status="computed",
+            data_quality="complete",
+            windows={
+                "1d": {"excess_return": 0.02},
+                "_source_snapshot": {"item_id": "item_api", "digest": "abc"},
+                "_meta": {
+                    "provider_name": "fake",
+                    "missing_dates": ["2026-09-15"],
+                },
+            },
+            confidence=0.9,
+        )
+    )
+    db_session.commit()
+    response = client.get(
+        "/api/v1/investment/person-sources/person_api/impact-events?workspace_id=ws_default"
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload[0]["windows"]["_source_snapshot"]["digest"] == "abc"
+    assert payload[0]["windows"]["_meta"]["missing_dates"] == ["2026-09-15"]

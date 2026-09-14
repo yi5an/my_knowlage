@@ -13,6 +13,9 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
+type JsonPrimitive = str | int | float | bool | None
+type JsonValue = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
+
 # --- enums -----------------------------------------------------------------
 
 
@@ -936,7 +939,7 @@ class PersonImpactEventResponse(BaseModel):
     window_overlap: bool
     event_status: PersonImpactEventStatus
     data_quality: MarketDataQuality
-    windows: dict[str, dict[str, float | str | None]]
+    windows: dict[str, JsonValue] = Field(default_factory=dict)
     concurrent_events: list[str] = Field(default_factory=list)
     exclusion_reason: str | None = None
     confidence: float = Field(ge=0.0, le=1.0)
