@@ -87,14 +87,18 @@ def upgrade() -> None:
         ["workspace_id", "platform", "handle"],
     )
 
-    op.add_column("investment_item", sa.Column("theme_id", sa.String(64)))
-    op.create_foreign_key(
-        "fk_investment_item_theme_id",
-        "investment_item",
-        "investment_theme",
-        ["theme_id"],
-        ["id"],
-    )
+    # SQLite cannot ALTER a table to add a foreign-key constraint.  Keeping
+    # the column and constraint in one batch operation lets Alembic recreate
+    # the table safely on SQLite while using regular ALTER statements on
+    # databases that support them.
+    with op.batch_alter_table("investment_item") as batch_op:
+        batch_op.add_column(sa.Column("theme_id", sa.String(64)))
+        batch_op.create_foreign_key(
+            "fk_investment_item_theme_id",
+            "investment_theme",
+            ["theme_id"],
+            ["id"],
+        )
     op.add_column(
         "investment_item",
         sa.Column(
@@ -227,10 +231,11 @@ def downgrade() -> None:
     ]:
         op.drop_column("investment_signal", column)
     op.drop_index("idx_investment_item_theme", table_name="investment_item")
-    op.drop_column("investment_item", "collected_at")
-    op.drop_column("investment_item", "source_layer")
-    op.drop_constraint("fk_investment_item_theme_id", "investment_item", type_="foreignkey")
-    op.drop_column("investment_item", "theme_id")
+    with op.batch_alter_table("investment_item") as batch_op:
+        batch_op.drop_column("collected_at")
+        batch_op.drop_column("source_layer")
+        batch_op.drop_constraint("fk_investment_item_theme_id", type_="foreignkey")
+        batch_op.drop_column("theme_id")
     op.drop_index("idx_investment_person_source_platform", table_name="investment_person_source")
     op.drop_table("investment_person_source")
     op.drop_index("idx_investment_theme_source_theme", table_name="investment_theme_source")

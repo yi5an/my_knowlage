@@ -18,14 +18,14 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    op.add_column("investment_signal", sa.Column("theme_id", sa.String(64), nullable=True))
-    op.create_foreign_key(
-        "fk_investment_signal_theme_id",
-        "investment_signal",
-        "investment_theme",
-        ["theme_id"],
-        ["id"],
-    )
+    with op.batch_alter_table("investment_signal") as batch_op:
+        batch_op.add_column(sa.Column("theme_id", sa.String(64), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_investment_signal_theme_id",
+            "investment_theme",
+            ["theme_id"],
+            ["id"],
+        )
     op.create_index(
         "idx_investment_signal_theme",
         "investment_signal",
@@ -35,5 +35,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("idx_investment_signal_theme", table_name="investment_signal")
-    op.drop_constraint("fk_investment_signal_theme_id", "investment_signal", type_="foreignkey")
-    op.drop_column("investment_signal", "theme_id")
+    with op.batch_alter_table("investment_signal") as batch_op:
+        batch_op.drop_constraint("fk_investment_signal_theme_id", type_="foreignkey")
+        batch_op.drop_column("theme_id")
