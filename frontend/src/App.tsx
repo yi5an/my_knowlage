@@ -28,6 +28,7 @@ import { EntityPage } from "./pages/EntityPage";
 import { GraphPage } from "./pages/GraphPage";
 import { ImportPage } from "./pages/ImportPage";
 import { InformationEdgePage } from "./pages/InformationEdgePage";
+import { IntelligenceFlowPage } from "./pages/IntelligenceFlowPage";
 import { InvestmentCalendarPage } from "./pages/InvestmentCalendarPage";
 import { InvestmentClaimsPage } from "./pages/InvestmentClaimsPage";
 import { InvestmentDashboardPage } from "./pages/InvestmentDashboardPage";
@@ -51,40 +52,76 @@ import { YouTubeHubPage } from "./pages/YouTubeHubPage";
 
 const { Content, Header, Sider } = Layout;
 
-const navItems: MenuProps["items"] = [
-  { key: "/", icon: <DashboardOutlined />, label: <Link to="/">仪表盘</Link> },
-  { key: "/youtube", icon: <YoutubeOutlined />, label: <Link to="/youtube">YouTube</Link> },
-  { key: "/youtube/subscriptions", icon: <YoutubeOutlined />, label: <Link to="/youtube/subscriptions">订阅管理</Link> },
+const primaryNavItems: MenuProps["items"] = [
+  { key: "/", icon: <DashboardOutlined />, label: <Link to="/">情报流</Link> },
+  {
+    key: "/investment/watchlist",
+    icon: <StockOutlined />,
+    label: <Link to="/investment/watchlist">观察对象</Link>,
+  },
+  {
+    key: "/investment/claims",
+    icon: <FundProjectionScreenOutlined />,
+    label: <Link to="/investment/claims">假设验证</Link>,
+  },
+  {
+    key: "/investment/digest",
+    icon: <ReadOutlined />,
+    label: <Link to="/investment/digest">研究简报</Link>,
+  },
+  {
+    key: "/investment/accounts",
+    icon: <ShareAltOutlined />,
+    label: <Link to="/investment/accounts">账号发现</Link>,
+  },
+  { key: "/youtube", icon: <YoutubeOutlined />, label: <Link to="/youtube">YouTube 观点</Link> },
+  {
+    key: "/investment/sources",
+    icon: <CloudUploadOutlined />,
+    label: <Link to="/investment/sources">数据源</Link>,
+  },
+];
+
+const auxiliaryNavItems: MenuProps["items"] = [
+  { key: "/investment", label: <Link to="/investment">旧版投资工作台</Link> },
+  { key: "/investment/edge", label: <Link to="/investment/edge">信息差系统</Link> },
+  { key: "/investment/themes", label: <Link to="/investment/themes">主题中心</Link> },
+  { key: "/investment/items", label: <Link to="/investment/items">投资信息</Link> },
+  { key: "/investment/theses", label: <Link to="/investment/theses">投资假设</Link> },
+  { key: "/investment/calendar", label: <Link to="/investment/calendar">宏观日历</Link> },
+  { key: "/youtube/subscriptions", label: <Link to="/youtube/subscriptions">YouTube 订阅管理</Link> },
   { key: "/import", icon: <CloudUploadOutlined />, label: <Link to="/import">导入</Link> },
   { key: "/library", icon: <BookOutlined />, label: <Link to="/library">文档库</Link> },
   { key: "/reader", icon: <ReadOutlined />, label: <Link to="/reader">阅读</Link> },
   { key: "/graph", icon: <NodeIndexOutlined />, label: <Link to="/graph">知识图谱</Link> },
   { key: "/provenance", icon: <ShareAltOutlined />, label: <Link to="/provenance">溯源图</Link> },
   { key: "/search", icon: <SearchOutlined />, label: <Link to="/search">搜索</Link> },
-  { key: "/research", icon: <FileSearchOutlined />, label: <Link to="/research">研究</Link> },
+  { key: "/research", icon: <FileSearchOutlined />, label: <Link to="/research">深度研究</Link> },
   { key: "/entity", icon: <StockOutlined />, label: <Link to="/entity">实体</Link> },
-  { key: "/investment", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment">投资工作台</Link> },
-  { key: "/investment/edge", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/edge">信息差系统</Link> },
-  { key: "/investment/themes", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/themes">主题中心</Link> },
-  { key: "/investment/watchlist", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/watchlist">观察对象</Link> },
-  { key: "/investment/items", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/items">投资信息</Link> },
-  { key: "/investment/sources", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/sources">投资数据源</Link> },
-  { key: "/investment/claims", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/claims">待验证观点</Link> },
-  { key: "/investment/theses", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/theses">投资假设</Link> },
-  { key: "/investment/calendar", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/calendar">宏观日历</Link> },
-  { key: "/investment/digest", icon: <FundProjectionScreenOutlined />, label: <Link to="/investment/digest">每日简报</Link> },
   { key: "/notebooklm", icon: <ApiOutlined />, label: <Link to="/notebooklm">NotebookLM</Link> },
   { key: "/settings", icon: <SettingOutlined />, label: <Link to="/settings">设置</Link> },
 ];
+
+const navItems: MenuProps["items"] = [
+  ...primaryNavItems,
+  { key: "support", label: "辅助", children: auxiliaryNavItems },
+];
+
+const navKeys = [
+  ...primaryNavItems.map((item) => (item && "key" in item ? String(item.key) : "")),
+  ...auxiliaryNavItems.map((item) => (item && "key" in item ? String(item.key) : "")),
+];
+const auxiliaryNavKeys = auxiliaryNavItems.map((item) =>
+  item && "key" in item ? String(item.key) : "",
+);
 
 function selectedKey(pathname: string): string {
   // Match the longest nav key that is a prefix of the current path, so that
   // "/youtube/subscriptions" wins over "/youtube" (otherwise the shorter key
   // swallows the longer one and the active highlight is wrong).
   let best: string | null = null;
-  for (const item of navItems ?? []) {
-    if (!item || !("key" in item)) continue;
-    const key = String(item.key);
+  for (const key of navKeys) {
+    if (!key || key === "support") continue;
     const matches = key === "/" ? pathname === "/" : pathname === key || pathname.startsWith(key + "/");
     if (matches && (best === null || key.length > best.length)) {
       best = key;
@@ -112,6 +149,13 @@ export function App() {
           className="side-menu"
           mode="inline"
           selectedKeys={[selectedKey(location.pathname)]}
+          defaultOpenKeys={
+            auxiliaryNavKeys.some(
+              (key) => key && (location.pathname === key || location.pathname.startsWith(`${key}/`)),
+            )
+              ? ["support"]
+              : []
+          }
           items={navItems}
         />
         <div className="sidebar-footer">
@@ -124,7 +168,7 @@ export function App() {
           <Input
             className="global-search"
             prefix={<SearchOutlined />}
-            placeholder="搜索文档、实体、批注、报告..."
+            placeholder="搜索情报、对象、假设和证据"
           />
           <Space className="header-actions">
             <Button icon={<ControlOutlined />}>审阅队列</Button>
@@ -135,7 +179,8 @@ export function App() {
         </Header>
         <Content className="app-content">
           <Routes>
-            <Route path="/" element={<DashboardPage />} />
+            <Route path="/" element={<IntelligenceFlowPage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/youtube" element={<YouTubeHubPage />} />
             <Route path="/youtube/subscriptions" element={<SubscriptionPage />} />
             <Route path="/youtube/summary/:documentId" element={<VideoSummaryPage />} />
@@ -150,6 +195,8 @@ export function App() {
             <Route path="/entity" element={<EntityPage />} />
             <Route path="/entity/:entityId" element={<EntityPage />} />
             <Route path="/investment" element={<InvestmentDashboardPage />} />
+            {/* Task 9 replaces this compatibility target with account discovery. */}
+            <Route path="/investment/accounts" element={<InvestmentSourcesPage />} />
             <Route path="/investment/edge" element={<InformationEdgePage />} />
             <Route path="/investment/themes" element={<InvestmentThemesPage />} />
             <Route path="/investment/watchlist" element={<InvestmentWatchlistPage />} />

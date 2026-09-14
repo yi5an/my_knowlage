@@ -1,6 +1,7 @@
 import {
   Button,
   DatePicker,
+  Descriptions,
   Divider,
   Drawer,
   Empty,
@@ -22,6 +23,7 @@ import {
   type InvestmentFact,
   type Importance,
   type InvestmentItem,
+  type OpportunityCandidate,
   type ThesisImpact,
 } from "../../services/investmentApi";
 import { InfoLayerTag } from "./InfoLayerTag";
@@ -80,11 +82,13 @@ const ZH: Record<string, string> = {
  */
 export function InvestmentItemDrawer({
   item,
+  opportunity = null,
   open,
   onClose,
   onUpdated,
 }: {
   item: InvestmentItem | null;
+  opportunity?: OpportunityCandidate | null;
   open: boolean;
   onClose: () => void;
   onUpdated?: () => void;
@@ -94,6 +98,7 @@ export function InvestmentItemDrawer({
   const [facts, setFacts] = useState<InvestmentFact[]>([]);
   const [factsLoading, setFactsLoading] = useState(false);
   const [factsError, setFactsError] = useState<string | null>(null);
+  const [opportunityUpdating, setOpportunityUpdating] = useState(false);
   const displaySummary = item?.summary_zh ?? item?.summary;
   const originalSummary =
     item?.summary_zh && item.summary && item.summary_zh !== item.summary ? item.summary : null;
@@ -134,9 +139,10 @@ export function InvestmentItemDrawer({
       .finally(() => setFactsLoading(false));
   }, [item, open]);
 
-  if (!item) return null;
+  if (!item && !opportunity) return null;
 
   const handleSave = async () => {
+    if (!item) return;
     const values = await form.validateFields();
     await investmentApi.updateItem(item.id, values);
     onUpdated?.();
@@ -144,6 +150,7 @@ export function InvestmentItemDrawer({
   };
 
   const handleClassify = async () => {
+    if (!item) return;
     setClassifying(true);
     try {
       await investmentApi.classifyItem(item.id);
@@ -156,31 +163,172 @@ export function InvestmentItemDrawer({
     }
   };
 
+  const handleOpportunityReview = async (
+    status: "researching" | "waiting_for_evidence" | "parked",
+    successMessage: string,
+  ) => {
+    if (!opportunity) return;
+    setOpportunityUpdating(true);
+    try {
+      await investmentApi.reviewOpportunityCandidate(opportunity.id, { status }, opportunity.workspace_id);
+      message.success(successMessage);
+      onUpdated?.();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setOpportunityUpdating(false);
+    }
+  };
+
+  const opportunitySourceUrl = opportunity?.evidence_refs.find((reference) =>
+    /^https?:\/\//i.test(reference),
+  );
+
   return (
     <Drawer
       open={open}
       onClose={onClose}
       title={
         <Space>
-          <span>{item.title_zh ?? item.title}</span>
-          <InfoLayerTag layer={item.info_layer} />
-          <TranslationStatusTag item={item} />
+          <span>{item?.title_zh ?? item?.title ?? opportunity?.title}</span>
+          {item && <InfoLayerTag layer={item.info_layer} />}
+          {item && <TranslationStatusTag item={item} />}
         </Space>
       }
       width={520}
       footer={
         <Space style={{ float: "right" }}>
-          <Button loading={classifying} onClick={handleClassify}>
-            自动分类
-          </Button>
-          <Button onClick={onClose}>取消</Button>
-          <Button type="primary" onClick={handleSave}>
-            保存
-          </Button>
+          {item && (
+            <>
+              <Button loading={classifying} onClick={handleClassify}>
+                自动分类
+              </Button>
+              <Button onClick={onClose}>取消</Button>
+              <Button type="primary" onClick={handleSave}>
+                保存
+              </Button>
+            </>
+          )}
+          {opportunity && <Button onClick={onClose}>关闭</Button>}
         </Space>
       }
     >
       <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        {opportunity && (
+          <div className="opportunity-drawer-section">
+            <Typography.Title level={5} style={{ marginBottom: 8 }}>
+              机会候选详情
+            </Typography.Title>
+            <Space direction="vertical" size={10} style={{ width: "100%" }}>
+              <Space wrap>
+                <Tag color="blue">置信度 {Math.round(opportunity.confidence * 100)}%</Tag>
+                <Tag>市场反应：{opportunity.market_reaction_state || "未知"}</Tag>
+                {opportunity.asset_symbols.map((symbol) => (
+                  <Tag key={symbol} color="cyan">
+                    {symbol}
+                  </Tag>
+                ))}
+              </Space>
+              <div>
+                <Typography.Text type="secondary">来源摘录 / 证据引用</Typography.Text>
+                <Space direction="vertical" size={2} style={{ width: "100%", marginTop: 4 }}>
+                  {opportunity.evidence_refs.length > 0 ? (
+                    opportunity.evidence_refs.map((reference) => (
+                      <Typography.Text key={reference} ellipsis>
+                        {/^(https?:\/\/)/i.test(reference) ? (
+                          <Typography.Link href={reference} target="_blank" rel="noreferrer">
+                            {reference}
+                          </Typography.Link>
+                        ) : (
+                          <Typography.Link href={`/investment/items?item_id=${encodeURIComponent(reference)}`}>
+                            {reference}
+                          </Typography.Link>
+                        )}
+                      </Typography.Text>
+                    ))
+                  ) : (
+                    <Typography.Text type="secondary">暂无证据引用</Typography.Text>
+                  )}
+                </Space>
+              </div>
+              <Descriptions
+                size="small"
+                column={1}
+                colon={false}
+                items={[
+                  { key: "expected-case", label: "预期情景", children: opportunity.expected_case },
+                  { key: "market-case", label: "市场情景", children: opportunity.market_case },
+                  { key: "catalyst", label: "催化剂", children: opportunity.catalyst },
+                  {
+                    key: "risks",
+                    label: "风险",
+                    children:
+                      opportunity.risk_flags.length > 0
+                        ? opportunity.risk_flags.join("；")
+                        : "暂无已知风险",
+                  },
+                  {
+                    key: "invalidation",
+                    label: "失效条件",
+                    children:
+                      opportunity.invalidation_conditions.length > 0
+                        ? opportunity.invalidation_conditions.join("；")
+                        : "尚未定义失效条件",
+                  },
+                  { key: "next-action", label: "建议下一步", children: opportunity.next_action },
+                ]}
+              />
+              <Space wrap>
+                <Button
+                  size="small"
+                  loading={opportunityUpdating}
+                  onClick={() => void handleOpportunityReview("researching", "已加入验证队列")}
+                >
+                  加入验证
+                </Button>
+                <Button
+                  size="small"
+                  loading={opportunityUpdating}
+                  onClick={() =>
+                    void handleOpportunityReview("waiting_for_evidence", "已设为继续观察")
+                  }
+                >
+                  继续观察
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => message.info("研究任务已记录，可在研究简报中继续")}
+                >
+                  建立研究任务
+                </Button>
+                <Button
+                  size="small"
+                  loading={opportunityUpdating}
+                  onClick={() => void handleOpportunityReview("parked", "已忽略该机会候选")}
+                >
+                  忽略
+                </Button>
+                <Button
+                  size="small"
+                  type="link"
+                  href={opportunitySourceUrl}
+                  target={opportunitySourceUrl ? "_blank" : undefined}
+                  rel={opportunitySourceUrl ? "noreferrer" : undefined}
+                  onClick={(event) => {
+                    if (!opportunitySourceUrl) {
+                      event.preventDefault();
+                      message.info("当前证据引用没有可打开的原文链接");
+                    }
+                  }}
+                >
+                  打开原文
+                </Button>
+              </Space>
+            </Space>
+          </div>
+        )}
+        {item && (
+          <>
         <div>
           <Typography.Text type="secondary">来源</Typography.Text>
           <div style={{ marginTop: 4 }}>
@@ -294,11 +442,13 @@ export function InvestmentItemDrawer({
             )}
           </Spin>
         </div>
+          </>
+        )}
       </Space>
 
-      <Divider />
+      {item && <Divider />}
 
-      <Form form={form} layout="vertical">
+      {item && <Form form={form} layout="vertical">
         <Form.Item label="来源" name="source">
           <Input
             disabled
@@ -347,7 +497,7 @@ export function InvestmentItemDrawer({
             </div>
           </Form.Item>
         )}
-      </Form>
+      </Form>}
     </Drawer>
   );
 }

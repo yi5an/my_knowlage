@@ -9,6 +9,7 @@ import type {
 } from "../../services/investmentApi";
 
 type ResponseBody = InvestmentDashboard | InvestmentItem[] | InvestmentSignal[] | OpportunityCandidate[];
+type FetchResponder = (url: string, init?: RequestInit) => Promise<Response>;
 
 export type InvestmentFixtureOptions = {
   opportunityCount?: number;
@@ -30,41 +31,81 @@ const emptyDashboard: InvestmentDashboard = {
   failed_job_count: 0,
 };
 
-export const recommendationFixture = (overrides: Partial<AccountRecommendation> = {}): AccountRecommendation => ({
-  id: "rec_fixture",
-  workspace_id: "ws_default",
-  platform: "x",
-  handle: "signal_hunter",
-  display_name: "Signal Hunter",
-  role_type: "analyst",
-  theme_ids: ["theme_ai"],
-  recommendation_label: "值得关注",
-  reason: "持续提供可验证的一手线索",
-  score_breakdown: { theme_relevance: 0.9 },
-  sample_count: 12,
-  evidence_count: 8,
-  status: "new",
-  ...overrides,
-});
+export const recommendationFixture = (
+  overrides: Partial<AccountRecommendation> = {},
+): FetchResponder => {
+  const recommendation: AccountRecommendation = {
+    id: "rec_fixture",
+    workspace_id: "ws_default",
+    platform: "x",
+    handle: "signal_hunter",
+    display_name: "Signal Hunter",
+    role_type: "analyst",
+    theme_ids: ["theme_ai"],
+    recommendation_label: "值得关注",
+    reason: "持续提供可验证的一手线索",
+    score_breakdown: { theme_relevance: 0.9 },
+    sample_count: 12,
+    evidence_count: 8,
+    status: "new",
+    ...overrides,
+  };
+  return async (url: string): Promise<Response> => {
+    if (url.includes("/follow")) {
+      return new Response(
+        JSON.stringify({
+          id: "source_followed",
+          workspace_id: recommendation.workspace_id,
+          source_type: recommendation.platform === "youtube" ? "rss" : "x_web",
+          name: recommendation.display_name ?? recommendation.handle,
+          url: `https://${recommendation.platform}.com/${recommendation.handle}`,
+          config: { username: recommendation.handle },
+          default_info_layer: "opinion",
+          default_watchlist_ids: [],
+          poll_interval_seconds: 3600,
+          enabled: true,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(JSON.stringify([recommendation]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+};
 
 export const personImpactFixture = (
   overrides: Partial<PersonImpactProfile> = {},
-): PersonImpactProfile => ({
-  person_source_id: "person_fixture",
-  sample_count: 12,
-  valid_sample_count: 10,
-  excluded_sample_count: 2,
-  sample_sufficient: true,
-  positive_event_count: 6,
-  negative_event_count: 3,
-  neutral_event_count: 1,
-  hit_rate: 0.6,
-  average_lead_time_hours: 18,
-  average_excess_return_1d: 0.023,
-  stability_score: 0.72,
-  uncertainty: "样本量有限",
-  ...overrides,
-});
+): FetchResponder => {
+  const profile: PersonImpactProfile = {
+    person_source_id: "person_fixture",
+    sample_count: 12,
+    valid_sample_count: 10,
+    excluded_sample_count: 2,
+    sample_sufficient: true,
+    positive_event_count: 6,
+    negative_event_count: 3,
+    neutral_event_count: 1,
+    hit_rate: 0.6,
+    average_lead_time_hours: 18,
+    average_excess_return_1d: 0.023,
+    stability_score: 0.72,
+    uncertainty: "样本量有限",
+    ...overrides,
+  };
+  const event = personImpactEventFixture({
+    person_source_id: profile.person_source_id,
+    workspace_id: "ws_default",
+  });
+  return async (url: string): Promise<Response> => {
+    const body = url.includes("impact-profile") ? profile : [event];
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+};
 
 export const investmentFetchFixture = (options: InvestmentFixtureOptions = {}) => {
   const opportunityCount = options.opportunityCount ?? 2;

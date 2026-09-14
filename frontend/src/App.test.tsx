@@ -47,17 +47,14 @@ describe("App shell", () => {
     }
   });
 
-  it("keeps dashboard focused on workspace overview", async () => {
+  it("keeps home focused on the investment intelligence flow", async () => {
     renderRoute();
 
-    // Dashboard fetches real stats; wait for the labels to render after
-    // loading settles (the fetch will fail in the test env, showing defaults).
     await waitFor(() => {
-      expect(screen.getByText("快速操作")).toBeInTheDocument();
+      expect(screen.getByText("最新情报")).toBeInTheDocument();
     });
-    expect(screen.getByText("已启用订阅")).toBeInTheDocument();
-    expect(screen.getByText("已总结视频")).toBeInTheDocument();
-    expect(screen.getByText("抽取实体")).toBeInTheDocument();
+    expect(screen.getByText("正在发生")).toBeInTheDocument();
+    expect(screen.getByText("高优先研究")).toBeInTheDocument();
   });
 
   it("selects the provenance navigation item on the dedicated route", () => {

@@ -1,4 +1,4 @@
-import { Button, Card, Col, Empty, List, Row, Skeleton, Space, Statistic, Tag, Typography } from "antd";
+import { Alert, Button, Card, Col, Empty, List, Row, Skeleton, Space, Statistic, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
@@ -112,6 +112,17 @@ export function InvestmentDashboardPage() {
               <Button type="primary">数据源</Button>
             </Link>
           </Space>
+        }
+      />
+
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message={
+          <span>
+            首页已切换为情报流。此页保留为兼容视图，可继续查看完整的历史处理统计。
+          </span>
         }
       />
 
