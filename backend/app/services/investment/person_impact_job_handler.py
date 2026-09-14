@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -19,9 +20,13 @@ class PersonImpactRefreshJobHandler:
         person_source_id = str((job.input or {}).get("person_source_id") or job.target_id or "")
         if not person_source_id:
             raise ValueError("person_impact_refresh job requires person_source_id")
+        as_of = (job.input or {}).get("as_of")
+        if as_of is not None and not isinstance(as_of, (str, datetime)):
+            raise ValueError("person_impact_refresh job as_of must be ISO datetime")
         result = PersonImpactService.from_settings(session).rebuild_person(
             person_source_id=person_source_id,
             workspace_id=job.workspace_id,
+            as_of=as_of,
         )
         provider_errors = int(result.get("provider_errors", 0))
         if provider_errors:

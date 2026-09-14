@@ -188,7 +188,7 @@ python -m scripts.backfill_opportunity_candidates \
 
 人物事件研究默认使用 Stooq 日线接口（`MARKET_DATA_BASE_URL`，默认 `https://stooq.com`），交易所时区默认 `America/New_York`。日线数据通常有收盘后延迟；每个事件保存 provider、请求区间、时区、缺失交易日、复权价是否为原始价和 `complete`/`partial`/`missing`/`stale`/`invalid` 质量状态。常见可见失败信息包括 `market provider error`（超时或限流）、`market bars missing`、`未能确定唯一标的` 和 `搜索服务未配置`。
 
-`person_impact_refresh` 是异步 `TaskJob` 类型；机会候选回填是受 gate 保护的同步命令；推荐校准由 `OutcomeService.recalculate_recommendation_weights` 执行，并只使用 `observed_at <= as_of` 的结果。暂停推荐请在推荐记录上使用 `dismissed`/`paused` 状态，保留其来源、事件和结果证据，不要删除行。
+`person_impact_refresh` 是异步 `TaskJob` 类型；机会候选回填是受 gate 保护的同步命令；推荐校准由 `OutcomeService.recalculate_recommendation_weights` 执行，并只使用 `observed_at <= as_of` 的结果。暂停推荐请在推荐记录上使用当前 API 支持的 `dismissed` 状态，保留其来源、事件和结果证据，不要删除行。
 
 ### 迁移回滚与历史重建
 

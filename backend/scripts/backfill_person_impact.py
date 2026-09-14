@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.infrastructure.database import SessionLocal
@@ -155,13 +155,30 @@ def backfill_person_impact(
     if as_of is not None:
         as_of = as_of.astimezone(UTC) if as_of.tzinfo else as_of.replace(tzinfo=UTC)
 
+    conditions = [
+        InvestmentItem.workspace_id == workspace_id,
+        InvestmentItem.source_layer.in_(_SOURCE_LAYERS),
+    ]
+    if as_of is not None:
+        # Match the service's event-time fallback while applying the cutoff
+        # before LIMIT, so future rows cannot consume the historical window.
+        conditions.append(
+            or_(
+                and_(
+                    InvestmentItem.event_at.is_not(None),
+                    InvestmentItem.event_at <= as_of,
+                ),
+                and_(
+                    InvestmentItem.event_at.is_(None),
+                    InvestmentItem.published_at.is_not(None),
+                    InvestmentItem.published_at <= as_of,
+                ),
+            )
+        )
     items = list(
         session.scalars(
             select(InvestmentItem)
-            .where(
-                InvestmentItem.workspace_id == workspace_id,
-                InvestmentItem.source_layer.in_(_SOURCE_LAYERS),
-            )
+            .where(*conditions)
             .order_by(InvestmentItem.event_at, InvestmentItem.published_at, InvestmentItem.id)
             .limit(limit)
         )
@@ -178,12 +195,13 @@ def backfill_person_impact(
         if person_id is None or symbol is None:
             result.skipped += 1
             continue
-        person = session.scalar(
-            select(InvestmentPersonSource).where(
-                InvestmentPersonSource.id == person_id,
-                InvestmentPersonSource.workspace_id == workspace_id,
+        with session.no_autoflush:
+            person = session.scalar(
+                select(InvestmentPersonSource).where(
+                    InvestmentPersonSource.id == person_id,
+                    InvestmentPersonSource.workspace_id == workspace_id,
+                )
             )
-        )
         if person is None:
             result.skipped += 1
             continue
@@ -219,7 +237,9 @@ def backfill_person_impact(
                     input=payload,
                 )
             )
-            session.flush()
+            # Commit each job independently: a malformed/duplicate row must
+            # not roll back jobs already reported as created.
+            session.commit()
             result.created += 1
         except Exception as exc:  # noqa: BLE001 - one bad source must be visible, not fatal
             session.rollback()

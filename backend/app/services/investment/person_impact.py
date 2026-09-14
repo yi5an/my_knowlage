@@ -157,11 +157,13 @@ class PersonImpactService:
         self,
         person_source_id: str,
         workspace_id: str | None = None,
+        as_of: datetime | str | None = None,
     ) -> dict[str, Any]:
         person = self.session.get(InvestmentPersonSource, person_source_id)
         if person is None or (workspace_id is not None and person.workspace_id != workspace_id):
             raise AppError("not_found", "person source not found", 404)
         workspace_id = person.workspace_id
+        as_of = _normalize_as_of(as_of)
         candidates = list(
             self.session.scalars(
                 select(InvestmentItem)
@@ -173,6 +175,13 @@ class PersonImpactService:
             )
         )
         items = [item for item in candidates if self._item_belongs_to_person(item, person)]
+        if as_of is not None:
+            items = [
+                item
+                for item in items
+                if (item_time := _as_datetime(item.event_at or item.published_at)) is not None
+                and item_time <= as_of
+            ]
         counters = {
             "created": 0,
             "computed": 0,
@@ -266,7 +275,7 @@ class PersonImpactService:
             event.confidence = self._confidence(result.data_quality)
             event.exclusion_reason = None
             counters["computed"] += 1
-        profile = self._rebuild_profile(workspace_id, person_source_id)
+        profile = self._rebuild_profile(workspace_id, person_source_id, as_of=as_of)
         counters["excluded"] = profile.excluded_sample_count
         counters["sample_count"] = profile.sample_count
         counters["valid_sample_count"] = profile.valid_sample_count
@@ -274,10 +283,15 @@ class PersonImpactService:
         return {"profile": profile, **counters}
 
     def rebuild_profile(
-        self, workspace_id: str, person_source_id: str
+        self,
+        workspace_id: str,
+        person_source_id: str,
+        as_of: datetime | str | None = None,
     ) -> InvestmentPersonImpactProfile:
         self._person(workspace_id, person_source_id)
-        profile = self._rebuild_profile(workspace_id, person_source_id)
+        profile = self._rebuild_profile(
+            workspace_id, person_source_id, as_of=_normalize_as_of(as_of)
+        )
         self.session.commit()
         self.session.refresh(profile)
         return profile
@@ -540,16 +554,19 @@ class PersonImpactService:
         return {"complete": 0.9, "partial": 0.6, "missing": 0.0}.get(quality, 0.3)
 
     def _rebuild_profile(
-        self, workspace_id: str, person_source_id: str
+        self,
+        workspace_id: str,
+        person_source_id: str,
+        *,
+        as_of: datetime | None = None,
     ) -> InvestmentPersonImpactProfile:
-        events = list(
-            self.session.scalars(
-                select(InvestmentPersonImpactEvent).where(
-                    InvestmentPersonImpactEvent.workspace_id == workspace_id,
-                    InvestmentPersonImpactEvent.person_source_id == person_source_id,
-                )
-            )
-        )
+        conditions = [
+            InvestmentPersonImpactEvent.workspace_id == workspace_id,
+            InvestmentPersonImpactEvent.person_source_id == person_source_id,
+        ]
+        if as_of is not None:
+            conditions.append(InvestmentPersonImpactEvent.event_at <= as_of)
+        events = list(self.session.scalars(select(InvestmentPersonImpactEvent).where(*conditions)))
         valid: list[InvestmentPersonImpactEvent] = [
             event
             for event in events
@@ -614,6 +631,16 @@ class PersonImpactService:
 
 def _json_safe(value: object) -> Any:
     return json.loads(json.dumps(value, default=str))
+
+
+def _normalize_as_of(value: datetime | str | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 __all__ = [

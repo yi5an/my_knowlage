@@ -104,8 +104,8 @@ Calibration is performed by `OutcomeService.recalculate_recommendation_weights`
 and only includes outcomes with `observed_at <= as_of`; fewer than ten
 evaluated outcomes returns `样本不足` without changing weights.
 
-To pause a recommendation, mark its status `dismissed`/`paused` through the
-service/API. This preserves source snapshots, events, and outcomes for audit;
+To pause a recommendation, mark its status `dismissed` through the
+service/API (the current API does not expose a separate `paused` value). This preserves source snapshots, events, and outcomes for audit;
 do not delete the recommendation or evidence.
 
 ### Migration rollback and as-of rebuild
