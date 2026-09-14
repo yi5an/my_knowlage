@@ -1,0 +1,38 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { recommendationFixture } from "../test/fixtures/investmentFixtures";
+import { AccountDiscoveryPage } from "./AccountDiscoveryPage";
+
+describe("AccountDiscoveryPage", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("explains why an account is recommended and follows it idempotently", async () => {
+    const responder = recommendationFixture({
+      reason: "过去 30 天持续提供可验证的一手线索",
+    });
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => responder(url, init));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter>
+        <AccountDiscoveryPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/过去 30 天/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "+ 关注追踪" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "已关注" })).toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/investment/account-recommendations/rec_fixture/follow"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});

@@ -709,6 +709,16 @@ export const investmentApi = {
     });
     return apiRequest(`/investment/account-recommendations${q}`);
   },
+  refreshAccountRecommendations(params: {
+    workspaceId?: string;
+    themeId?: string;
+  } = {}): Promise<AccountRecommendation[]> {
+    const q = buildQuery({
+      workspace_id: params.workspaceId ?? WS,
+      theme_id: params.themeId,
+    });
+    return apiRequest(`/investment/account-recommendations/refresh${q}`, { method: "POST" });
+  },
   followAccountRecommendation(
     id: string,
     payload: FollowRecommendationRequest = {},

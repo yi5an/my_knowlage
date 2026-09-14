@@ -30,6 +30,7 @@ import { ImportPage } from "./pages/ImportPage";
 import { InformationEdgePage } from "./pages/InformationEdgePage";
 import { IntelligenceFlowPage } from "./pages/IntelligenceFlowPage";
 import { InvestmentCalendarPage } from "./pages/InvestmentCalendarPage";
+import { AccountDiscoveryPage } from "./pages/AccountDiscoveryPage";
 import { InvestmentClaimsPage } from "./pages/InvestmentClaimsPage";
 import { InvestmentDashboardPage } from "./pages/InvestmentDashboardPage";
 import { InvestmentDigestPage } from "./pages/InvestmentDigestPage";
@@ -38,6 +39,7 @@ import { InvestmentSourcesPage } from "./pages/InvestmentSourcesPage";
 import { InvestmentThemesPage } from "./pages/InvestmentThemesPage";
 import { InvestmentThesesPage } from "./pages/InvestmentThesesPage";
 import { InvestmentWatchlistPage } from "./pages/InvestmentWatchlistPage";
+import { PersonImpactPage } from "./pages/PersonImpactPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { ModelManagementPage } from "./pages/ModelManagementPage";
 import { ProvenanceGraphPage } from "./pages/ProvenanceGraphPage";
@@ -195,8 +197,8 @@ export function App() {
             <Route path="/entity" element={<EntityPage />} />
             <Route path="/entity/:entityId" element={<EntityPage />} />
             <Route path="/investment" element={<InvestmentDashboardPage />} />
-            {/* Task 9 replaces this compatibility target with account discovery. */}
-            <Route path="/investment/accounts" element={<InvestmentSourcesPage />} />
+            <Route path="/investment/accounts" element={<AccountDiscoveryPage />} />
+            <Route path="/investment/person-sources/:personId/impact" element={<PersonImpactPage />} />
             <Route path="/investment/edge" element={<InformationEdgePage />} />
             <Route path="/investment/themes" element={<InvestmentThemesPage />} />
             <Route path="/investment/watchlist" element={<InvestmentWatchlistPage />} />

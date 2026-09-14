@@ -503,6 +503,91 @@ a {
   font-weight: 700;
 }
 
+.investment-recommendation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.investment-recommendation-card {
+  height: 100%;
+  border: 2px solid #2f3742;
+  border-radius: 12px;
+  background: #fffdf7;
+}
+
+.investment-recommendation-card__header,
+.investment-recommendation-card__meta,
+.investment-recommendation-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.investment-recommendation-card__header {
+  align-items: flex-start;
+}
+
+.investment-recommendation-card__reason {
+  min-height: 44px;
+  margin: 14px 0 10px;
+  color: #475467;
+}
+
+.investment-recommendation-card__themes {
+  min-height: 26px;
+}
+
+.investment-recommendation-card__divider {
+  margin: 14px 0 10px;
+}
+
+.investment-recommendation-card__meta {
+  flex-wrap: wrap;
+  color: #667085;
+  font-size: 12px;
+}
+
+.investment-recommendation-card__actions {
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.investment-impact-summary__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.investment-impact-summary__distribution {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.investment-impact-summary__distribution-labels {
+  display: flex;
+  justify-content: space-between;
+  color: #475467;
+  font-size: 12px;
+}
+
+.investment-impact-chart {
+  width: 100%;
+  min-height: 180px;
+  border: 1px solid #ded8ca;
+  border-radius: 8px;
+  background: #fffdf7;
+}
+
+.investment-account-discovery-page__note,
+.investment-person-impact-page__note {
+  margin-top: 18px;
+}
+
 .investment-theme-context-card {
   min-width: 0;
   overflow: hidden;
