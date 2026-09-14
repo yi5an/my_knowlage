@@ -63,22 +63,14 @@ def _daily_returns(bars: Sequence[MarketBar]) -> list[float]:
     return returns
 
 
-def _window_end_index(window: str, available_count: int) -> int:
-    """Map a display horizon to an observation index.
+def _window_end_index(window: str) -> int:
+    """Map a display horizon to the required forward trading-day offset."""
 
-    The event anchor counts as the first observation.  Thus the five-point
-    fixture (anchor plus four following bars) still supports a complete 5d
-    display window, while providers returning six or more observations use the
-    conventional fifth forward trading observation.
-    """
-
-    if window == "1d":
-        return 1
-    if window == "3d":
-        return 3
-    if window == "5d":
-        return 5 if available_count >= 6 else 4
-    raise ValueError(f"unsupported event window {window}")
+    offsets = {"1d": 1, "3d": 3, "5d": 5}
+    try:
+        return offsets[window]
+    except KeyError as exc:
+        raise ValueError(f"unsupported event window {window}") from exc
 
 
 def _window_metrics(
@@ -127,6 +119,7 @@ def compute_event_windows(
     provider_name: str | None = None,
     query_start: date | None = None,
     query_end: date | None = None,
+    window_overlap: bool = False,
 ) -> EventStudyResult:
     """Calculate excess returns and liquidity response for 1d/3d/5d windows.
 
@@ -148,6 +141,7 @@ def compute_event_windows(
             query_start=query_start,
             query_end=query_end,
             exchange_timezone=exchange_timezone,
+            window_overlap=window_overlap,
         )
 
     event_date = select_event_trading_date(event_at, all_dates, exchange_timezone)
@@ -159,12 +153,11 @@ def compute_event_windows(
     )
 
     for window in WINDOWS:
-        endpoint_index = event_index + _window_end_index(window, len(all_dates) - event_index)
+        endpoint_index = event_index + _window_end_index(window)
         if endpoint_index >= len(all_dates):
-            # There is no endpoint bar for this horizon.  Record the next
-            # expected calendar date when the available index has a final date.
-            if all_dates:
-                missing_dates.add(all_dates[-1])
+            # No endpoint can be inferred safely from an irregular trading
+            # calendar.  Leave ``missing_dates`` limited to dates confirmed by
+            # the other series and mark the result partial.
             continue
         window_dates = all_dates[event_index : endpoint_index + 1]
         # Cumulative return requires the event anchor and the endpoint.  Bars
@@ -201,6 +194,7 @@ def compute_event_windows(
         query_end=query_end,
         exchange_timezone=exchange_timezone,
         missing_dates=sorted(missing_dates),
+        window_overlap=window_overlap,
         event_trading_date=event_date,
         adjusted_close_is_raw=raw_prices,
     )
@@ -218,7 +212,7 @@ def events_overlap(
     if overlap_days < 0:
         raise ValueError("overlap_days must be non-negative")
     if not trading_dates:
-        raise ValueError("trading_dates must contain at least one date")
+        return False
     ordered_dates = sorted(set(trading_dates))
     left_date = select_event_trading_date(left_event_at, ordered_dates, exchange_timezone)
     right_date = select_event_trading_date(right_event_at, ordered_dates, exchange_timezone)

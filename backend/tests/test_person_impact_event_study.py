@@ -24,8 +24,8 @@ def _bars(symbol: str, values: list[float], start: date = date(2026, 9, 14)) -> 
 def test_event_study_uses_next_trading_day_and_adjusted_close() -> None:
     result = compute_event_windows(
         event_at=datetime(2026, 9, 12, 20, tzinfo=UTC),
-        asset_bars=_bars("TSLA", [100, 103, 105, 106, 107]),
-        benchmark_bars=_bars("XLY", [200, 202, 203, 204, 205]),
+        asset_bars=_bars("TSLA", [100, 103, 105, 106, 107, 108]),
+        benchmark_bars=_bars("XLY", [200, 202, 203, 204, 205, 206]),
         event_cluster_id="cluster_1",
     )
 
@@ -35,6 +35,19 @@ def test_event_study_uses_next_trading_day_and_adjusted_close() -> None:
     assert result.windows["1d"]["excess_return"] == pytest.approx(0.02)
     assert result.provider_name is None
     assert result.exchange_timezone == "America/New_York"
+
+
+def test_five_day_window_requires_fifth_following_trading_day() -> None:
+    result = compute_event_windows(
+        event_at=datetime(2026, 9, 12, 20, tzinfo=UTC),
+        asset_bars=_bars("TSLA", [100, 103, 105, 106, 107]),
+        benchmark_bars=_bars("XLY", [200, 202, 203, 204, 205]),
+        event_cluster_id="cluster_short",
+    )
+
+    assert "5d" not in result.windows
+    assert result.data_quality == "partial"
+    assert date(2026, 9, 18) not in result.missing_dates
 
 
 def test_select_event_trading_date_converts_timezone_and_skips_weekend() -> None:
@@ -101,3 +114,26 @@ def test_no_market_bars_is_explicitly_marked_missing() -> None:
 
     assert result.data_quality == "missing"
     assert result.windows == {}
+
+
+def test_empty_trading_dates_are_not_considered_overlapping() -> None:
+    assert (
+        events_overlap(
+            datetime(2026, 9, 12, tzinfo=UTC),
+            datetime(2026, 9, 13, tzinfo=UTC),
+            [],
+        )
+        is False
+    )
+
+
+def test_event_study_preserves_explicit_window_overlap_flag() -> None:
+    result = compute_event_windows(
+        event_at=datetime(2026, 9, 12, 20, tzinfo=UTC),
+        asset_bars=_bars("TSLA", [100, 103, 105, 106, 107, 108]),
+        benchmark_bars=_bars("XLY", [200, 202, 203, 204, 205, 206]),
+        event_cluster_id="cluster_overlap",
+        window_overlap=True,
+    )
+
+    assert result.window_overlap is True
