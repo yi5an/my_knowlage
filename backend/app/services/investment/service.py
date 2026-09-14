@@ -454,10 +454,12 @@ class InvestmentService:
 
         return AccountRecommendationService(self.session).refresh(workspace_id, theme_id)
 
-    def list_account_recommendations(self, workspace_id: str, platform: str | None = None):
+    def list_account_recommendations(
+        self, workspace_id: str, platform: str | None = None, theme_id: str | None = None
+    ):
         from app.services.investment.account_recommendation import AccountRecommendationService
 
-        return AccountRecommendationService(self.session).list(workspace_id, platform)
+        return AccountRecommendationService(self.session).list(workspace_id, platform, theme_id)
 
     def dismiss_account_recommendation(self, rec_id: str, workspace_id: str):
         from app.services.investment.account_recommendation import AccountRecommendationService

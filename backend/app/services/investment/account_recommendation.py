@@ -23,6 +23,10 @@ def _id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex}"
 
 
+def _handle(value: object) -> str:
+    return str(value or "").strip().lstrip("@").casefold()
+
+
 class AccountRecommendationService:
     """Workspace-scoped, evidence-first account recommendations."""
 
@@ -57,12 +61,16 @@ class AccountRecommendationService:
             )
         if self.web_search is not None:
             query = f"investment research {theme_id or 'macro'} X YouTube institution"
-            for item in self.web_search.search(query) or []:
+            try:
+                search_results = self.web_search.search(query) or []
+            except Exception:  # noqa: BLE001 - optional enrichment
+                search_results = []
+            for item in search_results:
                 if isinstance(item, dict) and item.get("platform") and item.get("handle"):
                     candidates.append(dict(item))
         out: list[InvestmentAccountRecommendation] = []
         for item in candidates:
-            handle = str(item["handle"])
+            handle = str(item["handle"]).strip().lstrip("@")
             platform = str(item.get("platform", "x")).lower()
             existing = self.session.scalar(
                 select(InvestmentAccountRecommendation).where(
@@ -81,23 +89,12 @@ class AccountRecommendationService:
                     )
                 )
             sample = int(profile.sample_count) if profile else 0
-            evidence = (
-                int(
-                    self.session.scalar(
+            evidence = len(
+                list(
+                    self.session.scalars(
                         select(InvestmentFact.id)
                         .where(InvestmentFact.workspace_id == workspace_id)
-                        .count()
-                    )
-                    or 0
-                )
-                if False
-                else len(
-                    list(
-                        self.session.scalars(
-                            select(InvestmentFact.id)
-                            .where(InvestmentFact.workspace_id == workspace_id)
-                            .limit(100)
-                        )
+                        .limit(100)
                     )
                 )
             )
@@ -153,16 +150,19 @@ class AccountRecommendationService:
         return out
 
     def list(
-        self, workspace_id: str, platform: str | None = None
+        self, workspace_id: str, platform: str | None = None, theme_id: str | None = None
     ) -> list[InvestmentAccountRecommendation]:
         stmt = select(InvestmentAccountRecommendation).where(
             InvestmentAccountRecommendation.workspace_id == workspace_id
         )
         if platform:
             stmt = stmt.where(InvestmentAccountRecommendation.platform == platform)
-        return list(
+        rows = list(
             self.session.scalars(stmt.order_by(InvestmentAccountRecommendation.updated_at.desc()))
         )
+        if theme_id:
+            rows = [r for r in rows if theme_id in [str(v) for v in (r.theme_ids or [])]]
+        return rows
 
     def _get(self, rec_id: str, workspace_id: str) -> InvestmentAccountRecommendation:
         rec = self.session.scalar(
@@ -185,20 +185,34 @@ class AccountRecommendationService:
         self, rec_id: str, workspace_id: str, payload: FollowRecommendationRequest
     ) -> InvestmentSource:
         rec = self._get(rec_id, workspace_id)
-        src = self.session.scalar(
-            select(InvestmentSource).where(
-                InvestmentSource.workspace_id == workspace_id,
-                InvestmentSource.source_type == "x_web",
-                InvestmentSource.config["username"].as_string() == rec.handle,
+        sources = list(
+            self.session.scalars(
+                select(InvestmentSource).where(InvestmentSource.workspace_id == workspace_id)
             )
         )
+        src = next(
+            (
+                s
+                for s in sources
+                if _handle((s.config or {}).get("username")) == _handle(rec.handle)
+            ),
+            None,
+        )
         if src is None:
+            source_type = {"x": "x_web", "youtube": "youtube", "institution": "manual"}.get(
+                rec.platform, "manual"
+            )
             src = InvestmentSource(
                 id=_id("src"),
                 workspace_id=workspace_id,
-                source_type="x_web",
+                source_type=source_type,
                 name=rec.display_name or rec.handle,
-                config={"mode": "account", "username": rec.handle, "max_items_per_poll": 50},
+                config={
+                    "mode": "account",
+                    "username": rec.handle,
+                    "platform": rec.platform,
+                    "max_items_per_poll": 50,
+                },
                 default_info_layer="human_source",
                 default_watchlist_ids=list(payload.theme_ids or []),
                 poll_interval_seconds=payload.poll_interval_seconds,
@@ -206,10 +220,11 @@ class AccountRecommendationService:
             )
             self.session.add(src)
             self.session.flush()
+        job_type = X_WEB_COLLECT_JOB_TYPE if src.source_type == "x_web" else "investment_fetch"
         job = self.session.scalar(
             select(TaskJob).where(
                 TaskJob.workspace_id == workspace_id,
-                TaskJob.job_type == X_WEB_COLLECT_JOB_TYPE,
+                TaskJob.job_type == job_type,
                 TaskJob.target_id == src.id,
                 TaskJob.status.in_(("pending", "running")),
             )
@@ -219,7 +234,7 @@ class AccountRecommendationService:
                 TaskJob(
                     id=_id("job"),
                     workspace_id=workspace_id,
-                    job_type=X_WEB_COLLECT_JOB_TYPE,
+                    job_type=job_type,
                     target_type="investment_source",
                     target_id=src.id,
                     status="pending",

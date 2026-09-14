@@ -70,7 +70,7 @@ async def refresh_account_recommendations(
     workspace_id: str = "ws_default",
     theme_id: str | None = Query(default=None),
     service: InvestmentService = SERVICE_DEPENDENCY,
-):
+) -> list[AccountRecommendationResponse]:
     return [
         AccountRecommendationResponse.model_validate(x)
         for x in service.refresh_account_recommendations(workspace_id, theme_id)
@@ -81,11 +81,12 @@ async def refresh_account_recommendations(
 async def list_account_recommendations(
     workspace_id: str = "ws_default",
     platform: str | None = Query(default=None),
+    theme_id: str | None = Query(default=None),
     service: InvestmentService = SERVICE_DEPENDENCY,
-):
+) -> list[AccountRecommendationResponse]:
     return [
         AccountRecommendationResponse.model_validate(x)
-        for x in service.list_account_recommendations(workspace_id, platform)
+        for x in service.list_account_recommendations(workspace_id, platform, theme_id)
     ]
 
 
@@ -97,7 +98,7 @@ async def dismiss_account_recommendation(
     recommendation_id: str,
     workspace_id: str = "ws_default",
     service: InvestmentService = SERVICE_DEPENDENCY,
-):
+) -> AccountRecommendationResponse:
     return AccountRecommendationResponse.model_validate(
         service.dismiss_account_recommendation(recommendation_id, workspace_id)
     )
