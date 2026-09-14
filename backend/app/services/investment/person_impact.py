@@ -153,17 +153,17 @@ class PersonImpactService:
         if person is None or (workspace_id is not None and person.workspace_id != workspace_id):
             raise AppError("not_found", "person source not found", 404)
         workspace_id = person.workspace_id
-        items = list(
+        candidates = list(
             self.session.scalars(
                 select(InvestmentItem)
                 .where(
                     InvestmentItem.workspace_id == workspace_id,
-                    InvestmentItem.source_id == person_source_id,
                     InvestmentItem.source_layer.in_(_SOURCE_LAYERS),
                 )
                 .order_by(InvestmentItem.event_at, InvestmentItem.published_at, InvestmentItem.id)
             )
         )
+        items = [item for item in candidates if self._item_belongs_to_person(item, person)]
         counters = {
             "created": 0,
             "computed": 0,
@@ -194,7 +194,7 @@ class PersonImpactService:
                 )
                 if created:
                     counters["created"] += 1
-                self._mark_insufficient(event, reason)
+                self._mark_insufficient(event, reason, item)
                 counters["insufficient"] += 1
                 continue
             symbol = symbols[0]
@@ -210,22 +210,22 @@ class PersonImpactService:
             if created:
                 counters["created"] += 1
             if benchmark is None:
-                self._mark_insufficient(event, "无法确定基准指数")
+                self._mark_insufficient(event, "无法确定基准指数", item)
                 counters["insufficient"] += 1
                 continue
             try:
                 result = self._compute_event(event, item)
             except (MarketDataError, RuntimeError) as exc:
-                self._mark_insufficient(event, f"market provider error: {exc}")
+                self._mark_insufficient(event, f"market provider error: {exc}", item)
                 counters["insufficient"] += 1
                 counters["provider_errors"] += 1
                 continue
             except (ValueError, PersonImpactProviderError) as exc:
-                self._mark_insufficient(event, str(exc))
+                self._mark_insufficient(event, str(exc), item)
                 counters["insufficient"] += 1
                 continue
             if result.data_quality == "missing" or not result.windows:
-                self._mark_insufficient(event, "market bars missing or incomplete")
+                self._mark_insufficient(event, "market bars missing or incomplete", item)
                 counters["insufficient"] += 1
                 continue
             event.event_status = "computed"
@@ -233,6 +233,8 @@ class PersonImpactService:
             metrics = _json_safe(result.windows)
             prior_snapshot = (event.windows or {}).get("_source_snapshot")
             metrics["_source_snapshot"] = prior_snapshot or self._source_snapshot(item)
+            prior_meta = (event.windows or {}).get("_meta")
+            prior_meta = prior_meta if isinstance(prior_meta, dict) else {}
             metrics["_meta"] = _json_safe(
                 {
                     "provider_name": result.provider_name,
@@ -242,6 +244,12 @@ class PersonImpactService:
                     "event_trading_date": result.event_trading_date,
                     "adjusted_close_is_raw": result.adjusted_close_is_raw,
                     "missing_dates": result.missing_dates,
+                    "first_event_at": prior_meta.get("first_event_at", event.event_at),
+                    "first_event_cluster_id": prior_meta.get(
+                        "first_event_cluster_id", event.event_cluster_id
+                    ),
+                    "computation_version": int(prior_meta.get("computation_version", 0)) + 1,
+                    "last_computed_at": datetime.now(UTC),
                 }
             )
             event.windows = metrics
@@ -275,6 +283,28 @@ class PersonImpactService:
         if person is None:
             raise AppError("not_found", "person source not found", 404)
         return person
+
+    def _item_belongs_to_person(self, item: InvestmentItem, person: InvestmentPersonSource) -> bool:
+        if item.source_id == person.id:
+            return True
+        raw = item.raw_payload or {}
+        person_handle = person.handle.strip().removeprefix("@").casefold()
+        for key in ("person_source_id", "person_id"):
+            if str(raw.get(key, "")).strip() == person.id:
+                return True
+        for key in ("author_username", "username", "handle", "author_handle"):
+            value = str(raw.get(key, "")).strip().removeprefix("@").casefold()
+            if value and value == person_handle:
+                return True
+        if item.source_id:
+            source = self.session.get(InvestmentSource, item.source_id)
+            if source is not None and source.workspace_id == person.workspace_id:
+                config = source.config or {}
+                for key in ("username", "handle", "author_username"):
+                    value = str(config.get(key, "")).strip().removeprefix("@").casefold()
+                    if value and value == person_handle:
+                        return True
+        return False
 
     def _resolve_symbols(self, item: InvestmentItem, person: InvestmentPersonSource) -> list[str]:
         raw = item.raw_payload or {}
@@ -386,25 +416,47 @@ class PersonImpactService:
             self.session.flush()
         else:
             event.benchmark_symbol = benchmark_symbol
-            event.event_at = event_at
-            event.event_cluster_id = cluster_id
         return event, created
 
     @staticmethod
-    def _source_snapshot(item: InvestmentItem) -> dict[str, str]:
+    def _source_snapshot(item: InvestmentItem) -> dict[str, Any]:
         payload = json.dumps(
             item.raw_payload or {}, ensure_ascii=False, sort_keys=True, default=str
         )
         digest = hashlib.sha256(
             f"{item.id}|{item.title}|{item.summary or ''}|{payload}".encode()
         ).hexdigest()
-        return {"item_id": item.id, "digest": digest}
+        return _json_safe(
+            {
+                "item_id": item.id,
+                "title": item.title,
+                "summary": item.summary,
+                "source_url": item.source_url,
+                "published_at": item.published_at,
+                "event_at": item.event_at,
+                "raw_payload": item.raw_payload or {},
+                "digest": digest,
+            }
+        )
 
-    def _mark_insufficient(self, event: InvestmentPersonImpactEvent, reason: str) -> None:
+    def _mark_insufficient(
+        self,
+        event: InvestmentPersonImpactEvent,
+        reason: str,
+        item: InvestmentItem | None = None,
+    ) -> None:
         event.event_status = "insufficient_data"
         event.data_quality = "missing"
         snapshot = (event.windows or {}).get("_source_snapshot")
+        if snapshot is None and item is not None:
+            snapshot = self._source_snapshot(item)
+        metadata = (event.windows or {}).get("_meta")
         event.windows = {"_source_snapshot": snapshot} if snapshot else {}
+        metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        metadata.setdefault("first_event_at", event.event_at)
+        metadata.setdefault("first_event_cluster_id", event.event_cluster_id)
+        metadata.setdefault("computation_version", 0)
+        event.windows["_meta"] = _json_safe(metadata)
         event.exclusion_reason = reason
         event.confidence = 0.0
         event.window_overlap = False
@@ -445,10 +497,13 @@ class PersonImpactService:
             if previous.event_status != "computed":
                 continue
             previous_at = _as_datetime(previous.event_at)
+            current_at = _as_datetime(event.event_at)
+            if current_at is None:
+                continue
             if previous_at is None or (
                 previous_at,
                 previous.source_item_id,
-            ) >= (event.event_at, event.source_item_id):
+            ) >= (current_at, event.source_item_id):
                 continue
             try:
                 if previous.event_cluster_id == event.event_cluster_id or events_overlap(

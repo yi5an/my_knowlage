@@ -12,6 +12,7 @@ from app.infrastructure.models import (
     InvestmentPersonImpactEvent,
     InvestmentPersonImpactProfile,
     InvestmentPersonSource,
+    InvestmentSource,
     Workspace,
 )
 from app.services.investment.market_data import MarketBar, MarketDataError
@@ -198,6 +199,88 @@ def test_provider_error_and_source_layer_filter_are_explicit() -> None:
     assert event is not None
     assert event.event_status == "insufficient_data"
     assert "provider unavailable" in (event.exclusion_reason or "")
+
+
+def test_real_x_source_item_is_matched_by_author_account() -> None:
+    session = _session()
+    _seed_person(session)
+    source = InvestmentSource(
+        id="source_x",
+        workspace_id="ws_test",
+        source_type="x_web",
+        name="Analyst X",
+        config={"mode": "account", "username": "analyst"},
+    )
+    session.add(source)
+    session.commit()
+    item = _item(
+        session,
+        "real_x_item",
+        "source_x",
+        "AAA",
+        datetime(2026, 9, 14, tzinfo=UTC),
+        "real X statement",
+    )
+    item.raw_payload = {"author_username": "analyst", "symbol": "AAA"}
+    session.commit()
+    result = PersonImpactService(session, market_provider=FakeProvider()).rebuild_person("person_1")
+    assert result["profile"].sample_count == 1
+    assert (
+        session.scalar(
+            select(InvestmentPersonImpactEvent).where(
+                InvestmentPersonImpactEvent.source_item_id == "real_x_item"
+            )
+        )
+        is not None
+    )
+
+
+def test_source_snapshot_is_auditable_and_immutable_across_rebuilds() -> None:
+    session = _session()
+    _seed_person(session)
+    item = _item(
+        session,
+        "snapshot_item",
+        "person_1",
+        "AAA",
+        datetime(2026, 9, 14, tzinfo=UTC),
+        "original title",
+    )
+    item.summary = "original summary"
+    item.source_url = "https://x.com/analyst/status/1"
+    item.raw_payload = {
+        "author_username": "analyst",
+        "symbol": "AAA",
+        "text": "original text",
+    }
+    session.commit()
+    service = PersonImpactService(session, market_provider=FakeProvider())
+    service.rebuild_person("person_1")
+    event = session.scalar(
+        select(InvestmentPersonImpactEvent).where(
+            InvestmentPersonImpactEvent.source_item_id == "snapshot_item"
+        )
+    )
+    assert event is not None
+    first_snapshot = (event.windows or {})["_source_snapshot"]
+    assert first_snapshot["title"] == "original title"
+    assert first_snapshot["summary"] == "original summary"
+    assert first_snapshot["source_url"] == "https://x.com/analyst/status/1"
+    assert first_snapshot["raw_payload"]["text"] == "original text"
+    first_version = (event.windows or {})["_meta"]["computation_version"]
+    item.title = "edited title"
+    item.summary = "edited summary"
+    item.raw_payload = {
+        "author_username": "analyst",
+        "symbol": "AAA",
+        "text": "edited text",
+    }
+    session.commit()
+    service.rebuild_person("person_1")
+    session.refresh(event)
+    assert (event.windows or {})["_source_snapshot"]["title"] == "original title"
+    assert (event.windows or {})["_source_snapshot"]["raw_payload"]["text"] == "original text"
+    assert (event.windows or {})["_meta"]["computation_version"] == first_version + 1
 
 
 def test_missing_bars_remain_insufficient_data() -> None:
