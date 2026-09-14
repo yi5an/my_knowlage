@@ -108,6 +108,8 @@ class AccountRecommendationService:
                 else ("样本不足" if not sufficient else "值得学习")
             )
             reason = f"主题相关账号；基于 {sample} 个事件样本和 {evidence} 条事实验证。"
+            if self.web_search is None:
+                reason += " 搜索服务未配置，未扩展外部候选。"
             scores = {
                 k: 0.0
                 for k in (
@@ -216,10 +218,14 @@ class AccountRecommendationService:
                     "mode": "account",
                     "username": rec.handle,
                     "platform": rec.platform,
+                    "url": f"https://{rec.handle}",
+                    "theme_ids": list(
+                        dict.fromkeys([*(rec.theme_ids or []), *(payload.theme_ids or [])])
+                    ),
                     "max_items_per_poll": 50,
                 },
                 default_info_layer="human_source",
-                default_watchlist_ids=list(payload.theme_ids or []),
+                default_watchlist_ids=[],
                 poll_interval_seconds=payload.poll_interval_seconds,
                 enabled=True,
             )
