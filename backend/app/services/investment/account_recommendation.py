@@ -48,15 +48,15 @@ class AccountRecommendationService:
         if theme_id:
             people = [p for p in people if theme_id in [str(v) for v in (p.theme_ids or [])]]
         candidates: list[dict[str, Any]] = []
-        for person in people:
+        for person_source in people:
             candidates.append(
                 {
-                    "platform": person.platform,
-                    "handle": person.handle,
-                    "display_name": person.display_name,
-                    "role_type": person.role_type,
-                    "theme_ids": list(person.theme_ids or []),
-                    "person": person,
+                    "platform": person_source.platform,
+                    "handle": person_source.handle,
+                    "display_name": person_source.display_name,
+                    "role_type": person_source.role_type,
+                    "theme_ids": list(person_source.theme_ids or []),
+                    "person": person_source,
                 }
             )
         if self.web_search is not None:
@@ -79,13 +79,16 @@ class AccountRecommendationService:
                     InvestmentAccountRecommendation.handle == handle,
                 )
             )
-            person = item.get("person")
+            person_candidate = item.get("person")
+            source_person: InvestmentPersonSource | None = (
+                person_candidate if isinstance(person_candidate, InvestmentPersonSource) else None
+            )
             profile = None
-            if person is not None:
+            if source_person is not None:
                 profile = self.session.scalar(
                     select(InvestmentPersonImpactProfile).where(
                         InvestmentPersonImpactProfile.workspace_id == workspace_id,
-                        InvestmentPersonImpactProfile.person_source_id == person.id,
+                        InvestmentPersonImpactProfile.person_source_id == source_person.id,
                     )
                 )
             sample = int(profile.sample_count) if profile else 0
@@ -190,18 +193,20 @@ class AccountRecommendationService:
                 select(InvestmentSource).where(InvestmentSource.workspace_id == workspace_id)
             )
         )
+        expected_type = {"x": "x_web", "youtube": "youtube", "institution": "manual"}.get(
+            rec.platform, "manual"
+        )
         src = next(
             (
                 s
                 for s in sources
-                if _handle((s.config or {}).get("username")) == _handle(rec.handle)
+                if s.source_type == expected_type
+                and _handle((s.config or {}).get("username")) == _handle(rec.handle)
             ),
             None,
         )
         if src is None:
-            source_type = {"x": "x_web", "youtube": "youtube", "institution": "manual"}.get(
-                rec.platform, "manual"
-            )
+            source_type = expected_type
             src = InvestmentSource(
                 id=_id("src"),
                 workspace_id=workspace_id,

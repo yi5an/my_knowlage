@@ -110,14 +110,14 @@ async def dismiss_account_recommendation(
 async def follow_account_recommendation(
     recommendation_id: str,
     payload: FollowRecommendationRequest,
+    response: Response,
     workspace_id: str = "ws_default",
-    response: Response = None,
     service: InvestmentService = SERVICE_DEPENDENCY,
-):
+) -> InvestmentSourceResponse:
     rec = service.session.get(InvestmentAccountRecommendation, recommendation_id)
     was_followed = bool(rec and rec.workspace_id == workspace_id and rec.source_id)
     source = service.follow_account_recommendation(recommendation_id, workspace_id, payload)
-    if response is not None and not was_followed:
+    if not was_followed:
         response.status_code = 201
     return InvestmentSourceResponse.model_validate(source)
 
