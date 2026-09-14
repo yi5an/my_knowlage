@@ -61,6 +61,13 @@ def test_digest_contains_opportunity_fields_and_failed_outcomes() -> None:
         market_reaction_state="partially_reacted",
         priority="high_priority_research",
         score_breakdown={"source_quality": 0.8},
+        outcome={
+            "realized_1d": 0.11,
+            "windows": {
+                "3d": {"excess_return": 0.22},
+                "5d": {"asset_return": 0.33},
+            },
+        },
     )
     source = InvestmentSource(
         id="src_digest",
@@ -120,6 +127,10 @@ def test_digest_contains_opportunity_fields_and_failed_outcomes() -> None:
     assert digest["person_impact_events"][0]["windows"]["1d"]["excess_return"] == 0.02
     assert digest["outcomes"][0]["outcome_status"] == "invalidated"
     assert digest["outcomes"][0]["failure_reason"] == "Guidance was cut after the event."
+    assert digest["outcomes"][0]["recommendation_date"]
+    assert digest["outcomes"][0]["realized_1d"] == 0.11
+    assert digest["outcomes"][0]["realized_3d"] == 0.22
+    assert digest["outcomes"][0]["realized_5d"] == 0.33
 
 
 def test_digest_is_workspace_scoped_and_keeps_historical_snapshots() -> None:
@@ -174,3 +185,44 @@ def test_digest_is_workspace_scoped_and_keeps_historical_snapshots() -> None:
     assert "today_highlights" in aggregate
     assert "early_signals" in aggregate
     assert [item["id"] for item in aggregate["opportunities"]] == ["opp_default"]
+
+
+def test_digest_marks_missing_outcome_metrics_without_fabricating_returns() -> None:
+    session = _session()
+    candidate = InvestmentOpportunityCandidate(
+        id="opp_missing_metrics",
+        workspace_id="ws_default",
+        title="Missing metrics",
+        asset_symbols=["NVDA"],
+        opportunity_type="catalyst",
+        change_summary="Change",
+        expected_case="Case",
+        market_case="Market",
+        impact_path="Path",
+        catalyst="Catalyst",
+        next_action="Verify",
+        risk_flags=["risk"],
+        invalidation_conditions=["Invalid"],
+        evidence_refs=["item"],
+        confidence=0.5,
+        outcome={},
+    )
+    session.add(candidate)
+    session.add(
+        InvestmentRecommendationOutcome(
+            id="outcome_missing_metrics",
+            workspace_id="ws_default",
+            opportunity_id="opp_missing_metrics",
+            adopted=False,
+            outcome_status="tracking",
+            observed_at=datetime(2026, 9, 20, tzinfo=UTC),
+        )
+    )
+    session.commit()
+
+    outcome = InvestmentDigestService(session).build("ws_default")["outcomes"][0]
+
+    assert outcome["realized_1d"] is None
+    assert outcome["realized_3d"] is None
+    assert outcome["realized_5d"] is None
+    assert "数据缺失" in outcome["metrics_reason"]

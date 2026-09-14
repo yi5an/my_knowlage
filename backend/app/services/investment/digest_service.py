@@ -8,6 +8,7 @@ any source rows.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -168,14 +169,28 @@ class InvestmentDigestService:
                 target = opportunities.get(row.opportunity_id)
             elif row.recommendation_id:
                 target = recommendations.get(row.recommendation_id)
+            if target is not None and target.created_at is not None:
+                payload["recommendation_date"] = target.created_at.isoformat()
+            metric_source: dict[str, Any] = {}
             if isinstance(target, InvestmentOpportunityCandidate):
                 payload["opportunity_title"] = target.title
                 payload["catalyst_result"] = row.outcome_status
-                outcome_data: Mapping[str, Any] = target.outcome or {}
-                for window in ("1d", "3d", "5d"):
-                    value = outcome_data.get(f"realized_{window}")
-                    if isinstance(value, (int, float)):
-                        payload[f"realized_{window}"] = float(value)
+                metric_source.update(target.outcome or {})
+            note_data = _parse_outcome_note(row.outcome_note)
+            metric_source.update(note_data)
+            missing_windows: list[str] = []
+            for window in ("1d", "3d", "5d"):
+                value = _realized_metric(metric_source, window)
+                if value is None:
+                    missing_windows.append(window.upper())
+                else:
+                    payload[f"realized_{window}"] = value
+            if missing_windows:
+                payload["metrics_reason"] = (
+                    "数据缺失：尚未记录 " + "/".join(missing_windows) + " 行情结果。"
+                )
+            else:
+                payload["metrics_reason"] = None
             payload["failure_reason"] = (
                 row.outcome_note
                 if row.outcome_status in {"invalidated", "expired", "failed"}
@@ -184,3 +199,34 @@ class InvestmentDigestService:
             payload["reason"] = payload["failure_reason"] or f"结果：{row.outcome_status}。"
             result.append(payload)
         return result
+
+
+def _parse_outcome_note(value: str | None) -> dict[str, Any]:
+    """Read optional structured metrics from an outcome note.
+
+    Free-form notes remain untouched; only a JSON object contributes metrics,
+    preventing accidental parsing of prose into fabricated returns.
+    """
+
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _realized_metric(source: Mapping[str, Any], window: str) -> float | None:
+    candidates: list[Any] = [source.get(f"realized_{window}")]
+    windows = source.get("windows")
+    if isinstance(windows, Mapping):
+        window_data = windows.get(window)
+        if isinstance(window_data, Mapping):
+            candidates.extend(
+                [window_data.get("excess_return"), window_data.get("asset_return")]
+            )
+    for value in candidates:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None

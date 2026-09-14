@@ -338,7 +338,9 @@ describe("InvestmentDigestPage", () => {
                   outcome_status: "invalidated",
                   outcome_note: "Guidance was cut",
                   observed_at: "2026-09-20T00:00:00Z",
+                  recommendation_date: "2026-09-14T00:00:00Z",
                   failure_reason: "Guidance was cut",
+                  metrics_reason: "数据缺失：尚未记录 3D/5D 行情结果。",
                   catalyst_result: "invalidated",
                   reason: "Guidance was cut",
                 },
@@ -360,5 +362,7 @@ describe("InvestmentDigestPage", () => {
     expect(screen.getByText("人物影响事件")).toBeInTheDocument();
     expect(screen.getByText("结果复盘")).toBeInTheDocument();
     expect(screen.getByText(/Guidance was cut/)).toBeInTheDocument();
+    expect(screen.getByText(/推荐日期/)).toBeInTheDocument();
+    expect(screen.getByText(/数据缺失/)).toBeInTheDocument();
   });
 });

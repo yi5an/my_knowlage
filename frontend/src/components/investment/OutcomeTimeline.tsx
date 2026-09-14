@@ -30,7 +30,8 @@ export function OutcomeTimeline({ outcomes }: OutcomeTimelineProps) {
               <Typography.Text strong>
                 {outcome.opportunity_title ?? outcome.recommendation_id ?? "推荐结果"}
               </Typography.Text>
-              <Tag>{formatDate(outcome.observed_at)}</Tag>
+              <Tag>推荐日期：{formatDate(outcome.recommendation_date ?? outcome.observed_at)}</Tag>
+              <Tag>观察日期：{formatDate(outcome.observed_at)}</Tag>
               <Tag color={outcome.adopted ? "blue" : "default"}>
                 {outcome.adopted ? "已采用" : "未采用"}
               </Tag>
@@ -40,6 +41,9 @@ export function OutcomeTimeline({ outcomes }: OutcomeTimelineProps) {
               1D {windowValue(outcome, "1d")} · 3D {windowValue(outcome, "3d")} · 5D{" "}
               {windowValue(outcome, "5d")}
             </Typography.Text>
+            {outcome.metrics_reason && (
+              <Typography.Text type="secondary">{outcome.metrics_reason}</Typography.Text>
+            )}
             {(outcome.failure_reason ?? outcome.outcome_note) && (
               <Typography.Text type="danger">
                 失败原因：{outcome.failure_reason ?? outcome.outcome_note}
@@ -51,4 +55,3 @@ export function OutcomeTimeline({ outcomes }: OutcomeTimelineProps) {
     />
   );
 }
-

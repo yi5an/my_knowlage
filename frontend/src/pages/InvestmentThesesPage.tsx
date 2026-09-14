@@ -7,6 +7,7 @@ import {
   Input,
   List,
   Modal,
+  message,
   Select,
   Space,
   Spin,
@@ -19,6 +20,7 @@ import { WatchlistSelector } from "../components/investment/WatchlistSelector";
 import { ApiError } from "../services/client";
 import {
   investmentApi,
+  INVESTMENT_WORKSPACE_ID,
   type InvestmentClaim,
   type InvestmentThesis,
   type OpportunityCandidate,
@@ -89,17 +91,22 @@ export function InvestmentThesesPage() {
   };
 
   const handleRecordOutcome = async () => {
-    const values = await outcomeForm.validateFields();
-    await investmentApi.createRecommendationOutcome({
-      workspace_id: "ws_default",
-      opportunity_id: values.opportunity_id,
-      adopted: Boolean(values.adopted),
-      outcome_status: values.outcome_status,
-      outcome_note: values.outcome_note || null,
-      observed_at: new Date().toISOString(),
-    });
-    setOutcomeOpen(false);
-    outcomeForm.resetFields();
+    try {
+      const values = await outcomeForm.validateFields();
+      await investmentApi.createRecommendationOutcome({
+        workspace_id: INVESTMENT_WORKSPACE_ID,
+        opportunity_id: values.opportunity_id,
+        adopted: Boolean(values.adopted),
+        outcome_status: values.outcome_status,
+        outcome_note: values.outcome_note || null,
+        observed_at: new Date().toISOString(),
+      });
+      setOutcomeOpen(false);
+      outcomeForm.resetFields();
+    } catch (cause) {
+      if (cause && typeof cause === "object" && "errorFields" in cause) return;
+      message.error(cause instanceof ApiError ? cause.message : String(cause));
+    }
   };
 
   return (
@@ -124,7 +131,7 @@ export function InvestmentThesesPage() {
                       key="record-outcome"
                       size="small"
                       onClick={() => {
-                        const candidate = opportunityForThesis(t.id)[0] ?? opportunities[0];
+                        const candidate = opportunityForThesis(t.id)[0];
                         outcomeForm.setFieldsValue({ opportunity_id: candidate?.id });
                         setOutcomeOpen(true);
                       }}

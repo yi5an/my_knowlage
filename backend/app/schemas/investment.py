@@ -1053,7 +1053,9 @@ class InvestmentDigestPersonImpactEventResponse(PersonImpactEventResponse):
 class InvestmentDigestOutcomeResponse(RecommendationOutcomeResponse):
     """Outcome projection enriched for review timelines."""
 
+    recommendation_date: datetime | None = None
     failure_reason: str | None = None
+    metrics_reason: str | None = None
     opportunity_title: str | None = None
     catalyst_result: str | None = None
     realized_1d: float | None = None

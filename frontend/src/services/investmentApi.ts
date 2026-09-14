@@ -296,7 +296,9 @@ export interface PersonImpactDigestEvent extends PersonImpactEvent {
 
 export interface DigestOutcome extends RecommendationOutcome {
   reason?: string | null;
+  recommendation_date?: string | null;
   failure_reason?: string | null;
+  metrics_reason?: string | null;
   opportunity_title?: string | null;
   catalyst_result?: string | null;
   realized_1d?: number | null;
@@ -591,7 +593,8 @@ export interface CreateThemePayload {
 
 // --- API ------------------------------------------------------------------
 
-const WS = "ws_default";
+export const INVESTMENT_WORKSPACE_ID = "ws_default";
+const WS = INVESTMENT_WORKSPACE_ID;
 
 function buildQuery(params: Record<string, string | number | undefined>): string {
   const parts = Object.entries(params)
