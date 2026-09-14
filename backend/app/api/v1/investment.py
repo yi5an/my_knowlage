@@ -46,11 +46,14 @@ from app.schemas.investment import (
     PersonSourceCreate,
     PersonSourceResponse,
     PersonSourceUpdate,
-    RecommendationOutcomeCreate, RecommendationOutcomeResponse, UserInvestmentContextResponse, UserInvestmentContextUpdate,
     PollSourceResponse,
+    RecommendationOutcomeCreate,
+    RecommendationOutcomeResponse,
     SourceTraceResponse,
     ThemeSourceBindRequest,
     ThemeSourceResponse,
+    UserInvestmentContextResponse,
+    UserInvestmentContextUpdate,
     XCollectorCommandComplete,
     XCollectorCommandResponse,
     XCollectorHeartbeat,
@@ -65,20 +68,40 @@ from app.services.investment.x_web import XWebInvestmentService
 router = APIRouter(prefix="/investment", tags=["investment"])
 SERVICE_DEPENDENCY = Depends(get_investment_service)
 
-@router.get('/context', response_model=UserInvestmentContextResponse)
-async def get_context(workspace_id: str = 'ws_default', service: InvestmentService = SERVICE_DEPENDENCY):
+
+@router.get("/context", response_model=UserInvestmentContextResponse)
+async def get_context(
+    workspace_id: str = "ws_default", service: InvestmentService = SERVICE_DEPENDENCY
+):
     return service.get_user_context(workspace_id)
 
-@router.patch('/context', response_model=UserInvestmentContextResponse)
-async def update_context(payload: UserInvestmentContextUpdate, workspace_id: str = 'ws_default', service: InvestmentService = SERVICE_DEPENDENCY):
+
+@router.patch("/context", response_model=UserInvestmentContextResponse)
+async def update_context(
+    payload: UserInvestmentContextUpdate,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+):
     return service.update_user_context(workspace_id, payload)
 
-@router.post('/recommendation-outcomes', response_model=RecommendationOutcomeResponse, status_code=201)
-async def record_outcome(payload: RecommendationOutcomeCreate, service: InvestmentService = SERVICE_DEPENDENCY):
+
+@router.post(
+    "/recommendation-outcomes", response_model=RecommendationOutcomeResponse, status_code=201
+)
+async def record_outcome(
+    payload: RecommendationOutcomeCreate, service: InvestmentService = SERVICE_DEPENDENCY
+):
     return service.record_recommendation_outcome(payload)
 
-@router.get('/opportunities/{opportunity_id}/outcomes', response_model=list[RecommendationOutcomeResponse])
-async def list_outcomes(opportunity_id: str, workspace_id: str = 'ws_default', service: InvestmentService = SERVICE_DEPENDENCY):
+
+@router.get(
+    "/opportunities/{opportunity_id}/outcomes", response_model=list[RecommendationOutcomeResponse]
+)
+async def list_outcomes(
+    opportunity_id: str,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+):
     return service.list_recommendation_outcomes(opportunity_id, workspace_id)
 
 

@@ -64,14 +64,15 @@ from app.schemas.investment import (
     OpportunityReviewAction,
     PersonSourceCreate,
     PersonSourceUpdate,
+    RecommendationOutcomeCreate,
     SourceType,
     ThemeSourceBindRequest,
+    UserInvestmentContextUpdate,
 )
+from app.services.investment.outcomes import OutcomeService
 from app.services.investment.post_processing import enqueue_investment_post_processing
 from app.services.investment.repositories import InvestmentSourceRepository
 from app.services.investment.x_web import X_WEB_COLLECT_JOB_TYPE
-from app.services.investment.outcomes import OutcomeService
-from app.schemas.investment import RecommendationOutcomeCreate, UserInvestmentContextUpdate
 
 INVESTMENT_FETCH_JOB_TYPE = "investment_fetch"
 CHALLENGING_THESIS_IMPACTS = ("weakens", "contradicts")
@@ -147,10 +148,17 @@ class InvestmentService:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def get_user_context(self, workspace_id: str): return OutcomeService(self.session).get_user_context(workspace_id)
-    def update_user_context(self, workspace_id: str, payload: UserInvestmentContextUpdate): return OutcomeService(self.session).update_user_context(workspace_id, payload)
-    def record_recommendation_outcome(self, payload: RecommendationOutcomeCreate): return OutcomeService(self.session).record(payload)
-    def list_recommendation_outcomes(self, opportunity_id: str, workspace_id: str): return OutcomeService(self.session).list_for_opportunity(opportunity_id, workspace_id)
+    def get_user_context(self, workspace_id: str):
+        return OutcomeService(self.session).get_user_context(workspace_id)
+
+    def update_user_context(self, workspace_id: str, payload: UserInvestmentContextUpdate):
+        return OutcomeService(self.session).update_user_context(workspace_id, payload)
+
+    def record_recommendation_outcome(self, payload: RecommendationOutcomeCreate):
+        return OutcomeService(self.session).record(payload)
+
+    def list_recommendation_outcomes(self, opportunity_id: str, workspace_id: str):
+        return OutcomeService(self.session).list_for_opportunity(opportunity_id, workspace_id)
 
     # --- watchlist ---------------------------------------------------------
 
