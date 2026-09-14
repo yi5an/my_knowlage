@@ -74,6 +74,15 @@ def _string_values(value: object) -> list[str]:
     return []
 
 
+def _id_values(value: object) -> list[str]:
+    """Return database identifiers without ticker-style case normalization."""
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, list):
+        return [str(candidate).strip() for candidate in value if str(candidate).strip()]
+    return []
+
+
 class PersonImpactService:
     """Rebuild event observations and the uncertainty-aware person profile."""
 
@@ -315,9 +324,9 @@ class PersonImpactService:
             return symbols
         item_watchlist_id = getattr(item, "watchlist_id", None)
         watchlist_ids = (
-            _string_values(item_watchlist_id)
-            + _string_values(raw.get("watchlist_id"))
-            + _string_values(raw.get("watchlist_ids"))
+            _id_values(item_watchlist_id)
+            + _id_values(raw.get("watchlist_id"))
+            + _id_values(raw.get("watchlist_ids"))
         )
         if watchlist_ids:
             watchlist_symbols = list(

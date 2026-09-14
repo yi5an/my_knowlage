@@ -13,6 +13,7 @@ from app.infrastructure.models import (
     InvestmentPersonImpactProfile,
     InvestmentPersonSource,
     InvestmentSource,
+    InvestmentWatchlist,
     Workspace,
 )
 from app.services.investment.market_data import MarketBar, MarketDataError
@@ -233,6 +234,41 @@ def test_real_x_source_item_is_matched_by_author_account() -> None:
         )
         is not None
     )
+
+
+def test_watchlist_id_resolution_preserves_database_identifier_case() -> None:
+    session = _session()
+    _seed_person(session)
+    session.add(
+        InvestmentWatchlist(
+            id="wl_MixedCase",
+            workspace_id="ws_test",
+            name="Tracked stock",
+            watch_type="stock",
+            ticker="AAA",
+        )
+    )
+    session.commit()
+    item = _item(
+        session,
+        "watchlist_item",
+        "person_1",
+        None,
+        datetime(2026, 9, 14, tzinfo=UTC),
+        "watchlist statement",
+    )
+    item.raw_payload = {"watchlist_id": "wl_MixedCase"}
+    session.commit()
+    result = PersonImpactService(session, market_provider=FakeProvider()).rebuild_person("person_1")
+    assert result["profile"].sample_count == 1
+    event = session.scalar(
+        select(InvestmentPersonImpactEvent).where(
+            InvestmentPersonImpactEvent.source_item_id == "watchlist_item"
+        )
+    )
+    assert event is not None
+    assert event.symbol == "AAA"
+    assert event.event_status == "computed"
 
 
 def test_source_snapshot_is_auditable_and_immutable_across_rebuilds() -> None:
