@@ -279,11 +279,17 @@ export function InvestmentDigestPage() {
                               {new Date(event.event_at).toLocaleDateString("zh-CN")} · 基准 {event.benchmark_symbol}
                             </Typography.Text>
                             <Typography.Text>{event.reason ?? "暂无结论"}</Typography.Text>
-                            <Typography.Link
-                              href={`/investment/items?item_id=${encodeURIComponent(event.source_item_id)}`}
-                            >
-                              查看原文证据
-                            </Typography.Link>
+                            {event.source_url ? (
+                              <Typography.Link
+                                href={event.source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                查看原文证据
+                              </Typography.Link>
+                            ) : (
+                              <Typography.Text type="secondary">原文链接缺失</Typography.Text>
+                            )}
                           </Space>
                         }
                       />

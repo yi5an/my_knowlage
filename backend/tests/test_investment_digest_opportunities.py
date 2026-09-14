@@ -125,6 +125,10 @@ def test_digest_contains_opportunity_fields_and_failed_outcomes() -> None:
     assert digest["opportunities"][0]["market_reaction_state"] == "partially_reacted"
     assert digest["opportunities"][0]["reason"]
     assert digest["person_impact_events"][0]["windows"]["1d"]["excess_return"] == 0.02
+    assert (
+        digest["person_impact_events"][0]["source_url"]
+        == "https://x.com/analyst/status/1"
+    )
     assert digest["outcomes"][0]["outcome_status"] == "invalidated"
     assert digest["outcomes"][0]["failure_reason"] == "Guidance was cut after the event."
     assert digest["outcomes"][0]["recommendation_date"]

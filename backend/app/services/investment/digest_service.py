@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import AppError
 from app.infrastructure.models import (
     InvestmentAccountRecommendation,
+    InvestmentItem,
     InvestmentOpportunityCandidate,
     InvestmentPersonImpactEvent,
     InvestmentRecommendationOutcome,
@@ -115,9 +116,21 @@ class InvestmentDigestService:
                 .limit(20)
             )
         )
+        source_item_ids = {row.source_item_id for row in rows}
+        source_items = {
+            row.id: row
+            for row in self.session.scalars(
+                select(InvestmentItem).where(
+                    InvestmentItem.workspace_id == workspace_id,
+                    InvestmentItem.id.in_(source_item_ids or {"__none__"}),
+                )
+            )
+        }
         result: list[dict[str, Any]] = []
         for row in rows:
             payload = PersonImpactEventResponse.model_validate(row).model_dump(mode="json")
+            source_item = source_items.get(row.source_item_id)
+            payload["source_url"] = source_item.source_url if source_item is not None else None
             payload["reason"] = row.exclusion_reason or _EVENT_STATUS_REASON.get(
                 row.event_status,
                 f"事件状态：{row.event_status}；数据质量：{row.data_quality}。",

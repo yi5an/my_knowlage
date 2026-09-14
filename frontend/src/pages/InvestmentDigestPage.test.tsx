@@ -319,6 +319,7 @@ describe("InvestmentDigestPage", () => {
                   window_overlap: false,
                   event_status: "computed",
                   data_quality: "complete",
+                  source_url: "https://x.com/analyst/status/1",
                   windows: {
                     "1d": { "excess_return": 0.02 },
                     "3d": { "excess_return": 0.04 },
@@ -360,6 +361,9 @@ describe("InvestmentDigestPage", () => {
 
     expect(await screen.findByText("AI capex inflection")).toBeInTheDocument();
     expect(screen.getByText("人物影响事件")).toBeInTheDocument();
+    const evidenceLink = screen.getByRole("link", { name: "查看原文证据" });
+    expect(evidenceLink).toHaveAttribute("href", "https://x.com/analyst/status/1");
+    expect(evidenceLink).toHaveAttribute("target", "_blank");
     expect(screen.getByText("结果复盘")).toBeInTheDocument();
     expect(screen.getByText(/Guidance was cut/)).toBeInTheDocument();
     expect(screen.getByText(/推荐日期/)).toBeInTheDocument();

@@ -292,6 +292,7 @@ export interface InvestmentDigest {
 
 export interface PersonImpactDigestEvent extends PersonImpactEvent {
   reason?: string | null;
+  source_url?: string | null;
 }
 
 export interface DigestOutcome extends RecommendationOutcome {

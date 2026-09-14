@@ -1048,6 +1048,7 @@ class InvestmentDigestPersonImpactEventResponse(PersonImpactEventResponse):
     """Person-impact event projection with a human-readable status reason."""
 
     reason: str
+    source_url: str | None = None
 
 
 class InvestmentDigestOutcomeResponse(RecommendationOutcomeResponse):
