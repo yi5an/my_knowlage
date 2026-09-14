@@ -100,6 +100,33 @@ def test_person_impact_profile_allows_insufficient_sample_uncertainty() -> None:
     assert profile.uncertainty == "样本不足"
 
 
+def test_person_impact_profile_uses_non_nullable_uncertainty_default() -> None:
+    profile = PersonImpactProfileResponse(
+        person_source_id="person_1",
+        sample_count=0,
+        valid_sample_count=0,
+        excluded_sample_count=0,
+        sample_sufficient=False,
+        positive_event_count=0,
+        negative_event_count=0,
+        neutral_event_count=0,
+    )
+    assert profile.uncertainty == "样本不足"
+
+    with pytest.raises(ValidationError):
+        PersonImpactProfileResponse(
+            person_source_id="person_1",
+            sample_count=0,
+            valid_sample_count=0,
+            excluded_sample_count=0,
+            sample_sufficient=False,
+            positive_event_count=0,
+            negative_event_count=0,
+            neutral_event_count=0,
+            uncertainty=None,
+        )
+
+
 def test_recommendation_and_follow_contracts() -> None:
     recommendation = AccountRecommendationResponse(
         id="rec_1",

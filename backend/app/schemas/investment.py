@@ -958,7 +958,7 @@ class PersonImpactProfileResponse(BaseModel):
     average_lead_time_hours: float | None = None
     average_excess_return_1d: float | None = None
     stability_score: float | None = None
-    uncertainty: str | None = None
+    uncertainty: str = "样本不足"
 
 
 class AccountRecommendationResponse(BaseModel):
