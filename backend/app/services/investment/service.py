@@ -25,6 +25,7 @@ from app.infrastructure.models import (
     InvestmentDigestSnapshot,
     InvestmentFact,
     InvestmentItem,
+    InvestmentOpportunityCandidate,
     InvestmentPersonImpactEvent,
     InvestmentPersonImpactProfile,
     InvestmentPersonSource,
@@ -58,6 +59,9 @@ from app.schemas.investment import (
     InvestmentThesisUpdate,
     InvestmentWatchlistCreate,
     InvestmentWatchlistUpdate,
+    OpportunityCandidateCreate,
+    OpportunityPromotionResult,
+    OpportunityReviewAction,
     PersonSourceCreate,
     PersonSourceUpdate,
     SourceType,
@@ -444,6 +448,50 @@ class InvestmentService:
         self.session.commit()
         self.session.refresh(job)
         return job
+
+    # --- opportunity candidates ------------------------------------------
+
+    def promote_signal_to_opportunity(
+        self,
+        signal_id: str,
+        workspace_id: str,
+        payload: OpportunityCandidateCreate,
+    ) -> OpportunityPromotionResult:
+        from app.services.investment.opportunity import OpportunityService
+
+        return OpportunityService(self.session).promote_signal(
+            signal_id=signal_id,
+            workspace_id=workspace_id,
+            payload=payload,
+        )
+
+    def list_opportunities(
+        self,
+        workspace_id: str,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[InvestmentOpportunityCandidate]:
+        from app.services.investment.opportunity import OpportunityService
+
+        return OpportunityService(self.session).list_candidates(
+            workspace_id=workspace_id,
+            status=status,
+            limit=limit,
+        )
+
+    def review_opportunity(
+        self,
+        opportunity_id: str,
+        workspace_id: str,
+        payload: OpportunityReviewAction,
+    ) -> InvestmentOpportunityCandidate:
+        from app.services.investment.opportunity import OpportunityService
+
+        return OpportunityService(self.session).review(
+            opportunity_id=opportunity_id,
+            workspace_id=workspace_id,
+            action=payload,
+        )
 
     # --- source ------------------------------------------------------------
 

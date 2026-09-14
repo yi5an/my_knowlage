@@ -34,6 +34,10 @@ from app.schemas.investment import (
     InvestmentWatchlistCreate,
     InvestmentWatchlistResponse,
     InvestmentWatchlistUpdate,
+    OpportunityCandidateCreate,
+    OpportunityCandidateResponse,
+    OpportunityPromotionResult,
+    OpportunityReviewAction,
     PersonImpactEventResponse,
     PersonImpactProfileResponse,
     PersonSourceCreate,
@@ -579,6 +583,49 @@ async def refresh_signals(
             watchlist_id=watchlist_id,
         )
     ]
+
+
+# --- opportunity candidates ----------------------------------------------
+
+
+@router.get("/opportunities", response_model=list[OpportunityCandidateResponse])
+async def list_opportunities(
+    workspace_id: str = "ws_default",
+    status: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> list[OpportunityCandidateResponse]:
+    return [
+        OpportunityCandidateResponse.model_validate(candidate)
+        for candidate in service.list_opportunities(workspace_id, status, limit)
+    ]
+
+
+@router.post(
+    "/signals/{signal_id}/opportunity",
+    response_model=OpportunityPromotionResult,
+    status_code=201,
+)
+async def promote_signal_to_opportunity(
+    signal_id: str,
+    payload: OpportunityCandidateCreate,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> OpportunityPromotionResult:
+    result = service.promote_signal_to_opportunity(signal_id, workspace_id, payload)
+    return OpportunityPromotionResult.model_validate(result)
+
+
+@router.patch("/opportunities/{opportunity_id}", response_model=OpportunityCandidateResponse)
+async def review_opportunity(
+    opportunity_id: str,
+    payload: OpportunityReviewAction,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> OpportunityCandidateResponse:
+    return OpportunityCandidateResponse.model_validate(
+        service.review_opportunity(opportunity_id, workspace_id, payload)
+    )
 
 
 # --- source trace ----------------------------------------------------------
