@@ -230,7 +230,21 @@ export function InvestmentItemDrawer({
                 ))}
               </Space>
               <div>
-                <Typography.Text type="secondary">来源摘录 / 证据引用</Typography.Text>
+                <Typography.Text type="secondary">来源摘录</Typography.Text>
+                <Typography.Paragraph
+                  className="opportunity-drawer__source-excerpt"
+                  style={{ whiteSpace: "pre-wrap", margin: "4px 0" }}
+                >
+                  {opportunity.change_summary || "暂无来源摘录"}
+                </Typography.Paragraph>
+                {opportunity.impact_path && (
+                  <Typography.Text type="secondary">
+                    影响路径：{opportunity.impact_path}
+                  </Typography.Text>
+                )}
+              </div>
+              <div>
+                <Typography.Text type="secondary">证据引用</Typography.Text>
                 <Space direction="vertical" size={2} style={{ width: "100%", marginTop: 4 }}>
                   {opportunity.evidence_refs.length > 0 ? (
                     opportunity.evidence_refs.map((reference) => (
