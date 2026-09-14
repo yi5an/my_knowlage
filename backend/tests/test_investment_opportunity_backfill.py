@@ -37,6 +37,15 @@ class _FlatProvider:
         ]
 
 
+class _RecordingProvider(_FlatProvider):
+    def __init__(self) -> None:
+        self.ends = []
+
+    def daily_bars(self, symbol: str, start, end):  # noqa: ANN001
+        self.ends.append(end)
+        return super().daily_bars(symbol, start, end)
+
+
 def _session() -> Generator[Session, None, None]:
     engine = create_engine(
         "sqlite://",
@@ -244,13 +253,16 @@ def test_person_impact_rebuild_as_of_excludes_future_items_from_profile() -> Non
         )
     session.commit()
 
-    result = PersonImpactService(session, market_provider=_FlatProvider()).rebuild_person(
+    provider = _RecordingProvider()
+    result = PersonImpactService(session, market_provider=provider).rebuild_person(
         "person_history",
         workspace_id="ws_default",
         as_of=datetime(2026, 9, 15, tzinfo=UTC),
     )
 
     assert result["profile"].sample_count == 1
+    assert provider.ends
+    assert max(provider.ends) <= datetime(2026, 9, 15, tzinfo=UTC).date()
     event_ids = {
         event.source_item_id
         for event in session.scalars(select(InvestmentPersonImpactEvent))

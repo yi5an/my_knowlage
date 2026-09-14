@@ -232,7 +232,7 @@ class PersonImpactService:
                 counters["insufficient"] += 1
                 continue
             try:
-                result = self._compute_event(event, item)
+                result = self._compute_event(event, item, as_of=as_of)
             except (MarketDataError, RuntimeError) as exc:
                 self._mark_insufficient(event, f"market provider error: {exc}", item)
                 counters["insufficient"] += 1
@@ -484,11 +484,19 @@ class PersonImpactService:
         event.confidence = 0.0
         event.window_overlap = False
 
-    def _compute_event(self, event: InvestmentPersonImpactEvent, item: InvestmentItem):
+    def _compute_event(
+        self,
+        event: InvestmentPersonImpactEvent,
+        item: InvestmentItem,
+        *,
+        as_of: datetime | None = None,
+    ):
         event_date = event.event_at.date()
         lookback = min(max(int(self.settings.market_data_max_lookback_days), 6), 365)
         query_start = event_date - timedelta(days=min(lookback, 14))
         query_end = event_date + timedelta(days=lookback)
+        if as_of is not None:
+            query_end = min(query_end, as_of.date())
         asset_bars = self.market_provider.daily_bars(event.symbol, query_start, query_end)
         benchmark_bars = self.market_provider.daily_bars(
             event.benchmark_symbol, query_start, query_end
