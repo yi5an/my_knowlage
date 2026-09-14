@@ -160,4 +160,54 @@ describe("InvestmentClaimsPage", () => {
       );
     });
   });
+
+  it("renders clickable evidence URLs and an explicit missing-link state", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/investment/claims")) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "cl_evidence",
+              workspace_id: "ws_default",
+              claim_text: "Evidence links are reviewable",
+              required_evidence: [],
+              verification_status: "verified",
+              verification_summary: null,
+              source_item_id: "item_evidence",
+              evidence_doc_ids: ["item_evidence", "missing_doc", "https://example.com/direct"],
+            },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (u.includes("/investment/items")) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "item_evidence",
+              workspace_id: "ws_default",
+              title: "Evidence item",
+              source_url: "https://x.com/analyst/status/42",
+            },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (u.includes("/investment/watchlist")) return new Response(JSON.stringify([]), { status: 200 });
+      if (u.includes("/investment/theses")) return new Response(JSON.stringify([]), { status: 200 });
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByText("Evidence links are reviewable")).toBeInTheDocument();
+    const itemLink = screen.getByRole("link", { name: /item_evidence/ });
+    expect(itemLink).toHaveAttribute("href", "https://x.com/analyst/status/42");
+    expect(itemLink).toHaveAttribute("target", "_blank");
+    const directLink = screen.getByRole("link", { name: /example\.com\/direct/ });
+    expect(directLink).toHaveAttribute("href", "https://example.com/direct");
+    expect(screen.getByText(/原文链接缺失：missing_doc/)).toBeInTheDocument();
+  });
 });

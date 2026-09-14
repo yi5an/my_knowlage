@@ -21,6 +21,7 @@ import { ApiError } from "../services/client";
 import {
   investmentApi,
   type InvestmentClaim,
+  type InvestmentItem,
   type OpportunityCandidate,
   type InvestmentThesis,
   type InvestmentWatchlist,
@@ -61,6 +62,7 @@ export function InvestmentClaimsPage() {
   const [watchlists, setWatchlists] = useState<InvestmentWatchlist[]>([]);
   const [theses, setTheses] = useState<InvestmentThesis[]>([]);
   const [opportunities, setOpportunities] = useState<OpportunityCandidate[]>([]);
+  const [items, setItems] = useState<InvestmentItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -71,16 +73,18 @@ export function InvestmentClaimsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [c, w, t, o] = await Promise.all([
+      const [c, w, t, o, i] = await Promise.all([
         investmentApi.listClaims(),
         investmentApi.listWatchlist(),
         investmentApi.listTheses(),
         investmentApi.listOpportunityCandidates({ limit: 100 }).catch(() => []),
+        investmentApi.listItems({ limit: 200 }).catch(() => []),
       ]);
       setClaims(c);
       setWatchlists(w);
       setTheses(t);
       setOpportunities(o);
+      setItems(i);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -121,6 +125,20 @@ export function InvestmentClaimsPage() {
         candidate.evidence_refs.includes(claim.id) ||
         (claim.source_item_id ? candidate.evidence_refs.includes(claim.source_item_id) : false),
     );
+
+  const evidenceReferences = (claim: InvestmentClaim): string[] =>
+    Array.from(
+      new Set([
+        ...(claim.evidence_refs ?? []),
+        ...(claim.evidence_doc_ids ?? []),
+        ...(claim.source_item_id ? [claim.source_item_id] : []),
+      ]),
+    );
+
+  const evidenceUrl = (reference: string): string | null => {
+    if (/^https?:\/\//i.test(reference)) return reference;
+    return items.find((item) => item.id === reference)?.source_url ?? null;
+  };
 
   const handleVerify = async (claim: InvestmentClaim) => {
     setVerifying((current) => ({ ...current, [claim.id]: true }));
@@ -225,8 +243,27 @@ export function InvestmentClaimsPage() {
                           <span>需要证据：{c.required_evidence.join("；")}</span>
                         )}
                         {c.verification_summary && <span>{c.verification_summary}</span>}
-                        {c.evidence_doc_ids?.length > 0 && (
-                          <span>证据文档：{c.evidence_doc_ids.length} 篇</span>
+                        {evidenceReferences(c).length > 0 && (
+                          <Space direction="vertical" size={0}>
+                            <Typography.Text>证据文档：</Typography.Text>
+                            {evidenceReferences(c).map((reference) => {
+                              const url = evidenceUrl(reference);
+                              return url ? (
+                                <Typography.Link
+                                  key={reference}
+                                  href={url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  原文证据：{reference}
+                                </Typography.Link>
+                              ) : (
+                                <Typography.Text type="secondary" key={reference}>
+                                  原文链接缺失：{reference}
+                                </Typography.Text>
+                              );
+                            })}
+                          </Space>
                         )}
                         {linkedOpportunity(c) && (
                           <span>

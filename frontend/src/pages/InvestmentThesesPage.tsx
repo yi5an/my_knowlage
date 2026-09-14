@@ -15,6 +15,7 @@ import {
   Typography,
 } from "antd";
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { WatchlistSelector } from "../components/investment/WatchlistSelector";
 import { ApiError } from "../services/client";
@@ -28,6 +29,8 @@ import {
 } from "../services/investmentApi";
 
 export function InvestmentThesesPage() {
+  const [searchParams] = useSearchParams();
+  const workspaceId = searchParams.get("workspace_id") || INVESTMENT_WORKSPACE_ID;
   const [theses, setTheses] = useState<InvestmentThesis[]>([]);
   const [claims, setClaims] = useState<InvestmentClaim[]>([]);
   const [opportunities, setOpportunities] = useState<OpportunityCandidate[]>([]);
@@ -44,10 +47,10 @@ export function InvestmentThesesPage() {
     setError(null);
     try {
       const [t, w, c, o] = await Promise.all([
-        investmentApi.listTheses(),
-        investmentApi.listWatchlist(),
-        investmentApi.listClaims().catch(() => []),
-        investmentApi.listOpportunityCandidates({ limit: 100 }).catch(() => []),
+        investmentApi.listTheses(workspaceId),
+        investmentApi.listWatchlist(workspaceId),
+        investmentApi.listClaims(workspaceId).catch(() => []),
+        investmentApi.listOpportunityCandidates({ workspaceId, limit: 100 }).catch(() => []),
       ]);
       setTheses(t);
       setWatchlists(w);
@@ -58,7 +61,7 @@ export function InvestmentThesesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     void load();
@@ -67,6 +70,7 @@ export function InvestmentThesesPage() {
   const handleCreate = async () => {
     const values = await form.validateFields();
     await investmentApi.createThesis({
+      workspace_id: workspaceId,
       title: values.title,
       body: values.body,
       watchlist_id: values.watchlist_id,
@@ -94,7 +98,7 @@ export function InvestmentThesesPage() {
     try {
       const values = await outcomeForm.validateFields();
       await investmentApi.createRecommendationOutcome({
-        workspace_id: INVESTMENT_WORKSPACE_ID,
+        workspace_id: workspaceId,
         opportunity_id: values.opportunity_id,
         adopted: Boolean(values.adopted),
         outcome_status: values.outcome_status,

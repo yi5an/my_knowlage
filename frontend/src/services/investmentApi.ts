@@ -201,6 +201,7 @@ export interface InvestmentClaim {
   verification_status: VerificationStatus;
   verification_summary?: string | null;
   evidence_doc_ids: string[];
+  evidence_refs?: string[];
 }
 
 export interface InvestmentFact {
