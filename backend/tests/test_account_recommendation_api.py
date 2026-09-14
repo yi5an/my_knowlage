@@ -68,6 +68,7 @@ def test_recommendation_refresh_list_and_dismiss_api(client: TestClient) -> None
     )
     assert refreshed.status_code == 200, refreshed.text
     assert refreshed.json()[0]["handle"] == "analyst"
+    assert refreshed.json()[0]["person_source_id"] == "person_api"
     listed = client.get(
         "/api/v1/investment/account-recommendations?workspace_id=ws_default&platform=x"
     )

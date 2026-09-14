@@ -101,9 +101,18 @@ def test_person_impact_profile_workspace_person_is_unique(session: Session) -> N
 
 def test_recommendation_outcomes_append_without_overwriting_digest(session: Session) -> None:
     session.add(
+        InvestmentPersonSource(
+            id="person_rec_1",
+            workspace_id="ws_model",
+            platform="x",
+            handle="analyst",
+        )
+    )
+    session.add(
         InvestmentAccountRecommendation(
             id="rec_1",
             workspace_id="ws_model",
+            person_source_id="person_rec_1",
             platform="x",
             handle="analyst",
             recommendation_label="值得学习",
@@ -148,6 +157,28 @@ def test_recommendation_outcomes_append_without_overwriting_digest(session: Sess
     assert session.query(InvestmentRecommendationOutcome).count() == 2
 
 
+def test_account_recommendation_keeps_person_source_reference(session: Session) -> None:
+    person = InvestmentPersonSource(
+        id="person_ref",
+        workspace_id="ws_model",
+        platform="x",
+        handle="ref_account",
+    )
+    recommendation = InvestmentAccountRecommendation(
+        id="rec_ref",
+        workspace_id="ws_model",
+        person_source=person,
+        platform="x",
+        handle="ref_account",
+        recommendation_label="值得学习",
+        reason="evidence",
+    )
+    session.add(recommendation)
+    session.commit()
+
+    assert recommendation.person_source_id == "person_ref"
+
+
 def test_migration_revision_chain() -> None:
     migration_path = (
         Path(__file__).parents[1]
@@ -161,3 +192,18 @@ def test_migration_revision_chain() -> None:
     spec.loader.exec_module(migration)
     assert migration.revision == "202609140001"
     assert migration.down_revision == "202609030002"
+
+
+def test_person_source_reference_migration_revision_exists() -> None:
+    migration_path = (
+        Path(__file__).parents[1]
+        / "alembic"
+        / "versions"
+        / "202609140002_account_recommendation_person_source.py"
+    )
+    spec = spec_from_file_location("account_recommendation_person_source_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    assert migration.revision == "202609140002"
+    assert migration.down_revision == "202609140001"

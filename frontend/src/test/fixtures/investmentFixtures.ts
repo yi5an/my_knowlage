@@ -37,6 +37,7 @@ export const recommendationFixture = (
   const recommendation: AccountRecommendation = {
     id: "rec_fixture",
     workspace_id: "ws_default",
+    person_source_id: "person_fixture",
     platform: "x",
     handle: "signal_hunter",
     display_name: "Signal Hunter",

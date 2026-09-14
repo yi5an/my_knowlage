@@ -398,6 +398,7 @@ export interface PersonImpactProfile {
 export interface AccountRecommendation {
   id: string;
   workspace_id: string;
+  person_source_id?: string | null;
   platform: string;
   handle: string;
   display_name?: string | null;

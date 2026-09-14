@@ -130,6 +130,7 @@ class AccountRecommendationService:
                 existing = InvestmentAccountRecommendation(
                     id=_id("rec"),
                     workspace_id=workspace_id,
+                    person_source_id=source_person.id if source_person is not None else None,
                     platform=platform,
                     handle=handle,
                     display_name=item.get("display_name"),
@@ -144,6 +145,9 @@ class AccountRecommendationService:
                 )
                 self.session.add(existing)
             else:
+                existing.person_source_id = (
+                    source_person.id if source_person is not None else existing.person_source_id
+                )
                 existing.recommendation_label, existing.reason = label, reason
                 existing.sample_count, existing.evidence_count, existing.score_breakdown = (
                     sample,

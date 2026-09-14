@@ -30,6 +30,10 @@ describe("AccountDiscoveryPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "已关注" })).toBeInTheDocument();
     });
+    expect(screen.getByRole("link", { name: "查看人物影响" })).toHaveAttribute(
+      "href",
+      "/investment/person-sources/person_fixture/impact",
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/investment/account-recommendations/rec_fixture/follow"),
       expect.objectContaining({ method: "POST" }),

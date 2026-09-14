@@ -47,7 +47,7 @@ export function RecommendationCard({
   const followed = recommendation.status === "followed" || Boolean(recommendation.source_id);
   const sourceId = recommendation.source_id;
   const platform = recommendation.platform.toLowerCase();
-  const impactPersonId = sourceId ?? recommendation.id;
+  const impactPersonId = recommendation.person_source_id;
 
   return (
     <Card className="investment-recommendation-card" size="small">
@@ -104,9 +104,15 @@ export function RecommendationCard({
                 <Button size="small">查看最近内容</Button>
               </Link>
             )}
-            <Link to={`/investment/person-sources/${encodeURIComponent(impactPersonId)}/impact`}>
-              <Button size="small">查看人物影响</Button>
-            </Link>
+            {impactPersonId ? (
+              <Link to={`/investment/person-sources/${encodeURIComponent(impactPersonId)}/impact`}>
+                <Button size="small">查看人物影响</Button>
+              </Link>
+            ) : (
+              <Button size="small" disabled>
+                人物影响待关联
+              </Button>
+            )}
           </Space>
         ) : (
           <Button

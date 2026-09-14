@@ -969,6 +969,7 @@ class AccountRecommendationResponse(BaseModel):
 
     id: str
     workspace_id: str
+    person_source_id: str | None = None
     platform: str
     handle: str
     display_name: str | None = None

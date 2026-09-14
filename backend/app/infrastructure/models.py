@@ -1255,6 +1255,10 @@ class InvestmentAccountRecommendation(UpdatedTimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), nullable=False)
+    person_source_id: Mapped[str | None] = mapped_column(
+        ForeignKey("investment_person_source.id")
+    )
+    person_source: Mapped[InvestmentPersonSource | None] = relationship()
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
     handle: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(255))

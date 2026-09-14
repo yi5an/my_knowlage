@@ -93,6 +93,7 @@ def test_recommendation_reason_mentions_evidence_and_sample_count(session: Sessi
         session, web_search=FakeWebSearch([])
     ).refresh("ws_default")
     rec = next(item for item in recommendations if item.handle == "NickTimiraos")
+    assert rec.person_source_id == "person_timiraos"
     assert rec.sample_count == 12
     assert rec.evidence_count == 4
     assert "验证" in rec.reason
