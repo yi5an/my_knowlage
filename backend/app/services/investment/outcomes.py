@@ -72,7 +72,7 @@ class OutcomeService:
             return None
         return max(states, key=lambda state: cast(int, state.get("version", 0)))
 
-    def get_user_context(self, workspace_id: str):
+    def get_user_context(self, workspace_id: str) -> InvestmentUserContext:
         self._ensure_workspace(workspace_id)
         row = self.session.scalar(
             select(InvestmentUserContext).where(InvestmentUserContext.workspace_id == workspace_id)
@@ -85,7 +85,9 @@ class OutcomeService:
         self.session.refresh(row)
         return row
 
-    def update_user_context(self, workspace_id: str, payload: UserInvestmentContextUpdate):
+    def update_user_context(
+        self, workspace_id: str, payload: UserInvestmentContextUpdate
+    ) -> InvestmentUserContext:
         self._ensure_workspace(workspace_id)
         for model, ids in (
             (InvestmentTheme, payload.focus_theme_ids),
@@ -115,7 +117,9 @@ class OutcomeService:
         self.session.refresh(row)
         return row
 
-    def record(self, payload: RecommendationOutcomeCreate, workspace_id: str | None = None):
+    def record(
+        self, payload: RecommendationOutcomeCreate, workspace_id: str | None = None
+    ) -> InvestmentRecommendationOutcome:
         self._ensure_workspace(payload.workspace_id)
         if workspace_id is not None and workspace_id != payload.workspace_id:
             raise AppError("workspace_mismatch", "workspace_id does not match request", 400)
@@ -135,7 +139,9 @@ class OutcomeService:
         self.session.refresh(row)
         return row
 
-    def list_for_opportunity(self, opportunity_id: str, workspace_id: str):
+    def list_for_opportunity(
+        self, opportunity_id: str, workspace_id: str
+    ) -> list[InvestmentRecommendationOutcome]:
         self._ensure_workspace(workspace_id)
         obj = self.session.get(InvestmentOpportunityCandidate, opportunity_id)
         if not obj or obj.workspace_id != workspace_id:
@@ -151,7 +157,9 @@ class OutcomeService:
             )
         )
 
-    def recalculate_recommendation_weights(self, workspace_id: str, as_of: datetime | None = None):
+    def recalculate_recommendation_weights(
+        self, workspace_id: str, as_of: datetime | None = None
+    ) -> CalibrationResult:
         self._ensure_workspace(workspace_id)
         cutoff = as_of or datetime.now(UTC)
         rows = list(

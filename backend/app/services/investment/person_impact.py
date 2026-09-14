@@ -8,7 +8,7 @@ import logging
 import math
 from datetime import UTC, datetime, timedelta
 from statistics import mean, pstdev
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -24,7 +24,11 @@ from app.infrastructure.models import (
     InvestmentTheme,
     InvestmentWatchlist,
 )
-from app.services.investment.event_study import compute_event_windows, events_overlap
+from app.services.investment.event_study import (
+    EventStudyResult,
+    compute_event_windows,
+    events_overlap,
+)
 from app.services.investment.market_data import (
     MarketDataError,
     MarketDataProvider,
@@ -449,17 +453,20 @@ class PersonImpactService:
         digest = hashlib.sha256(
             f"{item.id}|{item.title}|{item.summary or ''}|{payload}".encode()
         ).hexdigest()
-        return _json_safe(
-            {
-                "item_id": item.id,
-                "title": item.title,
-                "summary": item.summary,
-                "source_url": item.source_url,
-                "published_at": item.published_at,
-                "event_at": item.event_at,
-                "raw_payload": item.raw_payload or {},
-                "digest": digest,
-            }
+        return cast(
+            dict[str, Any],
+            _json_safe(
+                {
+                    "item_id": item.id,
+                    "title": item.title,
+                    "summary": item.summary,
+                    "source_url": item.source_url,
+                    "published_at": item.published_at,
+                    "event_at": item.event_at,
+                    "raw_payload": item.raw_payload or {},
+                    "digest": digest,
+                }
+            ),
         )
 
     def _mark_insufficient(
@@ -490,7 +497,7 @@ class PersonImpactService:
         item: InvestmentItem,
         *,
         as_of: datetime | None = None,
-    ):
+    ) -> EventStudyResult:
         event_date = event.event_at.date()
         lookback = min(max(int(self.settings.market_data_max_lookback_days), 6), 365)
         query_start = event_date - timedelta(days=min(lookback, 14))

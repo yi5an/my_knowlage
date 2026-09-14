@@ -75,8 +75,8 @@ SERVICE_DEPENDENCY = Depends(get_investment_service)
 @router.get("/context", response_model=UserInvestmentContextResponse)
 async def get_context(
     workspace_id: str = "ws_default", service: InvestmentService = SERVICE_DEPENDENCY
-):
-    return service.get_user_context(workspace_id)
+) -> UserInvestmentContextResponse:
+    return UserInvestmentContextResponse.model_validate(service.get_user_context(workspace_id))
 
 
 @router.patch("/context", response_model=UserInvestmentContextResponse)
@@ -84,8 +84,10 @@ async def update_context(
     payload: UserInvestmentContextUpdate,
     workspace_id: str = "ws_default",
     service: InvestmentService = SERVICE_DEPENDENCY,
-):
-    return service.update_user_context(workspace_id, payload)
+) -> UserInvestmentContextResponse:
+    return UserInvestmentContextResponse.model_validate(
+        service.update_user_context(workspace_id, payload)
+    )
 
 
 @router.post(
@@ -95,8 +97,10 @@ async def record_outcome(
     payload: RecommendationOutcomeCreate,
     workspace_id: str = "ws_default",
     service: InvestmentService = SERVICE_DEPENDENCY,
-):
-    return service.record_recommendation_outcome(payload, workspace_id=workspace_id)
+) -> RecommendationOutcomeResponse:
+    return RecommendationOutcomeResponse.model_validate(
+        service.record_recommendation_outcome(payload, workspace_id=workspace_id)
+    )
 
 
 @router.get(
@@ -106,8 +110,11 @@ async def list_outcomes(
     opportunity_id: str,
     workspace_id: str = "ws_default",
     service: InvestmentService = SERVICE_DEPENDENCY,
-):
-    return service.list_opportunity_outcomes(opportunity_id, workspace_id)
+) -> list[RecommendationOutcomeResponse]:
+    return [
+        RecommendationOutcomeResponse.model_validate(outcome)
+        for outcome in service.list_opportunity_outcomes(opportunity_id, workspace_id)
+    ]
 
 
 @router.post("/account-recommendations/refresh", response_model=list[AccountRecommendationResponse])

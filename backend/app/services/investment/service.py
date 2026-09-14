@@ -21,6 +21,7 @@ from sqlalchemy.sql import ColumnElement, Select
 
 from app.core.errors import AppError
 from app.infrastructure.models import (
+    InvestmentAccountRecommendation,
     InvestmentClaim,
     InvestmentDigestSnapshot,
     InvestmentFact,
@@ -29,16 +30,19 @@ from app.infrastructure.models import (
     InvestmentPersonImpactEvent,
     InvestmentPersonImpactProfile,
     InvestmentPersonSource,
+    InvestmentRecommendationOutcome,
     InvestmentSignal,
     InvestmentSource,
     InvestmentSourceTrace,
     InvestmentTheme,
     InvestmentThemeSource,
     InvestmentThesis,
+    InvestmentUserContext,
     InvestmentWatchlist,
     TaskJob,
 )
 from app.schemas.investment import (
+    FollowRecommendationRequest,
     InvestmentClaimCreate,
     InvestmentClaimResponse,
     InvestmentClaimStatusAction,
@@ -151,21 +155,27 @@ class InvestmentService:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def get_user_context(self, workspace_id: str):
+    def get_user_context(self, workspace_id: str) -> InvestmentUserContext:
         return OutcomeService(self.session).get_user_context(workspace_id)
 
-    def update_user_context(self, workspace_id: str, payload: UserInvestmentContextUpdate):
+    def update_user_context(
+        self, workspace_id: str, payload: UserInvestmentContextUpdate
+    ) -> InvestmentUserContext:
         return OutcomeService(self.session).update_user_context(workspace_id, payload)
 
     def record_recommendation_outcome(
         self, payload: RecommendationOutcomeCreate, workspace_id: str | None = None
-    ):
+    ) -> InvestmentRecommendationOutcome:
         return OutcomeService(self.session).record(payload, workspace_id=workspace_id)
 
-    def list_opportunity_outcomes(self, opportunity_id: str, workspace_id: str):
+    def list_opportunity_outcomes(
+        self, opportunity_id: str, workspace_id: str
+    ) -> list[InvestmentRecommendationOutcome]:
         return OutcomeService(self.session).list_for_opportunity(opportunity_id, workspace_id)
 
-    def list_recommendation_outcomes(self, opportunity_id: str, workspace_id: str):
+    def list_recommendation_outcomes(
+        self, opportunity_id: str, workspace_id: str
+    ) -> list[InvestmentRecommendationOutcome]:
         return self.list_opportunity_outcomes(opportunity_id, workspace_id)
 
     # --- watchlist ---------------------------------------------------------
@@ -472,24 +482,33 @@ class InvestmentService:
         self.session.refresh(job)
         return job
 
-    def refresh_account_recommendations(self, workspace_id: str, theme_id: str | None = None):
+    def refresh_account_recommendations(
+        self, workspace_id: str, theme_id: str | None = None
+    ) -> list[InvestmentAccountRecommendation]:
         from app.services.investment.account_recommendation import AccountRecommendationService
 
         return AccountRecommendationService(self.session).refresh(workspace_id, theme_id)
 
     def list_account_recommendations(
         self, workspace_id: str, platform: str | None = None, theme_id: str | None = None
-    ):
+    ) -> list[InvestmentAccountRecommendation]:
         from app.services.investment.account_recommendation import AccountRecommendationService
 
         return AccountRecommendationService(self.session).list(workspace_id, platform, theme_id)
 
-    def dismiss_account_recommendation(self, rec_id: str, workspace_id: str):
+    def dismiss_account_recommendation(
+        self, rec_id: str, workspace_id: str
+    ) -> InvestmentAccountRecommendation:
         from app.services.investment.account_recommendation import AccountRecommendationService
 
         return AccountRecommendationService(self.session).dismiss(rec_id, workspace_id)
 
-    def follow_account_recommendation(self, rec_id: str, workspace_id: str, payload):
+    def follow_account_recommendation(
+        self,
+        rec_id: str,
+        workspace_id: str,
+        payload: FollowRecommendationRequest,
+    ) -> InvestmentSource:
         from app.services.investment.account_recommendation import AccountRecommendationService
 
         return AccountRecommendationService(self.session).follow(rec_id, workspace_id, payload)
