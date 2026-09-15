@@ -742,6 +742,46 @@ class InvestmentDashboardResponse(BaseModel):
     failed_job_count: int
 
 
+class InvestmentHealthState(StrEnum):
+    """Operational state for an investment source or workspace projection."""
+
+    HEALTHY = "healthy"
+    DELAYED = "delayed"
+    STALE = "stale"
+    FAILED = "failed"
+
+
+class InvestmentSourceHealthResponse(BaseModel):
+    """Read-only operational projection for one configured source."""
+
+    source_id: str
+    workspace_id: str
+    name: str
+    source_type: str
+    enabled: bool
+    health_state: InvestmentHealthState
+    last_success_at: datetime | None = None
+    last_failed_at: datetime | None = None
+    last_error: str | None = None
+    consecutive_failures: int = Field(default=0, ge=0)
+    newest_item_at: datetime | None = None
+    newest_item_age_hours: float | None = Field(default=None, ge=0)
+    freshness_age_hours: float | None = Field(default=None, ge=0)
+
+
+class InvestmentHealthResponse(BaseModel):
+    """Workspace-level source health and freshness projection."""
+
+    workspace_id: str
+    generated_at: datetime
+    freshness_state: InvestmentHealthState
+    newest_item_at: datetime | None = None
+    newest_item_age_hours: float | None = Field(default=None, ge=0)
+    delayed_after_hours: float = Field(default=24.0, gt=0)
+    stale_after_hours: float = Field(default=48.0, gt=0)
+    sources: list[InvestmentSourceHealthResponse] = Field(default_factory=list)
+
+
 class InvestmentDigestResponse(BaseModel):
     """Daily digest: aggregate counts + curated lists, no LLM generation."""
 
