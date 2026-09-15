@@ -16,6 +16,7 @@ from app.infrastructure.models import (
     TaskJob,
 )
 from app.schemas.investment import FollowRecommendationRequest
+from app.services.investment.account_seeds import seed_candidates
 from app.services.investment.x_web import X_WEB_COLLECT_JOB_TYPE
 
 
@@ -37,6 +38,7 @@ class AccountRecommendationService:
     def refresh(
         self, workspace_id: str, theme_id: str | None = None
     ) -> list[InvestmentAccountRecommendation]:
+        candidates: list[dict[str, Any]] = []
         people = list(
             self.session.scalars(
                 select(InvestmentPersonSource).where(
@@ -47,7 +49,6 @@ class AccountRecommendationService:
         )
         if theme_id:
             people = [p for p in people if theme_id in [str(v) for v in (p.theme_ids or [])]]
-        candidates: list[dict[str, Any]] = []
         for person_source in people:
             candidates.append(
                 {
@@ -59,6 +60,7 @@ class AccountRecommendationService:
                     "person": person_source,
                 }
             )
+        candidates.extend(seed_candidates(theme_id))
         if self.web_search is not None:
             query = f"investment research {theme_id or 'macro'} X YouTube institution"
             try:
@@ -68,10 +70,16 @@ class AccountRecommendationService:
             for item in search_results:
                 if isinstance(item, dict) and item.get("platform") and item.get("handle"):
                     candidates.append(dict(item))
+        return self._upsert_candidates(workspace_id, candidates)
+
+    def _upsert_candidates(
+        self, workspace_id: str, candidates: list[dict[str, Any]]
+    ) -> list[InvestmentAccountRecommendation]:
         out: list[InvestmentAccountRecommendation] = []
         for item in candidates:
             handle = str(item["handle"]).strip().lstrip("@")
             platform = str(item.get("platform", "x")).lower()
+            is_seed = item.get("seeded") is True
             existing = self.session.scalar(
                 select(InvestmentAccountRecommendation).where(
                     InvestmentAccountRecommendation.workspace_id == workspace_id,
@@ -79,6 +87,11 @@ class AccountRecommendationService:
                     InvestmentAccountRecommendation.handle == handle,
                 )
             )
+            if is_seed and existing is not None:
+                out.append(existing)
+                continue
+            if is_seed and self._source_exists(workspace_id, platform, handle, item.get("url")):
+                continue
             person_candidate = item.get("person")
             source_person: InvestmentPersonSource | None = (
                 person_candidate if isinstance(person_candidate, InvestmentPersonSource) else None
@@ -107,10 +120,11 @@ class AccountRecommendationService:
                 if sufficient and (profile and (profile.hit_rate or 0) >= 0.6)
                 else ("样本不足" if not sufficient else "值得学习")
             )
-            reason = f"主题相关账号；基于 {sample} 个事件样本和 {evidence} 条事实验证。"
+            reason = str(item.get("reason") or "主题相关账号。")
+            reason += f" 基于 {sample} 个事件样本和 {evidence} 条事实验证。"
             if self.web_search is None:
                 reason += " 搜索服务未配置，未扩展外部候选。"
-            scores = {
+            scores: dict[str, Any] = {
                 k: 0.0
                 for k in (
                     "theme_relevance",
@@ -126,6 +140,11 @@ class AccountRecommendationService:
             scores["sample_sufficiency"] = min(sample / 5, 1.0)
             if profile and profile.hit_rate is not None:
                 scores["validation_rate"] = float(profile.hit_rate)
+            seed_metadata = item.get("seed_metadata")
+            if isinstance(seed_metadata, dict):
+                scores["source_quality"] = float(item.get("source_quality") or 0.0)
+                scores["seeded"] = True
+                scores["seed_metadata"] = dict(seed_metadata)
             if existing is None:
                 existing = InvestmentAccountRecommendation(
                     id=_id("rec"),
@@ -148,7 +167,8 @@ class AccountRecommendationService:
                 existing.person_source_id = (
                     source_person.id if source_person is not None else existing.person_source_id
                 )
-                existing.recommendation_label, existing.reason = label, reason
+                # A refresh may recalculate metrics, but never overwrite a
+                # user's reason/status or other curation decisions.
                 existing.sample_count, existing.evidence_count, existing.score_breakdown = (
                     sample,
                     evidence,
@@ -166,9 +186,35 @@ class AccountRecommendationService:
         self.session.commit()
         return out
 
+    def _source_exists(
+        self, workspace_id: str, platform: str, handle: str, url: object
+    ) -> bool:
+        expected_type = {"x": "x_web", "youtube": "youtube", "institution": "manual"}.get(
+            platform, "manual"
+        )
+        normalized_url = str(url or "").rstrip("/").casefold()
+        sources = self.session.scalars(
+            select(InvestmentSource).where(
+                InvestmentSource.workspace_id == workspace_id,
+                InvestmentSource.source_type == expected_type,
+            )
+        )
+        return any(
+            _handle((source.config or {}).get("username")) == _handle(handle)
+            or bool(
+                normalized_url
+                and str(source.url or (source.config or {}).get("url") or "")
+                .rstrip("/")
+                .casefold()
+                == normalized_url
+            )
+            for source in sources
+        )
+
     def list(
         self, workspace_id: str, platform: str | None = None, theme_id: str | None = None
     ) -> list[InvestmentAccountRecommendation]:
+        self._upsert_candidates(workspace_id, seed_candidates(theme_id))
         stmt = select(InvestmentAccountRecommendation).where(
             InvestmentAccountRecommendation.workspace_id == workspace_id
         )

@@ -131,11 +131,13 @@ def test_refresh_preserves_calibration_snapshot(session: Session) -> None:
     assert refreshed[0].score_breakdown["calibration"] == calibration
 
 
-def test_refresh_does_not_fabricate_candidates_without_search_provider(session: Session) -> None:
+def test_refresh_uses_only_controlled_seeds_without_search_provider(session: Session) -> None:
     session.delete(session.get(InvestmentPersonSource, "person_timiraos"))
     session.commit()
     recommendations = AccountRecommendationService(session).refresh("ws_default")
-    assert recommendations == []
+    assert recommendations
+    assert {item.platform for item in recommendations} >= {"x", "youtube", "institution"}
+    assert all(item.score_breakdown.get("seeded") is True for item in recommendations)
 
 
 def test_follow_is_idempotent_and_never_calls_external_follow_api(session: Session) -> None:
