@@ -35,7 +35,10 @@ def _age_hours(value: datetime | None, now: datetime) -> float | None:
     value = _aware(value)
     if value is None:
         return None
-    return max(0.0, round((_aware(now) - value).total_seconds() / 3600.0, 2))  # type: ignore[operator]
+    now_aware = _aware(now)
+    if now_aware is None:
+        return None
+    return max(0.0, round((now_aware - value).total_seconds() / 3600.0, 2))
 
 
 def sanitize_failure_message(message: str | None) -> str | None:
@@ -56,16 +59,18 @@ def classify_source_health(
     delayed_after_hours: float = DEFAULT_DELAYED_AFTER_HOURS,
     stale_after_hours: float = DEFAULT_STALE_AFTER_HOURS,
 ) -> InvestmentHealthState:
-    now = _aware(now or datetime.now(UTC))
+    now_aware = _aware(now or datetime.now(UTC))
+    assert now_aware is not None
     if consecutive_failures > 0 and (
         last_success_at is None
         or (
-            _aware(last_failed_at) is not None
-            and _aware(last_failed_at) >= _aware(last_success_at)
+            (failed_at := _aware(last_failed_at)) is not None
+            and (success_at := _aware(last_success_at)) is not None
+            and failed_at >= success_at
         )
     ):
         return InvestmentHealthState.FAILED
-    age = _age_hours(last_success_at, now)
+    age = _age_hours(last_success_at, now_aware)
     if age is None or age >= stale_after_hours:
         return InvestmentHealthState.STALE
     if age >= delayed_after_hours:
@@ -99,7 +104,8 @@ class InvestmentHealthService:
         delayed_after_hours: float = DEFAULT_DELAYED_AFTER_HOURS,
         stale_after_hours: float = DEFAULT_STALE_AFTER_HOURS,
     ) -> InvestmentHealthResponse:
-        now = _aware(now or datetime.now(UTC))
+        now_aware = _aware(now or datetime.now(UTC))
+        assert now_aware is not None
         sources = list(
             self.session.scalars(
                 select(InvestmentSource)
@@ -155,6 +161,7 @@ class InvestmentHealthService:
                 delayed_after_hours=delayed_after_hours,
                 stale_after_hours=stale_after_hours,
             )
+            newest_item_aware = _aware(newest_item)
             views.append(
                 InvestmentSourceHealthResponse(
                     source_id=source.id,
@@ -171,9 +178,9 @@ class InvestmentHealthService:
                         else source.last_error
                     ),
                     consecutive_failures=consecutive,
-                    newest_item_at=_aware(newest_item),
-                    newest_item_age_hours=_age_hours(newest_item, now),
-                    freshness_age_hours=_age_hours(last_success_at, now),
+                    newest_item_at=newest_item_aware,
+                    newest_item_age_hours=_age_hours(newest_item_aware, now_aware),
+                    freshness_age_hours=_age_hours(last_success_at, now_aware),
                 )
             )
         newest_item_at = max(
@@ -182,10 +189,10 @@ class InvestmentHealthService:
         )
         return InvestmentHealthResponse(
             workspace_id=workspace_id,
-            generated_at=now,
+            generated_at=now_aware,
             freshness_state=aggregate_freshness_state([source.health_state for source in views]),
             newest_item_at=newest_item_at,
-            newest_item_age_hours=_age_hours(newest_item_at, now),
+            newest_item_age_hours=_age_hours(newest_item_at, now_aware),
             delayed_after_hours=delayed_after_hours,
             stale_after_hours=stale_after_hours,
             sources=views,
