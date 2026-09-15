@@ -155,6 +155,20 @@ export function AccountDiscoveryPage() {
           style={{ marginBottom: 16 }}
         />
       )}
+      {recommendations.some((row) => row.score_breakdown.seeded === true || row.score_breakdown.seeded === 1) && (
+        <Alert
+          type="info"
+          showIcon
+          message="内置种子推荐"
+          description="以下账号来自 KnowPilot 的内置高价值信息源清单，适合冷启动关注；它们不是外部搜索结果。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      {searchNotice && (
+        <Typography.Text type="secondary" style={{ display: "block", marginBottom: 16 }}>
+          外部搜索未配置：当前仅展示内置种子推荐和工作区已有账号。
+        </Typography.Text>
+      )}
       {error && !searchNotice && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
 
       <Tabs

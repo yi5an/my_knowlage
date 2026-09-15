@@ -18,6 +18,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
+import { InvestmentHealthPanel } from "../components/investment/InvestmentHealthPanel";
 import { buildSourcePayload, SOURCE_TYPE_LABEL } from "../components/investment/sourcePayload";
 import { ApiError } from "../services/client";
 import {
@@ -26,6 +27,7 @@ import {
   type InvestmentSource,
   type XCollectorState,
   type SourceType,
+  type InvestmentHealth,
 } from "../services/investmentApi";
 
 function fmtDate(s?: string | null): string {
@@ -52,6 +54,7 @@ export function InvestmentSourcesPage() {
   const [sources, setSources] = useState<InvestmentSource[]>([]);
   const [watchlist, setWatchlist] = useState<InvestmentWatchlist[]>([]);
   const [collectorStates, setCollectorStates] = useState<XCollectorState[]>([]);
+  const [health, setHealth] = useState<InvestmentHealth | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -64,12 +67,14 @@ export function InvestmentSourcesPage() {
     setLoading(true);
     setError(null);
     try {
-      const [nextSources, nextCollectorStates] = await Promise.all([
+      const [nextSources, nextCollectorStates, nextHealth] = await Promise.all([
         investmentApi.listSources(),
         investmentApi.listXCollectorStates(),
+        investmentApi.getHealth().catch(() => null),
       ]);
       setSources(nextSources);
       setCollectorStates(nextCollectorStates);
+      setHealth(nextHealth);
       setWatchlist(await investmentApi.listWatchlist());
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
@@ -247,6 +252,7 @@ export function InvestmentSourcesPage() {
         }
       />
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} showIcon />}
+      <InvestmentHealthPanel health={health} />
       <Card>
         <Spin spinning={loading}>
           {sources.length === 0 && !loading ? (

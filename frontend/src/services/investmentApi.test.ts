@@ -95,4 +95,18 @@ describe("investment opportunity discovery API", () => {
       },
     });
   });
+
+  it("loads operational health and retries an investment task", async () => {
+    await investmentApi.getHealth("ws/a");
+    await investmentApi.getTaskHealth({ workspaceId: "ws/a", limit: 7 });
+    await investmentApi.retryInvestmentTask("job/1", "ws/a");
+
+    expect(requestMock).toHaveBeenNthCalledWith(1, "/investment/health?workspace_id=ws%2Fa");
+    expect(requestMock).toHaveBeenNthCalledWith(2, "/investment/tasks/health?workspace_id=ws%2Fa&limit=7");
+    expect(requestMock).toHaveBeenNthCalledWith(
+      3,
+      "/investment/tasks/job%2F1/retry?workspace_id=ws%2Fa",
+      { method: "POST" },
+    );
+  });
 });

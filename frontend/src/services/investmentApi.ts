@@ -73,6 +73,7 @@ export type PersonImpactEventStatus =
   | "insufficient_data"
   | "excluded";
 export type MarketDataQuality = "complete" | "partial" | "missing" | "stale" | "invalid";
+export type InvestmentHealthState = "healthy" | "delayed" | "stale" | "failed";
 
 export interface InvestmentItem {
   id: string;
@@ -279,6 +280,71 @@ export interface InvestmentDashboard {
   failed_job_count: number;
 }
 
+export interface InvestmentSourceHealth {
+  source_id: string;
+  workspace_id: string;
+  name: string;
+  source_type: string;
+  enabled: boolean;
+  health_state: InvestmentHealthState;
+  last_success_at?: string | null;
+  last_failed_at?: string | null;
+  last_error?: string | null;
+  consecutive_failures: number;
+  newest_item_at?: string | null;
+  newest_item_age_hours?: number | null;
+  freshness_age_hours?: number | null;
+}
+
+export interface InvestmentHealth {
+  workspace_id: string;
+  generated_at: string;
+  freshness_state: InvestmentHealthState;
+  newest_item_at?: string | null;
+  newest_item_age_hours?: number | null;
+  delayed_after_hours: number;
+  stale_after_hours: number;
+  sources: InvestmentSourceHealth[];
+}
+
+export interface InvestmentTaskFailure {
+  job_id: string;
+  workspace_id: string;
+  job_type: string;
+  target_type?: string | null;
+  target_id?: string | null;
+  status: string;
+  error_message?: string | null;
+  finished_at?: string | null;
+  retryable: boolean;
+}
+
+export interface InvestmentTaskHealth {
+  workspace_id: string;
+  generated_at: string;
+  pending_count: number;
+  running_count: number;
+  succeeded_count: number;
+  failed_count: number;
+  recent_failures: InvestmentTaskFailure[];
+}
+
+export interface InvestmentTaskRetryResult {
+  workspace_id: string;
+  original_job_id: string;
+  job_id: string;
+  job_type: string;
+  status: string;
+  reused: boolean;
+}
+
+export interface OpportunityRefreshReport {
+  created_count: number;
+  skipped_count: number;
+  skip_reasons: Record<string, number>;
+  opportunities: OpportunityCandidate[];
+}
+
 export interface InvestmentDigest {
   counts: InvestmentDashboard;
   today_highlights: InvestmentItem[];
@@ -427,7 +493,7 @@ export interface AccountRecommendation {
   theme_ids: string[];
   recommendation_label: string;
   reason: string;
-  score_breakdown: Record<string, number>;
+  score_breakdown: Record<string, unknown>;
   sample_count: number;
   evidence_count: number;
   status: RecommendationStatus;
@@ -610,6 +676,18 @@ export const investmentApi = {
   getDashboard(workspaceId = WS): Promise<InvestmentDashboard> {
     return apiRequest(`/investment/dashboard?workspace_id=${workspaceId}`);
   },
+  getHealth(workspaceId = WS): Promise<InvestmentHealth> {
+    const q = buildQuery({ workspace_id: workspaceId });
+    return apiRequest(`/investment/health${q}`);
+  },
+  getTaskHealth(params: { workspaceId?: string; limit?: number } = {}): Promise<InvestmentTaskHealth> {
+    const q = buildQuery({ workspace_id: params.workspaceId ?? WS, limit: params.limit ?? 20 });
+    return apiRequest(`/investment/tasks/health${q}`);
+  },
+  retryInvestmentTask(jobId: string, workspaceId = WS): Promise<InvestmentTaskRetryResult> {
+    const q = buildQuery({ workspace_id: workspaceId });
+    return apiRequest(`/investment/tasks/${encodeURIComponent(jobId)}/retry${q}`, { method: "POST" });
+  },
 
   // macro calendar
   listMacroEvents(params: {
@@ -708,6 +786,10 @@ export const investmentApi = {
       limit: params.limit,
     });
     return apiRequest(`/investment/opportunities${q}`);
+  },
+  refreshOpportunities(workspaceId = WS): Promise<OpportunityRefreshReport> {
+    const q = buildQuery({ workspace_id: workspaceId });
+    return apiRequest(`/investment/opportunities/refresh${q}`, { method: "POST" });
   },
   reviewOpportunityCandidate(
     id: string,

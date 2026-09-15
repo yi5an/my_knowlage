@@ -39,4 +39,19 @@ describe("AccountDiscoveryPage", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("distinguishes built-in seed recommendations from unavailable external search", async () => {
+    const responder = recommendationFixture({
+      score_breakdown: { seeded: 1, source_quality: 0.9 },
+      reason: "KnowPilot 内置关注建议。搜索服务未配置，未扩展外部候选。",
+    });
+    vi.stubGlobal("fetch", vi.fn(responder));
+    render(
+      <MemoryRouter>
+        <AccountDiscoveryPage />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("内置种子推荐")).toBeInTheDocument();
+    expect(screen.getByText(/外部搜索未配置/)).toBeInTheDocument();
+  });
 });

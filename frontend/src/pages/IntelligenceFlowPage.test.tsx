@@ -56,4 +56,51 @@ describe("IntelligenceFlowPage", () => {
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("最新情报")).toBeInTheDocument());
   });
+
+  it("shows source freshness instead of claiming automatic 24-hour updates", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const value = String(url);
+        if (value.includes("/investment/health")) {
+          return new Response(JSON.stringify({
+            workspace_id: "ws_default",
+            generated_at: "2026-09-15T00:00:00Z",
+            freshness_state: "stale",
+            newest_item_at: "2026-09-12T00:00:00Z",
+            newest_item_age_hours: 72,
+            delayed_after_hours: 24,
+            stale_after_hours: 48,
+            sources: [{
+              source_id: "src_fed",
+              workspace_id: "ws_default",
+              name: "美联储 RSS",
+              source_type: "federal_reserve_rss",
+              enabled: true,
+              health_state: "stale",
+              last_success_at: "2026-09-12T00:00:00Z",
+              newest_item_at: "2026-09-12T00:00:00Z",
+              newest_item_age_hours: 72,
+              freshness_age_hours: 72,
+              consecutive_failures: 0,
+            }],
+          }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        return investmentFetchFixture({ opportunityCount: 0, itemCount: 0, signalCount: 0 })(url);
+      }),
+    );
+    renderPage();
+    expect((await screen.findAllByText("数据已过期")).length).toBeGreaterThan(0);
+    expect(screen.getByText(/美联储 RSS/)).toBeInTheDocument();
+    expect(screen.getByText(/最近成功/)).toBeInTheDocument();
+    expect(screen.queryByText("数据范围：过去 24 小时 · 自动更新")).not.toBeInTheDocument();
+  });
+
+  it("explains why there is no verifiable opportunity and offers refresh", async () => {
+    vi.stubGlobal("fetch", vi.fn(investmentFetchFixture({ opportunityCount: 0 })));
+    renderPage();
+    expect(await screen.findByText("暂无可验证机会")).toBeInTheDocument();
+    expect(screen.getByText(/当前没有可验证机会/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新机会" })).toBeInTheDocument();
+  });
 });

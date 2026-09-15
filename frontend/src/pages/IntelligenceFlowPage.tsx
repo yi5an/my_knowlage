@@ -20,11 +20,13 @@ import { Link } from "react-router-dom";
 import { InvestmentItemDrawer } from "../components/investment/InvestmentItemDrawer";
 import { InfoLayerTag } from "../components/investment/InfoLayerTag";
 import { OpportunityCandidateCard } from "../components/investment/OpportunityCandidateCard";
+import { InvestmentHealthPanel } from "../components/investment/InvestmentHealthPanel";
 import { ApiError } from "../services/client";
 import {
   investmentApi,
   type InfoLayer,
   type InvestmentDashboard,
+  type InvestmentHealth,
   type InvestmentItem,
   type InvestmentSignal,
   type OpportunityCandidate,
@@ -56,6 +58,7 @@ const ERROR_LABELS: Record<string, string> = {
   items: "最新情报",
   signals: "正在发生",
   opportunities: "机会候选",
+  health: "数据新鲜度",
 };
 
 type Endpoint = keyof typeof ERROR_LABELS;
@@ -102,6 +105,8 @@ export function IntelligenceFlowPage() {
   const [items, setItems] = useState<InvestmentItem[]>([]);
   const [signals, setSignals] = useState<InvestmentSignal[]>([]);
   const [opportunities, setOpportunities] = useState<OpportunityCandidate[]>([]);
+  const [health, setHealth] = useState<InvestmentHealth | null>(null);
+  const [refreshingOpportunities, setRefreshingOpportunities] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<Partial<Record<Endpoint, string>>>({});
   const [objectId, setObjectId] = useState("all");
@@ -119,11 +124,12 @@ export function IntelligenceFlowPage() {
       investmentApi.listItems({ limit: 30 }),
       investmentApi.listSignals({ limit: 20 }),
       investmentApi.listOpportunityCandidates({ limit: 20 }),
+      investmentApi.getHealth(),
     ]);
     const nextErrors: Partial<Record<Endpoint, string>> = {};
     const readError = (value: unknown): string =>
       value instanceof ApiError || value instanceof Error ? value.message : String(value);
-    const [dashboardResult, itemsResult, signalsResult, opportunitiesResult] = result;
+    const [dashboardResult, itemsResult, signalsResult, opportunitiesResult, healthResult] = result;
 
     if (dashboardResult.status === "fulfilled") setDashboard(dashboardResult.value);
     else nextErrors.dashboard = readError(dashboardResult.reason);
@@ -133,10 +139,25 @@ export function IntelligenceFlowPage() {
     else nextErrors.signals = readError(signalsResult.reason);
     if (opportunitiesResult.status === "fulfilled") setOpportunities(opportunitiesResult.value);
     else nextErrors.opportunities = readError(opportunitiesResult.reason);
+    if (healthResult.status === "fulfilled") setHealth(healthResult.value);
+    else nextErrors.health = readError(healthResult.reason);
 
     setErrors(nextErrors);
     setLoading(false);
   }, []);
+
+  const refreshOpportunities = async () => {
+    setRefreshingOpportunities(true);
+    try {
+      await investmentApi.refreshOpportunities();
+      await load();
+    } catch (error) {
+      const message = error instanceof ApiError || error instanceof Error ? error.message : String(error);
+      setErrors((current) => ({ ...current, opportunities: message }));
+    } finally {
+      setRefreshingOpportunities(false);
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -185,7 +206,9 @@ export function IntelligenceFlowPage() {
         extra={
           <Space direction="vertical" align="end" size={2}>
             <Typography.Text strong>{formatDate(new Date())}</Typography.Text>
-            <Typography.Text type="secondary">数据范围：过去 24 小时 · 自动更新</Typography.Text>
+            <Typography.Text type="secondary">
+              {health ? `数据状态：${health.freshness_state === "healthy" ? "正常" : health.freshness_state === "delayed" ? "延迟" : health.freshness_state === "stale" ? "已过期" : "失败"}` : "数据状态：加载中"}
+            </Typography.Text>
           </Space>
         }
       />
@@ -216,6 +239,8 @@ export function IntelligenceFlowPage() {
           }
         />
       )}
+
+      <InvestmentHealthPanel health={health} />
 
       <Row gutter={[12, 12]} className="intelligence-flow-metrics">
         <Col xs={12} md={6}>
@@ -267,7 +292,21 @@ export function IntelligenceFlowPage() {
           <Link to="/investment">查看全部机会候选</Link>
         </div>
         {highPriorityOpportunities.length === 0 ? (
-          <Card><Empty description="暂无高优先机会候选" /></Card>
+          <Card>
+            <Empty description="暂无可验证机会" />
+            <Space direction="vertical" align="center" style={{ width: "100%" }}>
+              <Typography.Text type="secondary">
+                {errors.opportunities
+                  ? `机会数据加载失败：${errors.opportunities}`
+                  : health && health.freshness_state !== "healthy"
+                    ? "数据源尚未提供足够新鲜的证据，暂不生成机会。"
+                    : "当前没有可验证机会；可以刷新信号和机会生成任务。"}
+              </Typography.Text>
+              <Button loading={refreshingOpportunities} onClick={() => void refreshOpportunities()}>
+                刷新机会
+              </Button>
+            </Space>
+          </Card>
         ) : (
           <div className="opportunity-card-grid">
             {highPriorityOpportunities.map((candidate) => (

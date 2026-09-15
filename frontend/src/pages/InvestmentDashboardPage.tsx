@@ -8,9 +8,11 @@ import {
   type InvestmentDashboard,
   type InvestmentItem,
   type InvestmentSignal,
+  type InvestmentTaskHealth,
 } from "../services/investmentApi";
 import { InfoLayerTag } from "../components/investment/InfoLayerTag";
 import { ReviewStatusTag } from "../components/investment/ReviewStatusTag";
+import { TaskHealthPanel } from "../components/investment/TaskHealthPanel";
 
 const EMPTY_DASHBOARD: InvestmentDashboard = {
   pending_review_count: 0,
@@ -67,6 +69,8 @@ export function InvestmentDashboardPage() {
   const [pending, setPending] = useState<InvestmentItem[]>([]);
   const [challengedItems, setChallengedItems] = useState<InvestmentItem[]>([]);
   const [signals, setSignals] = useState<InvestmentSignal[]>([]);
+  const [taskHealth, setTaskHealth] = useState<InvestmentTaskHealth | null>(null);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,22 +78,36 @@ export function InvestmentDashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const [d, items, digest, nextSignals] = await Promise.all([
+      const [d, items, digest, nextSignals, nextTaskHealth] = await Promise.all([
         investmentApi.getDashboard(),
         investmentApi.listItems({ actionStatus: "pending_review", limit: 10 }),
         investmentApi.getDigest(),
         investmentApi.listSignals({ limit: 5 }),
+        investmentApi.getTaskHealth().catch(() => null),
       ]);
       setDashboard(d);
       setPending(items);
       setChallengedItems(digest.challenged_items);
       setSignals(nextSignals);
+      setTaskHealth(nextTaskHealth);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const retryTask = async (jobId: string) => {
+    setRetryingJobId(jobId);
+    try {
+      await investmentApi.retryInvestmentTask(jobId);
+      setTaskHealth(await investmentApi.getTaskHealth());
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setRetryingJobId(null);
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -131,6 +149,12 @@ export function InvestmentDashboardPage() {
           <Typography.Text type="danger">{error}</Typography.Text>
         </Card>
       )}
+
+      <TaskHealthPanel
+        health={taskHealth}
+        retryingJobId={retryingJobId}
+        onRetry={(jobId) => void retryTask(jobId)}
+      />
 
       <Skeleton loading={loading} active>
         <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>

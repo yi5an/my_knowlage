@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -95,6 +95,46 @@ describe("InvestmentDashboardPage", () => {
     await waitFor(() => {
       expect(screen.getByText("暂无待处理信息")).toBeInTheDocument();
     });
+  });
+
+  it("shows task health counts and lets the user retry a failed investment task", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/investment/tasks/health")) {
+        return new Response(JSON.stringify({
+          workspace_id: "ws_default",
+          generated_at: "2026-09-15T00:00:00Z",
+          pending_count: 2,
+          running_count: 1,
+          succeeded_count: 7,
+          failed_count: 1,
+          recent_failures: [{
+            job_id: "job_failed",
+            workspace_id: "ws_default",
+            job_type: "investment_translation",
+            status: "failed",
+            error_message: "模型超时",
+            retryable: true,
+          }],
+        }), { status: 200 });
+      }
+      if (u.includes("/tasks/job_failed/retry")) {
+        expect(init?.method).toBe("POST");
+        return new Response(JSON.stringify({ job_id: "job_retry", original_job_id: "job_failed", job_type: "investment_translation", status: "pending", workspace_id: "ws_default", reused: false }), { status: 202 });
+      }
+      if (u.includes("/investment/dashboard")) {
+        return new Response(JSON.stringify({ pending_review_count: 0, pending_claims_count: 0, theses_challenged_count: 0, today_primary_count: 0, today_macro_count: 0, untranslated_count: 0, unextracted_count: 0, unsignaled_count: 0, failed_job_count: 1 }), { status: 200 });
+      }
+      if (u.includes("/investment/digest")) return new Response(JSON.stringify({ counts: {}, today_highlights: [], pending_claims: [], challenged_items: [], early_signals: [], pending_facts: [] }), { status: 200 });
+      if (u.includes("/investment/items") || u.includes("/investment/signals")) return new Response(JSON.stringify([]), { status: 200 });
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    expect(await screen.findByText("任务健康")).toBeInTheDocument();
+    expect(screen.getByText("模型超时")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/tasks/job_failed/retry"), expect.objectContaining({ method: "POST" })));
   });
 
   it("shows timestamps for pending investment items", async () => {
