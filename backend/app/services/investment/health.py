@@ -18,7 +18,7 @@ from app.schemas.investment import (
 _SECRET_RE = re.compile(
     r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization)\s*[:=]\s*([^\s,;&]+)"
 )
-_BEARER_RE = re.compile(r"(?i)(bearer\s+)[^\s,;&]+")
+_BEARER_RE = re.compile(r"(?i)bearer\s+[^\s,;&]+")
 DEFAULT_DELAYED_AFTER_HOURS = 24.0
 DEFAULT_STALE_AFTER_HOURS = 48.0
 
@@ -42,7 +42,7 @@ def sanitize_failure_message(message: str | None) -> str | None:
     """Remove common credential-shaped values before exposing a job error."""
     if not message:
         return None
-    sanitized = _BEARER_RE.sub(r"\1[REDACTED]", str(message))
+    sanitized = _BEARER_RE.sub("[REDACTED]", str(message))
     sanitized = _SECRET_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", sanitized)
     return sanitized[:500]
 
