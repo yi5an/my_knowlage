@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.infrastructure.database import Base, get_db_session
-from app.infrastructure.models import InvestmentSignal, Workspace
+from app.infrastructure.models import InvestmentSignal, InvestmentWatchlist, Workspace
 from app.main import app
 from app.services.investment.investment_dependencies import get_investment_service
 from app.services.investment.service import InvestmentService
@@ -31,9 +31,19 @@ def db_session() -> Generator[Session, None, None]:
         session.add(Workspace(id="ws_default", name="Default"))
         session.add(Workspace(id="ws_other", name="Other"))
         session.add(
+            InvestmentWatchlist(
+                id="wl_api",
+                workspace_id="ws_default",
+                name="API watchlist",
+                watch_type="stock",
+                ticker="NVDA",
+            )
+        )
+        session.add(
             InvestmentSignal(
                 id="sig_api",
                 workspace_id="ws_default",
+                watchlist_id="wl_api",
                 title="API signal",
                 summary="Demand remains strong.",
                 signal_type="catalyst",
@@ -50,6 +60,13 @@ def db_session() -> Generator[Session, None, None]:
                 market_feedback={
                     "market_reaction_state": "partially_reacted",
                     "reason": "one-day move observed",
+                    "catalyst": "Next earnings call",
+                    "expected_case": "Consensus underestimates demand persistence.",
+                    "market_case": "Price has not moved relative to SOXX.",
+                    "impact_path": "Orders -> revenue -> earnings revisions.",
+                    "risk_flags": ["valuation"],
+                    "invalidation_conditions": ["Orders cancel for two consecutive months"],
+                    "next_action": "Verify supplier lead times",
                 },
                 information_edge_score=0.5,
                 actionability="watch",
@@ -126,3 +143,16 @@ def test_api_review_and_workspace_isolation(client: TestClient) -> None:
     assert response.json()["status"] == "researching"
     assert response.json()["outcome"]["review_note"] == "verify supplier"
 
+
+def test_api_refreshes_opportunities_and_returns_report(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/investment/opportunities/refresh?workspace_id=ws_default"
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["created_count"] == 1
+    assert body["skipped_count"] == 0
+    assert body["skip_reasons"] == {}
+    assert body["opportunities"][0]["signal_id"] == "sig_api"
+    assert body["opportunities"][0]["asset_symbols"] == ["NVDA"]

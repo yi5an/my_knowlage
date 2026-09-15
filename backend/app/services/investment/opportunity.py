@@ -21,6 +21,7 @@ from app.schemas.investment import (
     OpportunityCandidateCreate,
     OpportunityCandidateResponse,
     OpportunityPromotionResult,
+    OpportunityRefreshReport,
     OpportunityReviewAction,
     OpportunityStatus,
     OpportunityType,
@@ -145,6 +146,113 @@ class OpportunityService:
 
     def __init__(self, session: Session) -> None:
         self.session = session
+
+    def refresh(self, workspace_id: str) -> OpportunityRefreshReport:
+        """Promote active signals using only explicit, workspace-scoped mappings."""
+        signals = list(
+            self.session.scalars(
+                select(InvestmentSignal).where(
+                    InvestmentSignal.workspace_id == workspace_id,
+                    InvestmentSignal.is_active.is_(True),
+                )
+            )
+        )
+        created: list[OpportunityCandidateResponse] = []
+        skip_reasons: dict[str, int] = {}
+        for signal in signals:
+            existing = self.session.scalar(
+                select(InvestmentOpportunityCandidate).where(
+                    InvestmentOpportunityCandidate.workspace_id == workspace_id,
+                    InvestmentOpportunityCandidate.signal_id == signal.id,
+                )
+            )
+            if existing is not None:
+                _count_skip(skip_reasons, "already_promoted")
+                continue
+            symbols = self._explicit_asset_symbols(signal)
+            if not symbols:
+                _count_skip(skip_reasons, "missing_asset_mapping")
+                continue
+            market_state, _ = _market_reaction(signal.market_feedback)
+            if market_state == "unknown":
+                _count_skip(skip_reasons, "market_reaction_unknown")
+                continue
+            evidence_refs = _unique_strings([*(signal.fact_ids or []), *(signal.item_ids or [])])
+            if not evidence_refs:
+                _count_skip(skip_reasons, "missing_evidence")
+                continue
+            payload, missing_reason = self._refresh_payload(
+                signal, symbols, evidence_refs, market_state
+            )
+            if payload is None:
+                _count_skip(skip_reasons, missing_reason or "missing_opportunity_fields")
+                continue
+            result = self.promote_signal(signal.id, workspace_id, payload)
+            if result.created and result.opportunity is not None:
+                created.append(result.opportunity)
+            else:
+                _count_skip(skip_reasons, result.reason or "not_promoted")
+        return OpportunityRefreshReport(
+            created_count=len(created),
+            skipped_count=sum(skip_reasons.values()),
+            skip_reasons=skip_reasons,
+            opportunities=created,
+        )
+
+    def _explicit_asset_symbols(self, signal: InvestmentSignal) -> list[str]:
+        if signal.watchlist_id:
+            watchlist = self.session.get(InvestmentWatchlist, signal.watchlist_id)
+            if watchlist is not None and watchlist.workspace_id == signal.workspace_id:
+                symbols = _symbols(watchlist.ticker)
+                if symbols:
+                    return symbols
+        if signal.theme_id:
+            theme = self.session.get(InvestmentTheme, signal.theme_id)
+            if theme is not None and theme.workspace_id == signal.workspace_id:
+                symbols = _symbols(theme.tickers)
+                if symbols:
+                    return symbols
+        return _market_feedback_symbols(signal.market_feedback)
+
+    def _refresh_payload(
+        self,
+        signal: InvestmentSignal,
+        symbols: list[str],
+        evidence_refs: list[str],
+        market_state: str,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        feedback = signal.market_feedback if isinstance(signal.market_feedback, Mapping) else {}
+        opportunity_fields = feedback.get("opportunity")
+        source = opportunity_fields if isinstance(opportunity_fields, Mapping) else feedback
+        required = (
+            ("catalyst", "missing_catalyst"),
+            ("expected_case", "missing_expected_case"),
+            ("market_case", "missing_market_case"),
+            ("impact_path", "missing_impact_path"),
+            ("risk_flags", "missing_risk_flags"),
+            ("invalidation_conditions", "missing_invalidation_conditions"),
+            ("next_action", "missing_next_action"),
+        )
+        for field, reason in required:
+            if not _nonempty(source.get(field)):
+                return None, reason
+        return {
+            "title": signal.title,
+            "asset_symbols": symbols,
+            "theme_id": signal.theme_id,
+            "watchlist_id": signal.watchlist_id,
+            "opportunity_type": _safe_type(signal.signal_type),
+            "change_summary": signal.summary,
+            "expected_case": str(source["expected_case"]).strip(),
+            "market_case": str(source["market_case"]).strip(),
+            "impact_path": str(source["impact_path"]).strip(),
+            "catalyst": str(source["catalyst"]).strip(),
+            "risk_flags": _clean_list(source["risk_flags"]),
+            "invalidation_conditions": _clean_list(source["invalidation_conditions"]),
+            "next_action": str(source["next_action"]).strip(),
+            "evidence_refs": evidence_refs,
+            "confidence": signal.confidence,
+        }, None
 
     def promote_signal(
         self,
@@ -323,7 +431,7 @@ class OpportunityService:
         if theme is not None:
             theme_symbols = {str(item).strip().upper() for item in (theme.tickers or [])}
             return bool(theme_symbols and set(symbols).issubset(theme_symbols))
-        return False
+        return symbols == _market_feedback_symbols(signal.market_feedback)
 
     def _score(
         self,
@@ -384,6 +492,38 @@ def _clean_list(value: object) -> list[str]:
     if not isinstance(value, (list, tuple, set)):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _count_skip(reasons: dict[str, int], reason: str) -> None:
+    reasons[reason] = reasons.get(reason, 0) + 1
+
+
+def _unique_strings(values: object) -> list[str]:
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    result: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _market_feedback_symbols(feedback: object) -> list[str]:
+    if not isinstance(feedback, Mapping):
+        return []
+    mapping = feedback.get("asset_mapping")
+    source: Mapping[str, Any] = mapping if isinstance(mapping, Mapping) else feedback
+    for key in ("asset_symbols", "symbols", "tickers", "ticker", "symbol"):
+        symbols = _symbols(source.get(key))
+        if symbols:
+            return symbols
+    return []
+
+
+def _feedback_list(feedback: Mapping[str, Any], key: str, fallback: list[str]) -> list[str]:
+    values = _clean_list(feedback.get(key))
+    return values or fallback
 
 
 def _bounded(value: float) -> float:

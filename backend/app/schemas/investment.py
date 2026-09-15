@@ -1007,6 +1007,15 @@ class OpportunityPromotionResult(BaseModel):
     opportunity: OpportunityCandidateResponse | None = None
 
 
+class OpportunityRefreshReport(BaseModel):
+    """Stable result for deterministic signal-to-opportunity promotion."""
+
+    created_count: int = Field(ge=0)
+    skipped_count: int = Field(ge=0)
+    skip_reasons: dict[str, int] = Field(default_factory=dict)
+    opportunities: list[OpportunityCandidateResponse] = Field(default_factory=list)
+
+
 class PersonImpactEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

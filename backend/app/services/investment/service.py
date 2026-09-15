@@ -68,6 +68,7 @@ from app.schemas.investment import (
     InvestmentWatchlistUpdate,
     OpportunityCandidateCreate,
     OpportunityPromotionResult,
+    OpportunityRefreshReport,
     OpportunityReviewAction,
     PersonSourceCreate,
     PersonSourceUpdate,
@@ -659,6 +660,11 @@ class InvestmentService:
             workspace_id=workspace_id,
             payload=payload,
         )
+
+    def refresh_opportunities(self, workspace_id: str) -> OpportunityRefreshReport:
+        from app.services.investment.opportunity import OpportunityService
+
+        return OpportunityService(self.session).refresh(workspace_id)
 
     def list_opportunities(
         self,

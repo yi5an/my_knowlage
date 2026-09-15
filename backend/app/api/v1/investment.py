@@ -46,6 +46,7 @@ from app.schemas.investment import (
     OpportunityCandidateCreate,
     OpportunityCandidateResponse,
     OpportunityPromotionResult,
+    OpportunityRefreshReport,
     OpportunityReviewAction,
     PersonImpactEventResponse,
     PersonImpactProfileResponse,
@@ -760,6 +761,14 @@ async def list_opportunities(
         OpportunityCandidateResponse.model_validate(candidate)
         for candidate in service.list_opportunities(workspace_id, status, limit)
     ]
+
+
+@router.post("/opportunities/refresh", response_model=OpportunityRefreshReport)
+async def refresh_opportunities(
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> OpportunityRefreshReport:
+    return OpportunityRefreshReport.model_validate(service.refresh_opportunities(workspace_id))
 
 
 @router.post(
