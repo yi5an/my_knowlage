@@ -782,6 +782,43 @@ class InvestmentHealthResponse(BaseModel):
     sources: list[InvestmentSourceHealthResponse] = Field(default_factory=list)
 
 
+class InvestmentTaskFailureResponse(BaseModel):
+    """Safe projection of a failed investment task for the recovery center."""
+
+    job_id: str
+    workspace_id: str
+    job_type: str
+    target_type: str | None = None
+    target_id: str | None = None
+    status: str
+    error_message: str | None = None
+    finished_at: datetime | None = None
+    retryable: bool = False
+
+
+class InvestmentTaskHealthResponse(BaseModel):
+    """Workspace-scoped counts and safe recent failures for investment jobs."""
+
+    workspace_id: str
+    generated_at: datetime
+    pending_count: int = Field(default=0, ge=0)
+    running_count: int = Field(default=0, ge=0)
+    succeeded_count: int = Field(default=0, ge=0)
+    failed_count: int = Field(default=0, ge=0)
+    recent_failures: list[InvestmentTaskFailureResponse] = Field(default_factory=list)
+
+
+class InvestmentTaskRetryResponse(BaseModel):
+    """Result of an idempotent retry request."""
+
+    workspace_id: str
+    original_job_id: str
+    job_id: str
+    job_type: str
+    status: str
+    reused: bool = False
+
+
 class InvestmentDigestResponse(BaseModel):
     """Daily digest: aggregate counts + curated lists, no LLM generation."""
 

@@ -1241,3 +1241,179 @@ def test_digest_snapshot_persists_current_digest(client: TestClient, db_session:
     )
     assert listed.status_code == 200
     assert [snapshot["id"] for snapshot in listed.json()] == [body["id"]]
+
+
+# --- operational health and task recovery ---------------------------------
+
+
+def test_investment_health_endpoint_projects_workspace_sources(client: TestClient):
+    source = client.post(
+        "/api/v1/investment/sources",
+        json={
+            "source_type": "x_web",
+            "name": "Health check source",
+            "config": {"mode": "account", "username": "healthcheck"},
+            "poll_interval_seconds": 900,
+        },
+    ).json()
+
+    response = client.get("/api/v1/investment/health?workspace_id=ws_default")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["workspace_id"] == "ws_default"
+    assert body["freshness_state"] == "stale"
+    assert [entry["source_id"] for entry in body["sources"]] == [source["id"]]
+
+
+def test_task_health_counts_only_investment_jobs_and_sanitizes_failures(
+    client: TestClient,
+    db_session: Session,
+):
+    for job_id, job_type, status in (
+        ("health_pending", "investment_translation", "pending"),
+        ("health_running", "investment_fact_extract", "running"),
+        ("health_succeeded", "investment_classification", "succeeded"),
+        ("health_failed", "investment_fetch", "failed"),
+    ):
+        db_session.add(
+            TaskJob(
+                id=job_id,
+                workspace_id="ws_default",
+                job_type=job_type,
+                target_type="investment_source",
+                target_id="source_health",
+                status=status,
+                input={"api_key": "must-not-be-returned", "source_id": "source_health"},
+                error_message=(
+                    "provider password=hunter2 authorization: Bearer top-secret"
+                    if status == "failed"
+                    else None
+                ),
+                finished_at=datetime.now(UTC) if status in {"succeeded", "failed"} else None,
+            )
+        )
+    db_session.add(
+        TaskJob(
+            id="health_unrelated",
+            workspace_id="ws_default",
+            job_type="youtube_summary",
+            target_type="video",
+            target_id="video_health",
+            status="failed",
+            error_message="not part of investment task health",
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/investment/tasks/health?workspace_id=ws_default")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["workspace_id"] == "ws_default"
+    assert body["pending_count"] == 1
+    assert body["running_count"] == 1
+    assert body["succeeded_count"] == 1
+    assert body["failed_count"] == 1
+    assert len(body["recent_failures"]) == 1
+    failure = body["recent_failures"][0]
+    assert failure["job_id"] == "health_failed"
+    assert failure["job_type"] == "investment_fetch"
+    assert failure["retryable"] is True
+    assert failure["error_message"] == (
+        "provider password=[REDACTED] authorization=[REDACTED]"
+    )
+    assert "input" not in failure
+    assert "hunter2" not in response.text
+    assert "top-secret" not in response.text
+    assert "must-not-be-returned" not in response.text
+
+
+def test_retry_failed_investment_job_is_workspace_scoped_safe_and_idempotent(
+    client: TestClient,
+    db_session: Session,
+):
+    failed = TaskJob(
+        id="retry_failed_translation",
+        workspace_id="ws_default",
+        job_type="investment_translation",
+        target_type="investment_source",
+        target_id="source_retry",
+        status="failed",
+        input={
+            "workspace_id": "ws_default",
+            "source_id": "source_retry",
+            "api_key": "secret-key",
+            "nested": {"access_token": "secret-token"},
+        },
+        error_message="timeout",
+        finished_at=datetime.now(UTC),
+    )
+    db_session.add(failed)
+    db_session.commit()
+
+    first = client.post(
+        "/api/v1/investment/tasks/retry_failed_translation/retry"
+        "?workspace_id=ws_default"
+    )
+    second = client.post(
+        "/api/v1/investment/tasks/retry_failed_translation/retry"
+        "?workspace_id=ws_default"
+    )
+
+    assert first.status_code == 202, first.text
+    assert second.status_code == 202, second.text
+    assert first.json()["original_job_id"] == failed.id
+    assert first.json()["job_id"] == second.json()["job_id"]
+    assert first.json()["reused"] is False
+    assert second.json()["reused"] is True
+    retried = db_session.get(TaskJob, first.json()["job_id"])
+    assert retried is not None
+    assert retried.status == "pending"
+    assert retried.input == {"workspace_id": "ws_default", "source_id": "source_retry"}
+    assert db_session.get(TaskJob, failed.id).status == "failed"  # type: ignore[union-attr]
+
+    wrong_workspace = client.post(
+        "/api/v1/investment/tasks/retry_failed_translation/retry"
+        "?workspace_id=ws_other"
+    )
+    assert wrong_workspace.status_code == 404
+
+
+def test_retry_rejects_unsupported_or_non_failed_jobs(
+    client: TestClient,
+    db_session: Session,
+):
+    db_session.add_all(
+        [
+            TaskJob(
+                id="retry_unsupported",
+                workspace_id="ws_default",
+                job_type="youtube_summary",
+                target_type="video",
+                target_id="video_retry",
+                status="failed",
+            ),
+            TaskJob(
+                id="retry_succeeded",
+                workspace_id="ws_default",
+                job_type="investment_fetch",
+                target_type="investment_source",
+                target_id="source_done",
+                status="succeeded",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    unsupported = client.post(
+        "/api/v1/investment/tasks/retry_unsupported/retry?workspace_id=ws_default"
+    )
+    not_failed = client.post(
+        "/api/v1/investment/tasks/retry_succeeded/retry?workspace_id=ws_default"
+    )
+
+    assert unsupported.status_code == 400
+    assert unsupported.json()["error"]["code"] == "unsupported_investment_job_type"
+    assert not_failed.status_code == 409
+    assert not_failed.json()["error"]["code"] == "investment_job_not_failed"

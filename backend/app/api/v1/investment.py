@@ -24,6 +24,7 @@ from app.schemas.investment import (
     InvestmentDigestSnapshotResponse,
     InvestmentFactResponse,
     InvestmentFetchJobResponse,
+    InvestmentHealthResponse,
     InvestmentItemCreate,
     InvestmentItemResponse,
     InvestmentItemUpdate,
@@ -31,6 +32,8 @@ from app.schemas.investment import (
     InvestmentSourceCreate,
     InvestmentSourceResponse,
     InvestmentSourceUpdate,
+    InvestmentTaskHealthResponse,
+    InvestmentTaskRetryResponse,
     InvestmentThemeCreate,
     InvestmentThemeResponse,
     InvestmentThemeUpdate,
@@ -64,6 +67,7 @@ from app.schemas.investment import (
     XPostBatchImportRequest,
     XPostBatchImportResponse,
 )
+from app.services.investment.health import InvestmentHealthService
 from app.services.investment.investment_dependencies import get_investment_service
 from app.services.investment.service import InvestmentService
 from app.services.investment.x_web import XWebInvestmentService
@@ -331,6 +335,39 @@ async def dashboard(
     service: InvestmentService = SERVICE_DEPENDENCY,
 ) -> InvestmentDashboardResponse:
     return InvestmentDashboardResponse(**service.dashboard(workspace_id))
+
+
+@router.get("/health", response_model=InvestmentHealthResponse)
+async def investment_health(
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentHealthResponse:
+    """Return source freshness and failure health without external requests."""
+    return InvestmentHealthService(service.session).project(workspace_id)
+
+
+@router.get("/tasks/health", response_model=InvestmentTaskHealthResponse)
+async def investment_task_health(
+    workspace_id: str = "ws_default",
+    limit: int = Query(default=20, ge=1, le=100),
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentTaskHealthResponse:
+    return InvestmentTaskHealthResponse.model_validate(
+        service.task_health(workspace_id, limit=limit)
+    )
+
+
+@router.post(
+    "/tasks/{job_id}/retry",
+    response_model=InvestmentTaskRetryResponse,
+    status_code=202,
+)
+async def retry_investment_task(
+    job_id: str,
+    workspace_id: str = "ws_default",
+    service: InvestmentService = SERVICE_DEPENDENCY,
+) -> InvestmentTaskRetryResponse:
+    return InvestmentTaskRetryResponse.model_validate(service.retry_task(job_id, workspace_id))
 
 
 @router.get("/macro-events", response_model=list[InvestmentItemResponse])

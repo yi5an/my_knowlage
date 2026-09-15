@@ -76,12 +76,22 @@ from app.schemas.investment import (
     ThemeSourceBindRequest,
     UserInvestmentContextUpdate,
 )
+from app.services.investment.health import sanitize_failure_message
 from app.services.investment.outcomes import OutcomeService
 from app.services.investment.post_processing import enqueue_investment_post_processing
 from app.services.investment.repositories import InvestmentSourceRepository
 from app.services.investment.x_web import X_WEB_COLLECT_JOB_TYPE
 
 INVESTMENT_FETCH_JOB_TYPE = "investment_fetch"
+INVESTMENT_TASK_RETRY_TYPES = frozenset(
+    {
+        INVESTMENT_FETCH_JOB_TYPE,
+        X_WEB_COLLECT_JOB_TYPE,
+        "investment_translation",
+        "investment_fact_extract",
+        "investment_classification",
+    }
+)
 CHALLENGING_THESIS_IMPACTS = ("weakens", "contradicts")
 GOOGLE_NEWS_FALLBACK_DISABLED_MESSAGE = (
     "Google News fallback disabled: X-first collection is enabled; "
@@ -154,6 +164,127 @@ class InvestmentService:
 
     def __init__(self, session: Session) -> None:
         self.session = session
+
+    def task_health(self, workspace_id: str = "ws_default", *, limit: int = 20) -> dict[str, Any]:
+        """Return safe operational counts for investment-related task jobs."""
+        from datetime import UTC, datetime
+
+        jobs = list(
+            self.session.scalars(
+                select(TaskJob).where(
+                    TaskJob.workspace_id == workspace_id,
+                    TaskJob.job_type.in_(INVESTMENT_TASK_RETRY_TYPES),
+                )
+            )
+        )
+        counts = {status: sum(job.status == status for job in jobs) for status in (
+            "pending",
+            "running",
+            "succeeded",
+            "failed",
+        )}
+        failures = sorted(
+            (job for job in jobs if job.status == "failed"),
+            key=lambda job: (job.finished_at or job.created_at, job.id),
+            reverse=True,
+        )[:limit]
+        return {
+            "workspace_id": workspace_id,
+            "generated_at": datetime.now(UTC),
+            "pending_count": counts["pending"],
+            "running_count": counts["running"],
+            "succeeded_count": counts["succeeded"],
+            "failed_count": counts["failed"],
+            "recent_failures": [
+                {
+                    "job_id": job.id,
+                    "workspace_id": job.workspace_id,
+                    "job_type": job.job_type,
+                    "target_type": job.target_type,
+                    "target_id": job.target_id,
+                    "status": job.status,
+                    "error_message": sanitize_failure_message(job.error_message),
+                    "finished_at": job.finished_at,
+                    "retryable": job.job_type in INVESTMENT_TASK_RETRY_TYPES,
+                }
+                for job in failures
+            ],
+        }
+
+    def retry_task(self, job_id: str, workspace_id: str = "ws_default") -> dict[str, Any]:
+        """Safely requeue a failed investment task without mutating its history."""
+        job = self.session.get(TaskJob, job_id)
+        if job is None or job.workspace_id != workspace_id:
+            raise AppError("not_found", "investment task not found", 404)
+        if job.job_type not in INVESTMENT_TASK_RETRY_TYPES:
+            raise AppError(
+                "unsupported_investment_job_type",
+                "this task type cannot be retried from the investment workspace",
+                400,
+            )
+        if job.status != "failed":
+            raise AppError(
+                "investment_job_not_failed",
+                "only failed investment tasks can be retried",
+                409,
+            )
+
+        active = self.session.scalar(
+            select(TaskJob)
+            .where(
+                TaskJob.workspace_id == workspace_id,
+                TaskJob.job_type == job.job_type,
+                TaskJob.target_type == job.target_type,
+                TaskJob.target_id == job.target_id,
+                TaskJob.status.in_(("pending", "running")),
+            )
+            .order_by(TaskJob.created_at.desc())
+        )
+        if active is not None:
+            return {
+                "workspace_id": workspace_id,
+                "original_job_id": job.id,
+                "job_id": active.id,
+                "job_type": active.job_type,
+                "status": active.status,
+                "reused": True,
+            }
+
+        # Only copy routing identifiers. Provider credentials and arbitrary
+        # input fields are intentionally not propagated to the new task.
+        previous_input = job.input or {}
+        safe_input: dict[str, str] = {"workspace_id": workspace_id}
+        for key in ("source_id", "item_id"):
+            value = previous_input.get(key)
+            if value is not None:
+                safe_input[key] = str(value)
+        if job.target_id is not None and job.job_type in {
+            INVESTMENT_FETCH_JOB_TYPE,
+            X_WEB_COLLECT_JOB_TYPE,
+        }:
+            safe_input.setdefault("source_id", job.target_id)
+
+        retried = TaskJob(
+            id=_new_id("job"),
+            workspace_id=workspace_id,
+            job_type=job.job_type,
+            target_type=job.target_type,
+            target_id=job.target_id,
+            status="pending",
+            input=safe_input,
+            output={},
+        )
+        self.session.add(retried)
+        self.session.commit()
+        self.session.refresh(retried)
+        return {
+            "workspace_id": workspace_id,
+            "original_job_id": job.id,
+            "job_id": retried.id,
+            "job_type": retried.job_type,
+            "status": retried.status,
+            "reused": False,
+        }
 
     def get_user_context(self, workspace_id: str) -> InvestmentUserContext:
         return OutcomeService(self.session).get_user_context(workspace_id)
