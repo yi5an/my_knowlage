@@ -43,6 +43,7 @@ def client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Generator[TestClient, None, None]:
     monkeypatch.setattr("app.main._mark_interrupted_youtube_summaries", lambda: None)
+    monkeypatch.setattr("app.main._fail_interrupted_task_jobs", lambda: None)
     monkeypatch.setattr("app.main._enqueue_unfinished_youtube_summaries", lambda: None)
     monkeypatch.setattr("app.main._enqueue_missing_youtube_local_video_downloads", lambda: None)
     app.dependency_overrides[get_db_session] = lambda: db_session

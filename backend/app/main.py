@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 
@@ -183,6 +184,48 @@ def _mark_interrupted_youtube_summaries() -> None:
         session.close()
 
 
+def _fail_interrupted_task_jobs() -> None:
+    """Fail ``task_job`` rows left ``running`` by a previous backend process.
+
+    Job execution happens inside this process (worker scheduler threads). A
+    crash/restart kills those threads, but their rows stay ``running`` forever.
+    This also blocks ``poll_source``'s double-enqueue guard, freezing the
+    affected investment sources permanently. On startup no old thread can
+    still be alive, so mark internal zombie rows as retryable failures.
+
+    ``x_web_collect`` jobs are executed by the external X collector process
+    and may legitimately still be inflight; never touch those.
+    """
+    from sqlalchemy import select
+
+    from app.infrastructure.database import SessionLocal
+    from app.infrastructure.models import TaskJob
+    from app.services.task_worker import _EXTERNAL_JOB_TYPES
+
+    message = "job interrupted by backend restart; please retry"
+    session = SessionLocal()
+    try:
+        zombies = list(
+            session.scalars(
+                select(TaskJob).where(
+                    TaskJob.status == "running",
+                    TaskJob.job_type.notin_(_EXTERNAL_JOB_TYPES),
+                )
+            )
+        )
+        for job in zombies:
+            job.status = "failed"
+            job.finished_at = datetime.now(UTC)
+            job.error_message = message
+        if zombies:
+            session.commit()
+            logger.warning(
+                "marked %d interrupted task_job rows as failed", len(zombies)
+            )
+    finally:
+        session.close()
+
+
 def _enqueue_unfinished_youtube_summaries() -> None:
     """Backfill durable jobs for visible YouTube pending/interrupted rows."""
     from app.infrastructure.database import SessionLocal
@@ -235,6 +278,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     register_youtube_handler()
     register_youtube_local_video_handler()
     _mark_interrupted_youtube_summaries()
+    _fail_interrupted_task_jobs()
     _enqueue_unfinished_youtube_summaries()
     _enqueue_missing_youtube_local_video_downloads()
 
