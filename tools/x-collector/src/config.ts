@@ -11,6 +11,7 @@ export interface CollectorConfig {
   spoolDir: string;
   maxSpoolBytes: number;
   pollIntervalMs: number;
+  headless: boolean;
 }
 
 export interface LaunchAgentOptions {
@@ -37,6 +38,10 @@ export function loadConfig(
     spoolDir: join(dataDir, "spool"),
     maxSpoolBytes: Number(env.X_COLLECTOR_MAX_SPOOL_BYTES || 50 * 1024 * 1024),
     pollIntervalMs: Number(env.X_COLLECTOR_POLL_INTERVAL_MS || 60_000),
+    // X started rejecting headless Chromium with 403 around 2026-07-17
+    // (blank page, guest activation never fires). Headful is the default;
+    // set X_COLLECTOR_HEADLESS=1 only on hosts where headless still works.
+    headless: ["1", "true"].includes(String(env.X_COLLECTOR_HEADLESS ?? "").toLowerCase()),
   };
 }
 

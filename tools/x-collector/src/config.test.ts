@@ -22,6 +22,20 @@ describe("collector config", () => {
       spoolDir: "/tmp/x-collector-test/spool",
       token: "secret-token",
     });
+    expect(config.headless).toBe(false);
+  });
+
+  it("opts into headless only via X_COLLECTOR_HEADLESS", () => {
+    expect(
+      loadConfig({X_COLLECTOR_HEADLESS: "1"}, "/Users/test").headless,
+    ).toBe(true);
+    expect(
+      loadConfig({X_COLLECTOR_HEADLESS: "true"}, "/Users/test").headless,
+    ).toBe(true);
+    expect(
+      loadConfig({X_COLLECTOR_HEADLESS: "0"}, "/Users/test").headless,
+    ).toBe(false);
+    expect(loadConfig({}, "/Users/test").headless).toBe(false);
   });
 
   it("renders a LaunchAgent without placing secrets in the plist", () => {

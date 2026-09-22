@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Page } from "playwright";
 
 import {
   CollectorSessionError,
@@ -11,6 +12,7 @@ import {
   normalizeOperationVariables,
   selectMainJsUrl,
   waitForMainJsUrl,
+  waitForGuestCredentials,
 } from "./session.js";
 
 const MAIN_JS = `queryId:"account-query",operationName:"UserTweets",operationType:"query",
@@ -200,5 +202,65 @@ describe("Playwright session helpers", () => {
     ["https://x.com/home", false, false, "uninitialized"],
   ] as const)("maps page state to %s", (url, hasAccountSwitcher, hasChallenge, expected) => {
     expect(detectLoginStatus(url, hasAccountSwitcher, hasChallenge)).toBe(expected);
+  });
+});
+
+describe("waitForGuestCredentials", () => {
+  const fakePage = () => {
+    const handlers: Record<string, (response: unknown) => void> = {};
+    return {
+      page: {on: (event: string, cb: (response: unknown) => void) => {
+        handlers[event] = cb;
+      }} as unknown as Page,
+      emit: (response: unknown) => handlers["response"]?.(response),
+    };
+  };
+
+  it("steals credentials from any x-guest-token request header", async () => {
+    const {page, emit} = fakePage();
+    const promise = waitForGuestCredentials(page, 5000);
+    emit({
+      url: () => "https://api.x.com/1.1/flow/viewer.json",
+      status: () => 200,
+      headers: () => ({}),
+      request: () => ({
+        allHeaders: async () => ({
+          authorization: "Bearer AAAA",
+          "x-guest-token": "2102231392067420277",
+        }),
+      }),
+    });
+    await expect(promise).resolves.toEqual({
+      authorization: "Bearer AAAA",
+      guestToken: "2102231392067420277",
+    });
+  });
+
+  it("still supports the legacy guest/activate.json response body", async () => {
+    const {page, emit} = fakePage();
+    const promise = waitForGuestCredentials(page, 5000);
+    emit({
+      url: () => "https://api.x.com/1.1/guest/activate.json",
+      status: () => 200,
+      headers: () => ({}),
+      json: async () => ({guest_token: "legacy-token"}),
+      request: () => ({allHeaders: async () => ({authorization: "Bearer BBBB"})}),
+    });
+    await expect(promise).resolves.toEqual({
+      authorization: "Bearer BBBB",
+      guestToken: "legacy-token",
+    });
+  });
+
+  it("ignores requests without guest credentials", async () => {
+    const {page, emit} = fakePage();
+    const promise = waitForGuestCredentials(page, 300);
+    emit({
+      url: () => "https://api.x.com/1.1/flow/viewer.json",
+      status: () => 200,
+      headers: () => ({}),
+      request: () => ({allHeaders: async () => ({authorization: "Bearer AAAA"})}),
+    });
+    await expect(promise).rejects.toMatchObject({code: "network_error"});
   });
 });

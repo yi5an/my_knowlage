@@ -142,7 +142,7 @@ function defaultDependencies(config: CollectorConfig): RuntimeDependencies {
     client,
     spool,
     collectAccount: async (source) => {
-      const transport = await createGuestTransport();
+      const transport = await createGuestTransport({headless: config.headless});
       try {
         const posts = await new AccountCollector(transport).collect(source);
         return {posts, close: () => transport.close()};
@@ -152,7 +152,9 @@ function defaultDependencies(config: CollectorConfig): RuntimeDependencies {
       }
     },
     collectKeyword: async (source) => {
-      const session = await PlaywrightKeywordSearchSession.open(config.profileDir);
+      const session = await PlaywrightKeywordSearchSession.open(config.profileDir, {
+        headless: config.headless,
+      });
       try {
         const posts = await new KeywordCollector(session).collect(source);
         return {posts, close: () => session.close()};

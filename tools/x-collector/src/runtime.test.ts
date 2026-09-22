@@ -14,6 +14,7 @@ const config: CollectorConfig = {
   spoolDir: "/tmp/x-collector/spool",
   maxSpoolBytes: 1_000_000,
   pollIntervalMs: 60_000,
+  headless: false,
 };
 
 const post: XPost = {

@@ -357,7 +357,10 @@ export class PlaywrightKeywordSearchSession implements KeywordSearchSession {
   }
 }
 
-async function waitForGuestCredentials(page: Page, timeoutMs: number): Promise<GuestCredentials> {
+export async function waitForGuestCredentials(
+  page: Page,
+  timeoutMs: number,
+): Promise<GuestCredentials> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new CollectorSessionError("network_error", "X guest activation timed out")),
@@ -365,11 +368,23 @@ async function waitForGuestCredentials(page: Page, timeoutMs: number): Promise<G
     );
     page.on("response", async (response) => {
       try {
-        if (new URL(response.url()).pathname !== "/1.1/guest/activate.json") return;
+        const request = response.request();
+        const headers = await request.allHeaders();
+        const pathname = new URL(response.url()).pathname;
+        if (pathname !== "/1.1/guest/activate.json") {
+          // Since ~2026-09 the anonymous web app no longer calls
+          // guest/activate.json. Guest-authenticated API requests carry the
+          // token in the x-guest-token request header instead, so steal the
+          // credentials from any such request (e.g. viewer.json).
+          const headerToken = headers["x-guest-token"];
+          if (!headerToken || !headers.authorization) return;
+          clearTimeout(timer);
+          resolve({authorization: headers.authorization, guestToken: headerToken});
+          return;
+        }
         const error = classifyResponseStatus(response.status(), response.headers());
         if (error) throw error;
         const body = (await response.json()) as {guest_token?: unknown};
-        const headers = await response.request().allHeaders();
         const authorization = headers.authorization;
         const guestToken = typeof body.guest_token === "string" ? body.guest_token : null;
         if (!authorization || !guestToken) {
