@@ -22,4 +22,6 @@ RUN npm run build
 ENV KNOWPILOT_URL=http://backend:8010 \
     X_COLLECTOR_ID=prod-server
 
-CMD ["xvfb-run", "-a", "--server-args=-screen 0 1280x800x24", "node", "dist/cli.js", "run"]
+# Start Xvfb explicitly (xvfb-run's wrapper kills the node child in
+# containers); run the collector loop headful on the virtual display.
+CMD ["sh", "-c", "Xvfb :99 -screen 0 1280x800x24 -nolisten tcp & sleep 1; DISPLAY=:99 exec node dist/cli.js run"]

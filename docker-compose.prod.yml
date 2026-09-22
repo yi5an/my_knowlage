@@ -96,6 +96,7 @@ services:
       X_COLLECTOR_HEADLESS: "0"
     depends_on:
       - backend
+    init: true
     restart: unless-stopped
 
 volumes:
