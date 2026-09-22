@@ -23,5 +23,5 @@ ENV KNOWPILOT_URL=http://backend:8010 \
     X_COLLECTOR_ID=prod-server
 
 # Start Xvfb explicitly (xvfb-run's wrapper kills the node child in
-# containers); run the collector loop headful on the virtual display.
-CMD ["sh", "-c", "Xvfb :99 -screen 0 1280x800x24 -nolisten tcp & sleep 1; DISPLAY=:99 exec node dist/cli.js run"]
+# containers); clean stale locks from a previous container restart first.
+CMD ["sh", "-c", "rm -f /tmp/.X99-lock /tmp/.X11-unix/X99; Xvfb :99 -screen 0 1280x800x24 -nolisten tcp & sleep 1; DISPLAY=:99 exec node dist/cli.js run"]
