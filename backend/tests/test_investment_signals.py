@@ -111,6 +111,42 @@ def _fact(
     return fact
 
 
+def test_refresh_reuses_inactive_signal_row_instead_of_pk_crash() -> None:
+    """Regression (2026-09-22 production): a signal whose only row is inactive
+    (superseded earlier) must be reused. Inserting a new row with the same
+    deterministic sig_{canonical_key[:32]} id failed the whole import with an
+    investment_signal primary-key violation."""
+    session = next(_session())
+    watchlist = _watchlist(session)
+    source = _source(session, "nvidia", watchlist.id)
+    item = _item(session, source, "NVIDIA data center capex")
+    _fact(
+        session,
+        item,
+        watchlist.id,
+        "NVIDIA data center demand remains strong.",
+        0.8,
+    )
+
+    service = InvestmentSignalService(session)
+    signals = service.refresh_signals("ws_default")
+    assert len(signals) == 1
+    original_id = signals[0].id
+
+    # Simulate a superseded historical row: another key took over and this row
+    # was deactivated. Rebuilding the same cluster must reuse this row.
+    signals[0].is_active = False
+    session.commit()
+
+    rebuilt = service.refresh_signals("ws_default")
+
+    assert len(rebuilt) == 1
+    assert rebuilt[0].id == original_id
+    assert rebuilt[0].is_active is True
+    rows = list(session.scalars(select(InvestmentSignal)))
+    assert len(rows) == 1
+
+
 def test_refresh_signals_clusters_facts_and_counts_sources() -> None:
     session = next(_session())
     watchlist = _watchlist(session)

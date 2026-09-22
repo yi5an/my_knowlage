@@ -47,18 +47,23 @@ class InvestmentSignalService:
         facts = self._facts(workspace_id=workspace_id, watchlist_id=watchlist_id)
         groups = self._group_facts(facts)
 
-        conditions = [
-            InvestmentSignal.workspace_id == workspace_id,
-            InvestmentSignal.is_active.is_(True),
-        ]
+        conditions = [InvestmentSignal.workspace_id == workspace_id]
         if watchlist_id is not None:
             conditions.append(InvestmentSignal.watchlist_id == watchlist_id)
+        # Load ALL prior rows regardless of is_active: a signal whose only row
+        # is inactive (superseded earlier) must be reused and reactivated.
+        # Inserting a new row with the deterministic sig_{canonical_key[:32]}
+        # id would collide with the inactive row's primary key and fail the
+        # whole import (production incident 2026-09-22).
         prior_signals = list(self.session.scalars(select(InvestmentSignal).where(*conditions)))
-        prior_by_key = {
-            signal.canonical_key: signal
-            for signal in prior_signals
-            if signal.canonical_key
-        }
+        prior_by_key: dict[str, InvestmentSignal] = {}
+        prior_by_id = {signal.id: signal for signal in prior_signals}
+        for signal in prior_signals:
+            if not signal.canonical_key:
+                continue
+            current = prior_by_key.get(signal.canonical_key)
+            if current is None or (not current.is_active and signal.is_active):
+                prior_by_key[signal.canonical_key] = signal
         signals: list[InvestmentSignal] = []
         seen_keys: set[str] = set()
         for group in groups:
@@ -66,6 +71,10 @@ class InvestmentSignalService:
             seen_keys.add(canonical_key)
             candidate = self._build_signal(workspace_id, group, canonical_key)
             existing = prior_by_key.get(canonical_key)
+            if existing is None:
+                # Guard against a 32-char canonical-key prefix collision on
+                # the deterministic id: reuse that row too.
+                existing = prior_by_id.get(f"sig_{canonical_key[:32]}")
             if existing is not None:
                 self._update_signal(existing, candidate)
                 signal = existing
@@ -231,6 +240,7 @@ class InvestmentSignalService:
         candidate: InvestmentSignal,
     ) -> None:
         existing.theme_id = candidate.theme_id
+        existing.canonical_key = candidate.canonical_key
         existing.title = candidate.title
         existing.summary = candidate.summary
         existing.signal_type = candidate.signal_type
