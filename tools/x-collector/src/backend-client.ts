@@ -68,9 +68,19 @@ export class BackendClient {
     const body = (await response.json().catch(() => null)) as unknown;
     if (!response.ok) {
       const errorBody = isObject(body) ? body.error : undefined;
-      const message = isObject(errorBody) && typeof errorBody.message === "string"
-        ? errorBody.message
-        : `KnowPilot API failed with ${response.status}`;
+      let message = `KnowPilot API failed with ${response.status}`;
+      if (isObject(errorBody) && typeof errorBody.message === "string") {
+        message = errorBody.message;
+      }
+      // FastAPI validation payloads keep field-level detail in error.details
+      // (or bare detail); surface it so failed imports name the offending field.
+      const details = isObject(errorBody) ? errorBody.details : undefined;
+      const detail = isObject(body) ? body.detail : undefined;
+      const extra =
+        details ?? (Array.isArray(detail) || typeof detail === "string" ? detail : undefined);
+      if (extra !== undefined && extra !== null) {
+        message += `: ${JSON.stringify(extra).slice(0, 300)}`;
+      }
       throw new BackendClientError(response.status, message);
     }
     return body as T;
