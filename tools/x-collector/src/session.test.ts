@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { assertType, describe, expect, it, vi } from "vitest";
 import type { Page } from "playwright";
 
 import {
@@ -13,6 +13,8 @@ import {
   selectMainJsUrl,
   waitForMainJsUrl,
   waitForGuestCredentials,
+  LoggedInXWebTransport,
+  waitForLoggedInCredentials,
 } from "./session.js";
 
 const MAIN_JS = `queryId:"account-query",operationName:"UserTweets",operationType:"query",
@@ -262,5 +264,51 @@ describe("waitForGuestCredentials", () => {
       request: () => ({allHeaders: async () => ({authorization: "Bearer AAAA"})}),
     });
     await expect(promise).rejects.toMatchObject({code: "network_error"});
+  });
+});
+
+describe("LoggedInXWebTransport", () => {
+  it("sends csrf + OAuth2Session headers and reuses the logged-in relay flag", async () => {
+    const registry = new OperationRegistry(async () => [MAIN_JS]);
+    const requestJson = vi.fn(async () => ({status: 200, headers: {}, body: {data: {ok: true}}}));
+    const transport = new LoggedInXWebTransport(
+      registry,
+      {authorization: "Bearer B", csrfToken: "csrf-1"},
+      requestJson,
+      async () => {},
+    );
+    await expect(transport.query("UserTweets", {userId: "1", screenName: "x", count: 5})).resolves.toEqual({
+      data: {ok: true},
+    });
+    expect(requestJson).toHaveBeenCalledWith(
+      expect.objectContaining({url: expect.stringContaining("/UserTweets")}),
+      expect.objectContaining({
+        authorization: "Bearer B",
+        "x-csrf-token": "csrf-1",
+        "x-twitter-auth-type": "OAuth2Session",
+      }),
+    );
+  });
+});
+
+describe("waitForLoggedInCredentials", () => {
+  it("resolves from authorization + x-csrf-token request headers", async () => {
+    const handlers: Record<string, (r: unknown) => void> = {};
+    const page = {on: (e: string, cb: (r: unknown) => void) => {handlers[e] = cb;}} as unknown as Page;
+    const promise = waitForLoggedInCredentials(page, 5000);
+    const emit = handlers["response"];
+    assertType<((r: unknown) => void) | undefined>(emit);
+    emit?.({
+      url: () => "https://x.com/i/api/1.1/hashflags.json",
+      request: () => ({
+        allHeaders: async () => ({authorization: "Bearer B", "x-csrf-token": "csrf-9"}),
+      }),
+    });
+    await expect(promise).resolves.toEqual({authorization: "Bearer B", csrfToken: "csrf-9"});
+  });
+
+  it("rejects with auth_required when no logged-in request appears", async () => {
+    const page = {on: () => {}} as unknown as Page;
+    await expect(waitForLoggedInCredentials(page, 50)).rejects.toMatchObject({code: "auth_required"});
   });
 });

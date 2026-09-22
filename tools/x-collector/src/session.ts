@@ -110,6 +110,134 @@ export class GuestXWebTransport implements XWebTransport {
   }
 }
 
+export interface LoggedInCredentials {
+  authorization: string;
+  csrfToken: string;
+}
+
+export class LoggedInXWebTransport implements XWebTransport {
+  constructor(
+    private readonly registry: OperationRegistry,
+    private readonly credentials: LoggedInCredentials,
+    private readonly requestJson: RequestJson,
+    private readonly closeSession: () => Promise<void>,
+  ) {}
+
+  async query(operationName: string, variables: Record<string, unknown>): Promise<unknown> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const operation = await this.registry.get(operationName);
+      const normalizedVariables = normalizeOperationVariables(
+        operationName,
+        operation.protocol,
+        variables,
+        true,
+      );
+      const response = await this.requestJson(buildGraphqlRequest(operationName, operation, normalizedVariables), {
+        authorization: this.credentials.authorization,
+        "x-csrf-token": this.credentials.csrfToken,
+        "x-twitter-auth-type": "OAuth2Session",
+        "x-twitter-active-user": "yes",
+        "x-twitter-client-language": "en",
+      });
+      const error = classifyResponseStatus(response.status, response.headers);
+      if (!error) return response.body;
+      if (error.code === "query_changed" && attempt === 0) {
+        this.registry.invalidate();
+        continue;
+      }
+      throw error;
+    }
+    throw new CollectorSessionError("query_changed", `Unable to refresh ${operationName}`);
+  }
+
+  async close(): Promise<void> {
+    await this.closeSession();
+  }
+}
+
+export async function waitForLoggedInCredentials(
+  page: Page,
+  timeoutMs: number,
+): Promise<LoggedInCredentials> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new CollectorSessionError("auth_required", "X login session was not detected")),
+      timeoutMs,
+    );
+    page.on("response", async (response) => {
+      try {
+        const headers = await response.request().allHeaders();
+        const csrfToken = headers["x-csrf-token"];
+        if (!csrfToken || !headers.authorization) return;
+        clearTimeout(timer);
+        resolve({authorization: headers.authorization, csrfToken});
+      } catch (error) {
+        clearTimeout(timer);
+        reject(toSessionError(error));
+      }
+    });
+  });
+}
+
+export async function createLoggedInTransport(
+  profileDir: string,
+  options: {headless?: boolean; proxyServer?: string; timeoutMs?: number} = {},
+): Promise<LoggedInXWebTransport> {
+  const timeoutMs = options.timeoutMs ?? 45_000;
+  const context = await chromium.launchPersistentContext(profileDir, {
+    headless: options.headless ?? true,
+    locale: "en-US",
+    proxy: options.proxyServer ? {server: options.proxyServer} : undefined,
+  });
+  const pages = context.pages();
+  const page = pages[0] ?? (await context.newPage());
+  let observedBundleJobs: Array<Promise<string | null>> = [];
+  page.on("response", (response) => {
+    if (response.request().resourceType() !== "script") return;
+    observedBundleJobs.push(response.text().catch(() => null));
+  });
+  try {
+    const credentialsPromise = waitForLoggedInCredentials(page, timeoutMs);
+    await page.goto("https://x.com/home", {
+      waitUntil: "commit",
+      timeout: timeoutMs,
+    });
+    const credentials = await credentialsPromise;
+    let loadedOnce = false;
+    const registry = new OperationRegistry(async () => {
+      if (loadedOnce) {
+        observedBundleJobs = [];
+        await page.reload({waitUntil: "domcontentloaded", timeout: timeoutMs});
+      } else {
+        await page.waitForLoadState("domcontentloaded", {timeout: timeoutMs});
+      }
+      loadedOnce = true;
+      await page.locator("article").first().waitFor({state: "attached", timeout: timeoutMs});
+      const settled = await Promise.allSettled([...observedBundleJobs]);
+      return settled
+        .filter((result): result is PromiseFulfilledResult<string | null> => result.status === "fulfilled")
+        .map((result) => result.value)
+        .filter((source): source is string => Boolean(source));
+    });
+    return new LoggedInXWebTransport(
+      registry,
+      credentials,
+      async (request, headers) => {
+        const response = await context.request.get(request.url, {headers, timeout: timeoutMs});
+        return {
+          status: response.status(),
+          headers: response.headers(),
+          body: await response.json().catch(() => null),
+        };
+      },
+      async () => context.close(),
+    );
+  } catch (error) {
+    await context.close();
+    throw toSessionError(error);
+  }
+}
+
 export function buildGraphqlRequest(
   operationName: string,
   operation: DiscoveredOperation,
@@ -134,10 +262,11 @@ export function normalizeOperationVariables(
   operationName: string,
   protocol: DiscoveredOperation["protocol"],
   variables: Record<string, unknown>,
+  isLoggedIn = false,
 ): Record<string, unknown> {
   if (protocol === "relay") {
     const providedVariables = {
-      __relay_internal__pv__appviewerisloggedinprovider: false,
+      __relay_internal__pv__appviewerisloggedinprovider: isLoggedIn,
     };
     if (operationName === "UserByScreenName") {
       return {

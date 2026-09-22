@@ -5,7 +5,7 @@ import { BackendClient } from "./backend-client.js";
 import type { CollectorConfig } from "./config.js";
 import { KeywordCollector } from "./keyword-collector.js";
 import { FileSpool } from "./spool.js";
-import { createGuestTransport, PlaywrightKeywordSearchSession } from "./session.js";
+import { createLoggedInTransport, PlaywrightKeywordSearchSession } from "./session.js";
 import type { XPost } from "./types.js";
 
 interface RuntimeClient {
@@ -142,7 +142,10 @@ function defaultDependencies(config: CollectorConfig): RuntimeDependencies {
     client,
     spool,
     collectAccount: async (source) => {
-      const transport = await createGuestTransport({
+      // Plan A (2026-09-22): X removed anonymous GraphQL, so account collection
+      // runs on the logged-in persistent profile. Login once via
+      // `node dist/cli.js login` (or copy a logged-in profile to the server).
+      const transport = await createLoggedInTransport(config.profileDir, {
         headless: config.headless,
         proxyServer: config.proxyServer,
       });
