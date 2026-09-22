@@ -50,9 +50,9 @@ fi
 say "1/3 同步代码 (rsync)..."
 rsync "${RSYNC_OPTS[@]}" "./" "${REMOTE}:${REMOTE_DIR}/"
 
-say "2/3 重建并重启容器 (backend + frontend)..."
+say "2/3 重建并重启容器 (backend + frontend + x-collector)..."
 ssh -p "${SERVER_PORT}" "${REMOTE}" \
-  "cd ${REMOTE_DIR} && docker compose -f ${COMPOSE_FILE} up -d --build backend frontend"
+  "cd ${REMOTE_DIR} && docker compose -f ${COMPOSE_FILE} up -d --build"
 
 say "3/3 健康检查..."
 ok=0
