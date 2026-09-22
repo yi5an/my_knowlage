@@ -10,7 +10,7 @@ import { BackendClient } from "./backend-client.js";
 import { loadConfig, renderLaunchAgent } from "./config.js";
 import { PlaywrightKeywordSearchSession } from "./session.js";
 
-const ALLOWED_COMMANDS = new Set(["run", "once", "login", "status", "install", "uninstall"]);
+const ALLOWED_COMMANDS = new Set(["run", "once", "login", "status", "install", "uninstall", "inject-cookies"]);
 const execFileAsync = promisify(execFile);
 const LAUNCH_AGENT_LABEL = "com.knowpilot.x-collector";
 const LAUNCH_AGENT_PATH = () =>
@@ -39,6 +39,20 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     case "uninstall":
       await uninstall();
       return;
+    case "inject-cookies": {
+      const {injectCookies} = await import("./cookies.js");
+      const cookieFile = argv[3];
+      if (!cookieFile) {
+        throw new Error("usage: node dist/cli.js inject-cookies <netscape-cookie-file>");
+      }
+      const result = await injectCookies(config.profileDir, cookieFile, {
+        headless: false,
+        proxyServer: config.proxyServer,
+      });
+      console.log(JSON.stringify(result));
+      if (!result.logged_in) throw new Error("cookies did not restore the login session");
+      return;
+    }
     case "once":
     case "run": {
       const {runLoop} = await import("./runtime.js");
