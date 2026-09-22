@@ -107,6 +107,26 @@ Services:
 - PostgreSQL: localhost:5432
 - Redis: localhost:6379
 
+## 部署到远程服务器（生产）
+
+生产环境部署在独立服务器上（前端 nginx :80 反代后端），不依赖本地运行。
+本地开发完成后，一条命令完成同步、重建和健康检查：
+
+```bash
+# 建议先跑本地检查
+cd backend && pytest && ruff check . && mypy app
+
+./deploy_to_server.sh              # 正式部署
+DEPLOY_DRY_RUN=1 ./deploy_to_server.sh   # 仅预览将要同步的文件
+```
+
+说明：
+
+- 目标服务器可用环境变量覆盖：`KNOWPILOT_SERVER_HOST` / `KNOWPILOT_SERVER_PORT` / `KNOWPILOT_SERVER_USER` / `KNOWPILOT_REMOTE_DIR`。
+- 服务器上的 `.env` 永远不会被覆盖，部署配置（数据库、代理、密钥）以服务器为准。
+- 查看线上日志：`ssh -p 12222 yi5an@123.57.165.38 'docker logs -f knowpilot-backend'`。
+- 后端启动时会自动执行数据库迁移、清理被中断的僵尸任务，并拉起 YouTube / 投资数据源的调度器。
+
 ## Current Scope
 
 The repository includes document import, provider abstractions, RAG, graph synchronization, research workflows, and the schema-first provenance backend. See the development docs for feature-specific contracts and remaining limitations.
