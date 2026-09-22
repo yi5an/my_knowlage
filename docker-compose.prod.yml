@@ -98,7 +98,12 @@ services:
       - backend
     init: true
     restart: unless-stopped
+    volumes:
+      # Logged-in browser profile (populated via cookie injection or a
+      # profile copy; see tools/x-collector README).
+      - x_collector_data:/root/Library/Application Support/KnowPilot/x-collector
 
 volumes:
   backend_storage:
   backend_private:
+  x_collector_data:
