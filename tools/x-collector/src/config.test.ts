@@ -38,6 +38,14 @@ describe("collector config", () => {
     expect(loadConfig({}, "/Users/test").headless).toBe(false);
   });
 
+  it("reads the proxy server for containerized deployment", () => {
+    expect(
+      loadConfig({X_COLLECTOR_PROXY_SERVER: "http://mihomo:7890"}, "/Users/test")
+        .proxyServer,
+    ).toBe("http://mihomo:7890");
+    expect(loadConfig({}, "/Users/test").proxyServer).toBeUndefined();
+  });
+
   it("renders a LaunchAgent without placing secrets in the plist", () => {
     const plist = renderLaunchAgent({
       nodePath: "/opt/homebrew/bin/node",

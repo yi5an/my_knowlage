@@ -227,13 +227,17 @@ export interface GuestTransportOptions {
   headless?: boolean;
   profileUrl?: string;
   timeoutMs?: number;
+  proxyServer?: string;
 }
 
 export async function createGuestTransport(
   options: GuestTransportOptions = {},
 ): Promise<GuestXWebTransport> {
   const timeoutMs = options.timeoutMs ?? 45_000;
-  const browser = await chromium.launch({headless: options.headless ?? true});
+  const browser = await chromium.launch({
+    headless: options.headless ?? true,
+    proxy: options.proxyServer ? {server: options.proxyServer} : undefined,
+  });
   const context = await browser.newContext({locale: "en-US"});
   const page = await context.newPage();
   let observedBundleJobs: Array<Promise<string | null>> = [];
@@ -292,11 +296,12 @@ export class PlaywrightKeywordSearchSession implements KeywordSearchSession {
 
   static async open(
     profileDir: string,
-    options: {headless?: boolean; timeoutMs?: number} = {},
+    options: {headless?: boolean; timeoutMs?: number; proxyServer?: string} = {},
   ): Promise<PlaywrightKeywordSearchSession> {
     const context = await chromium.launchPersistentContext(profileDir, {
       headless: options.headless ?? true,
       locale: "en-US",
+      proxy: options.proxyServer ? {server: options.proxyServer} : undefined,
     });
     const pages = context.pages();
     const page = pages[0] ?? (await context.newPage());

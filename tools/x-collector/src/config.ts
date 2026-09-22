@@ -12,6 +12,7 @@ export interface CollectorConfig {
   maxSpoolBytes: number;
   pollIntervalMs: number;
   headless: boolean;
+  proxyServer?: string;
 }
 
 export interface LaunchAgentOptions {
@@ -42,6 +43,7 @@ export function loadConfig(
     // (blank page, guest activation never fires). Headful is the default;
     // set X_COLLECTOR_HEADLESS=1 only on hosts where headless still works.
     headless: ["1", "true"].includes(String(env.X_COLLECTOR_HEADLESS ?? "").toLowerCase()),
+    proxyServer: env.X_COLLECTOR_PROXY_SERVER || undefined,
   };
 }
 

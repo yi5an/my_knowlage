@@ -83,6 +83,21 @@ services:
       PADDLEOCR_LANG: ${PADDLEOCR_LANG:-ch}
     restart: unless-stopped
 
+  x-collector:
+    build:
+      context: ./tools/x-collector
+    container_name: knowpilot-x-collector
+    environment:
+      KNOWPILOT_URL: http://backend:8010
+      X_COLLECTOR_ID: prod-server
+      # x.com is only reachable via the mihomo proxy on the compose network.
+      X_COLLECTOR_PROXY_SERVER: http://mihomo:7890
+      # Headful inside the container's xvfb: X blocks headless fingerprints.
+      X_COLLECTOR_HEADLESS: "0"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
 volumes:
   backend_storage:
   backend_private:
