@@ -9,7 +9,7 @@ from hashlib import sha256
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
@@ -171,11 +171,19 @@ class InvestmentFactExtractionService:
                     if canonical_key in seen_keys:
                         raise _FactSkip("duplicate_fact")
                     seen_keys.add(canonical_key)
+                    # Match by canonical_key OR the deterministic primary
+                    # key regardless of is_active. A fact whose only row is
+                    # inactive (superseded earlier) must be reused and
+                    # reactivated; inserting a new row would collide with the
+                    # deterministic id and fail the whole job (production
+                    # incident 2026-09-22: investment_fact_pkey violation).
                     existing = self.session.scalar(
                         select(InvestmentFact).where(
                             InvestmentFact.workspace_id == item.workspace_id,
-                            InvestmentFact.canonical_key == canonical_key,
-                            InvestmentFact.is_active.is_(True),
+                            or_(
+                                InvestmentFact.canonical_key == canonical_key,
+                                InvestmentFact.id == f"fact_{canonical_key[:32]}",
+                            ),
                         )
                     )
                     if existing is not None:
@@ -186,6 +194,8 @@ class InvestmentFactExtractionService:
                             extraction=fact,
                             resolved=resolved,
                         )
+                        existing.is_active = True
+                        existing.canonical_key = canonical_key
                         self._ensure_trace(existing, anchor, fact_text)
                         reused += 1
                         continue

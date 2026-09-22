@@ -584,6 +584,67 @@ def test_changed_fact_keeps_inactive_predecessor() -> None:
     assert facts[1].supersedes_id == old.id
 
 
+def test_reappearing_fact_reactivates_inactive_row_instead_of_pk_crash() -> None:
+    """Regression (2026-09-22 production incident): a fact whose only row is
+    inactive (superseded earlier) must be reused, not re-inserted.
+
+    The deterministic id ``fact_{canonical_key[:32]}`` collides with the
+    inactive row's primary key, which failed the whole job with
+    IntegrityError: duplicate key (investment_fact_pkey)."""
+    session = next(_session())
+    item = _item(session)
+    item.summary = "Demand was strong. Demand slowed after supply constraints."
+    session.commit()
+
+    def output_with(text: str) -> MockStructuredOutputClient:
+        return MockStructuredOutputClient(
+            outputs={
+                InvestmentFactExtractionSchema: InvestmentFactExtractionSchema(
+                    facts=[
+                        InvestmentFactExtractionItem(
+                            fact_text=text,
+                            fact_type="company_update",
+                            evidence=EvidenceReference(
+                                source_segment_id=f"investment_item:{item.id}",
+                                quote=text,
+                            ),
+                            confidence=0.8,
+                        )
+                    ]
+                )
+            }
+        )
+
+    service = InvestmentFactExtractionService(
+        session=session,
+        llm_client=output_with("Demand was strong."),
+    )
+    service.extract_item(item.id)
+
+    # Second extraction returns only the changed fact -> first becomes inactive.
+    service.llm_client = output_with("Demand slowed after supply constraints.")
+    service.extract_item(item.id)
+    inactive = session.scalar(
+        select(InvestmentFact).where(InvestmentFact.fact_text == "Demand was strong.")
+    )
+    assert inactive is not None and inactive.is_active is False
+
+    # Third extraction returns the ORIGINAL fact again. Before the fix this
+    # raised IntegrityError (duplicate investment_fact_pkey); afterwards the
+    # inactive row is reused and reactivated.
+    service.llm_client = output_with("Demand was strong.")
+    service.extract_item(item.id)
+
+    facts = list(session.scalars(select(InvestmentFact)))
+    assert len(facts) == 2
+    reactivated = [
+        f for f in facts if f.fact_text == "Demand was strong."
+    ]
+    assert len(reactivated) == 1
+    assert reactivated[0].id == inactive.id
+    assert reactivated[0].is_active is True
+
+
 def test_fabricated_evidence_is_skipped_with_reason() -> None:
     session = next(_session())
     item = _item(session)
